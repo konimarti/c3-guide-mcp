@@ -44,6 +44,23 @@ fn String? run_capped(String[] cmd)
 	return out.str_view();
 }
 
+// Replace every `needle` in `s` by "<code>". (std String.replace returned corrupted bytes for a 4 KB
+// string without a match in c3c 0.8.5, hence the small loop.)
+fn String redact(String s, String needle)
+{
+	DString out = dstring::temp();
+	while (true)
+	{
+		sz? at = s.index_of(needle);
+		if (catch at) break;
+		out.append(s[:at]);
+		out.append("<code>");
+		s = s[at + needle.len..];
+	}
+	out.append(s);
+	return out.str_view();
+}
+
 fn String c3_check(String code @Desc("a C3 snippet or file content; a main function is not required"))
 	@Desc("Compile C3 code with the installed c3c (type-check only, nothing is linked or run) and return the compiler's diagnostics. Use it to verify code before showing it.")
 	@Timeout(30000)
@@ -62,7 +79,7 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 		String[] argv = { "timeout", "10", c3c_binary(), "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", file };
 		String? out = run_capped(argv);
 		if (catch out) return "could not start c3c (set the C3C environment variable to its path)";
-		String shown = out.replace(tmem, (String)dir, "<code>");
+		String shown = redact(out, (String)dir);
 		return shown.trim().len == 0 ? "OK: no errors" : shown;
 	};
 }

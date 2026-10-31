@@ -76,7 +76,17 @@ check("check: empty code rejected", "give 1 to" in text(17), text(17))
 check("check: oversized code rejected", "give 1 to" in text(18), text(18))
 m = session([("c3_check", {"code": "fn void f() {}"})], dict(os.environ, C3C="/nonexistent/c3c"))
 check("check: missing compiler gives a clear message", "c3c not found" in m[2]["result"]["content"][0]["text"], json.dumps(m[2]))
-import glob, tempfile
+import tempfile
+work = tempfile.mkdtemp(prefix="c3guide-test-")
+marker = os.path.join(work, "marker")
+payload = 'module evil;\n$exec("touch", { "%s" });\nfn void main() {}\n' % marker
+x = session([("c3_check", {"code": payload})], dict(os.environ, C3C=C3C or ""))
+check("exec: c3_check never runs $exec", not os.path.exists(marker), x[2]["result"]["content"][0]["text"])
+evil = os.path.join(work, "evil.c3"); open(evil, "w").write(payload)
+subprocess.run([C3C, "--trust=full", "--no-obj", "--no-entry", "-q", "compile-only", evil], capture_output=True, cwd=work, timeout=60)
+check("exec: positive control, payload runs under --trust=full", os.path.exists(marker))
+shutil.rmtree(work)
+import glob
 check("check: temp dir cleaned up", not glob.glob(os.path.join(tempfile.gettempdir(), "c3guide-*")), str(glob.glob(os.path.join(tempfile.gettempdir(), "c3guide-*"))))
 print("FAILED: %d" % fails if fails else "all passed")
 sys.exit(1 if fails else 0)
