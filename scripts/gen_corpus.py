@@ -93,7 +93,9 @@ def symbols(c3):
                 d = it.get("docs") or {}
                 doc = " ".join((d.get("text") or "").split())
                 for p in d.get("params") or []:
-                    doc += f" @param {p.get('name')}: {' '.join((p.get('description') or '').split())}"
+                    desc = " ".join((p.get("description") or "").split())
+                    if desc:
+                        doc += f" @param {p.get('name')}: {desc}"
                 if d.get("return"):
                     doc += " @return " + " ".join(d["return"].split())
                 if d.get("deprecated"):

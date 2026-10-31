@@ -1,6 +1,7 @@
 module c3guide::tools;
 import mcp, std::core::string;
 import c3guide::corpus, c3guide::search;
+import std::sort;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
 const sz MAX_REPLY = 3200;
@@ -29,23 +30,36 @@ fn String format_hits(Hit[] hits, sz snippet)
 	return clip(out.str_view(), MAX_REPLY);
 }
 
-// Release-note chunks are long bullet lists: show only the bullets that mention a query term.
-fn String matching_lines(String body, String query)
+// "C3C Release Notes > 0.8.5 Change list > Fixes" -> 800005 (0.8.5), so newer versions sort higher.
+fn int version_key(String title)
 {
-	String[] terms = search::query_terms(query);
+	String[] parts = title.tsplit(" > ");
+	if (parts.len < 2) return 0;
+	String[] nums = parts[1].tsplit(" ")[0].tsplit(".");
+	int key = 0;
+	foreach (n : nums)
+	{
+		int? v = n.to_int();
+		key = key * 100 + (v ?? 0);
+	}
+	return key;
+}
+
+// Release-note chunks are long bullet lists: show only the bullets that mention ALL query terms
+// (or any term, when no bullet has all of them).
+fn String matching_lines(String body, String[] terms, bool all)
+{
 	DString out = dstring::temp();
 	int n = 0;
 	foreach (line : body.tsplit("\n"))
 	{
-		if (!line.starts_with("-") || n >= 10) continue;
+		if (!line.starts_with("-") || n >= 6) continue;
 		String low = line.to_lower_tcopy();
-		foreach (t : terms)
-		{
-			if (!low.contains(t)) continue;
-			out.appendf("%s\n", clip(line, 240));
-			n++;
-			break;
-		}
+		int hit = 0;
+		foreach (t : terms) if (low.contains(t)) hit++;
+		if (hit == 0 || (all && hit < terms.len)) continue;
+		out.appendf("%s\n", clip(line, 240));
+		n++;
 	}
 	return out.str_view();
 }
@@ -65,19 +79,30 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 }
 
 fn String c3_changes(String topic @Desc("keyword, e.g. 'foreach', 'faultdef', 'type properties'"),
-	int limit @Desc("number of results (1..5)") = 3)
-	@Desc("Search the release notes (0.3.0 to the installed version) for what changed or broke. Use it when old C3 syntax from memory fails.")
+	int limit @Desc("number of release-note sections (1..5)") = 3)
+	@Desc("Search the release notes (0.3.0 to the installed version) for what changed or broke, newest first. Use it when old C3 syntax from memory fails.")
 	@ReadOnly
 {
-	Hit[] hits = search::search(topic, { "change" }, clamp(limit, 1, 5));
+	String[] terms = search::query_terms(topic);
+	Hit[] hits = search::search(topic, { "change" }, 12);
 	if (hits.len == 0) return "nothing in the release notes";
+	Hit[] sorted = mem::talloc_array(Hit, hits.len);
+	foreach (i, h : hits) sorted[i] = h;
+	sort::quicksort(sorted, fn int(Hit a, Hit b) => version_key(corpus::entries[b.idx].title) - version_key(corpus::entries[a.idx].title));
 	DString out = dstring::temp();
-	foreach (h : hits)
+	int shown = 0;
+	for (int pass = 0; pass < 2; pass++)
 	{
-		Entry* e = &corpus::entries[h.idx];
-		String lines = matching_lines(e.body, topic);
-		if (lines.len == 0) continue;
-		out.appendf("### %s\n%s", strip_prefix(e.title, "C3C Release Notes > "), lines);
+		foreach (h : sorted)
+		{
+			if (shown >= clamp(limit, 1, 5)) break;
+			Entry* e = &corpus::entries[h.idx];
+			String lines = matching_lines(e.body, terms, pass == 0);
+			if (lines.len == 0) continue;
+			out.appendf("### %s\n%s", strip_prefix(e.title, "C3C Release Notes > "), lines);
+			shown++;
+		}
+		if (shown > 0) break;
 	}
 	if (out.len() == 0) return "nothing in the release notes";
 	return clip(out.str_view(), MAX_REPLY);

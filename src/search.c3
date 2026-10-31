@@ -30,7 +30,7 @@ fn int count_terms(String text, String[] terms, int[] tf)
 		String w = text[s:i - s];
 		foreach (k, t : terms)
 		{
-			if (w.len == t.len && matches_ci(w, t)) tf[k]++;
+			if (matches_term(w, t)) tf[k]++;
 		}
 	}
 	return words;
@@ -38,10 +38,29 @@ fn int count_terms(String text, String[] terms, int[] tf)
 
 fn bool is_word(char c) @inline => ascii::is_alnum(c) || c == '_' || c == '$' || c == '@';
 
+// A word matches a term if equal (case-insensitive) or a plural of it ("vaargs" for "vaarg").
+fn bool matches_term(String w, String t)
+{
+	if (w.len == t.len) return matches_ci(w, t);
+	if (w.len == t.len + 1 && (w[t.len] == 's' || w[t.len] == 'S')) return matches_ci(w[:t.len], t);
+	return false;
+}
+
 fn bool matches_ci(String w, String lower_term)
 {
 	foreach (i, c : w) if (ascii::to_lower(c) != lower_term[i]) return false;
 	return true;
+}
+
+// Filler words of natural-language questions ("how to define a fault") only add noise.
+const String[*] STOPWORDS = { "how", "to", "a", "an", "the", "of", "in", "is", "do", "does", "i", "with", "for", "what", "use", "using", "can" };
+
+// Spellings people use that differ from the manual's ("vararg" vs "vaargs").
+fn String canonical(String t)
+{
+	if (t == "vararg" || t == "varargs") return "vaarg";
+	if (t == "vaargs") return "vaarg";
+	return t;
 }
 
 // Split a query into lowercase terms (leading @ and $ are dropped, so `@catch` matches `catch`).
@@ -51,9 +70,12 @@ fn String[] query_terms(String query)
 	out.init(tmem);
 	foreach (w : query.tsplit(" "))
 	{
-		String t = w.trim("@$ \t\n,.?");
+		String t = w.trim("@$ \t\n,.?!");
 		if (t.len == 0) continue;
-		out.push(t.to_lower_tcopy());
+		String low = canonical(t.to_lower_tcopy());
+		bool stop = false;
+		foreach (sw : STOPWORDS) if (sw == low) stop = true;
+		if (!stop) out.push(low);
 	}
 	return out.array_view();
 }
