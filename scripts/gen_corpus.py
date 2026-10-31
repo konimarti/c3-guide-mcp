@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Build data/corpus.rs from a c3c install (dev-time only; the binary needs no Python).
+
+usage: scripts/gen_corpus.py [C3_DIR] [all.md]
+  C3_DIR  c3c install dir (MANUAL.md, releasenotes.md, lib/std, c3c); default: dir of `c3c` on PATH
+  all.md  optional copy of https://c3-lang.org/all.md; only sections absent from MANUAL.md are kept
+
+Record format (parsed by src/corpus.c3): records end with \\x1e, fields split by \\x1f:
+  kind, title, body, loc
+kinds: meta | doc | change | list | fn | macro | method | mmethod | type | var
+"""
+import json, os, re, shutil, subprocess, sys
+
+CAP = 1800
+RS, US = "\x1e", "\x1f"
+
+def c3_dir():
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+    return os.path.dirname(os.path.realpath(shutil.which("c3c")))
+
+def chunk_md(text, min_level=1):
+    """Split at headings (ignoring fenced code), keep breadcrumb titles, cap size at blank lines."""
+    out, stack, buf, fence = [], {}, [], False
+    def flush():
+        body = "\n".join(buf).strip()
+        buf.clear()
+        if not body or len(body.splitlines()) < 2 and len(body) < 40:
+            return
+        path = " > ".join(stack[k] for k in sorted(stack))
+        cur, infence = "", False
+        for para in re.split(r"\n\n", body):
+            if cur and len(cur) + len(para) > CAP and not infence:
+                out.append((path, cur.strip())); cur = ""
+            cur += para + "\n\n"
+            infence = (cur.count("```") % 2) == 1
+        if cur.strip():
+            out.append((path, cur.strip()))
+    for line in text.splitlines():
+        if line.startswith("```"):
+            fence = not fence
+        m = None if fence else re.match(r"^(#{1,6})\s+(.*)$", line)
+        if m:
+            flush()
+            lvl = len(m.group(1))
+            stack[lvl] = m.group(2).strip()
+            for k in [k for k in stack if k > lvl]:
+                del stack[k]
+        buf.append(line)
+    flush()
+    return out
+
+def clean(s):
+    return s.replace(RS, " ").replace(US, " ")
+
+def rec(kind, title, body, loc=""):
+    return RS.join([US.join(clean(x) for x in (kind, title, body, loc)), ""])
+
+def sig(it):
+    kind, name = it["kind"], it["name"]
+    gp = it.get("generic_parameters")
+    gen = "{%s}" % ", ".join(g if isinstance(g, str) else g.get("name", "?") for g in gp) if gp else ""
+    ret = (it.get("return_type") or {}).get("name", "")
+    ps = []
+    for m in it.get("members") or []:
+        t = (m.get("type") or {}).get("name", "")
+        s = (t + " " + m.get("name", "")).strip()
+        if m.get("is_ref"): s = "&" + s
+        if "default_value" in m: s += " = " + str(m["default_value"])
+        ps.append(s)
+    if kind in ("function", "method"):
+        return f"fn {ret} {name}{gen}({', '.join(ps)})".replace("  ", " ")
+    if kind in ("macro", "macro_method"):
+        return f"macro {ret} {name}{gen}({', '.join(ps)})".replace("  ", " ")
+    if kind in ("constant", "variable"):
+        v = f" = {it['value']}" if "value" in it else ""
+        return f"{(it.get('type') or {}).get('name', '')} {name}{v}".strip()
+    mem = ", ".join(ps)
+    return f"{kind} {name}{gen}" + (f" {{ {mem} }}" if mem and len(mem) < 300 else "")
+
+def symbols(c3):
+    r = subprocess.run([os.path.join(c3, "c3c"), "docgen", os.path.join(c3, "lib/std"), "--json"],
+                       capture_output=True, text=True, check=True)
+    dg = json.loads(r.stdout)
+    root = os.path.join(c3, "")
+    out = []
+    for mod in dg["modules"].values():
+        for k, code in (("functions", "fn"), ("methods", "method"), ("macros", "macro"),
+                        ("macro_methods", "mmethod"), ("types", "type"), ("variables", "var")):
+            for it in mod.get(k, []):
+                if it.get("visibility") in ("private", "local"):
+                    continue
+                d = it.get("docs") or {}
+                doc = " ".join((d.get("text") or "").split())
+                for p in d.get("params") or []:
+                    doc += f" @param {p.get('name')}: {' '.join((p.get('description') or '').split())}"
+                if d.get("return"):
+                    doc += " @return " + " ".join(d["return"].split())
+                if d.get("deprecated"):
+                    doc += " DEPRECATED: " + d["deprecated"]
+                body = sig(it) + (("\n" + doc.strip()) if doc.strip() else "")
+                out.append(rec(code, it["uid"], body, it.get("file", "").replace(root, "")))
+    return out
+
+def lists(c3):
+    out = []
+    for flag in ("attributes", "builtins", "keywords", "type-properties", "operators", "precedence"):
+        r = subprocess.run([os.path.join(c3, "c3c"), f"--list-{flag}"], capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            out.append(rec("list", flag, r.stdout.strip()))
+    return out
+
+def main():
+    c3 = c3_dir()
+    ver = subprocess.run([os.path.join(c3, "c3c"), "--version"], capture_output=True, text=True).stdout
+    ver = re.search(r"Version:\s*(\S+)", ver).group(1)
+    recs = []
+    manual = chunk_md(open(os.path.join(c3, "MANUAL.md"), encoding="utf-8").read())
+    seen = {p for p, _ in manual}
+    manual = [(p, b) for p, b in manual if not p.lower().endswith("table of contents") and "Table of Contents" not in p]
+    recs += [rec("doc", p, b) for p, b in manual]
+    if len(sys.argv) > 2:
+        extra = [(p, b) for p, b in chunk_md(open(sys.argv[2], encoding="utf-8").read()) if p not in seen and "Table of Contents" not in p]
+        recs += [rec("doc", p + " [all.md]", b) for p, b in extra]
+    recs += [rec("change", p, b) for p, b in chunk_md(open(os.path.join(c3, "releasenotes.md"), encoding="utf-8").read())]
+    recs += lists(c3)
+    syms = symbols(c3)
+    recs += syms
+    meta = rec("meta", "c3c", ver, f"records={len(recs)}")
+    os.makedirs("data", exist_ok=True)
+    with open("data/corpus.rs", "w", encoding="utf-8") as f:
+        f.write(meta + "".join(recs))
+    print(f"c3c {ver}: {len(recs)} records ({len(syms)} symbols), data/corpus.rs = {os.path.getsize('data/corpus.rs')/1024:.0f} KB")
+
+main()

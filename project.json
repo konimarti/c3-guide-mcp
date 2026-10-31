@@ -1,0 +1,14 @@
+{
+  "langrev": "1",
+  "warnings": ["no-unused"],
+  "authors": ["Koni Marti <koni.marti@gmail.com>"],
+  "version": "0.1.0",
+  "sources": ["src/**"],
+  "dependency-search-paths": ["deps"],
+  "dependencies": ["mcp"],
+  "build-dir": "build",
+  "output": "build",
+  "targets": {
+    "c3-guide-mcp": { "type": "executable" }
+  }
+}
