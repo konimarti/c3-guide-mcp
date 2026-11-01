@@ -81,7 +81,7 @@ c3c build c3-guide-mcp -O3          # -> build/c3-guide-mcp
 
 ## How it works
 
-The docs are a snapshot embedded in the binary (`$embed`, 1.8 MB, 7,290 entries). `scripts/gen_corpus.py` builds it from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`. Startup takes about 10 ms. A search scans every entry in about 10 ms (BM25), so there is no index to build or keep in sync.
+The docs are a snapshot embedded in the binary (`$embed`, 1.8 MB, 7,293 entries). `scripts/gen_corpus.py` builds it from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`. Startup takes about 10 ms. A search scans every entry in about 10 ms (BM25), so there is no index to build or keep in sync.
 
 The snapshot belongs to one `c3c` version (printed in its header). After a compiler update:
 
@@ -101,10 +101,10 @@ python3 scripts/gen_corpus.py /path/to/c3 all.md && c3c build c3-guide-mcp -O3
 ```
 C3C=/path/to/c3c python3 test/stdio_test.py   # every tool over stdio, protocol errors, $exec guard
 python3 test/limits_test.py                   # hanging and flooding compilers
-python3 test/quality_test.py                  # 45 questions, expected answer in the reply (top 3 hits for search)
+python3 test/quality_test.py                  # 56 questions, expected answer in the reply (top 3 hits for search)
 python3 test/growth_test.py                   # memory over 4,000 calls
 python3 test/recipes_test.py                  # every recipe compiles and prints what it says
-python3 test/mutation_test.py                 # breaks the code 13 ways; every break must fail a test (slow)
+python3 test/mutation_test.py                 # breaks the code 15 ways; every break must fail a test (slow)
 ```
 
 ## Limits
