@@ -1,0 +1,86 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+env:
+  C3C_VERSION: v0.8.5            # the snapshot in data/corpus.rs and the tests belong to exactly this compiler
+  MCP_REF: cd4278f19624b6cb213b2cb04bf35dc48f5c13f3   # konimarti/mcp.c3l, pinned
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: linux-x64,    ext: tar.gz }
+          - { os: macos-latest,   target: macos-arm64,  ext: tar.gz }
+          - { os: windows-latest, target: windows-x64,  ext: zip }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: SDK (mcp.c3l, pinned)
+        shell: bash
+        run: |
+          git clone https://github.com/konimarti/mcp.c3l deps/mcp.c3l
+          git -C deps/mcp.c3l checkout "$MCP_REF"
+      - name: c3c ${{ env.C3C_VERSION }}
+        shell: bash
+        run: |
+          set -e
+          case "$RUNNER_OS" in
+            Linux)   asset=c3-linux.tar.gz ;;
+            macOS)   asset=c3-macos.zip ;;
+            Windows) asset=c3-windows.zip ;;
+          esac
+          curl -fsSL -o "$asset" "https://github.com/c3lang/c3c/releases/download/$C3C_VERSION/$asset"
+          mkdir c3c-install
+          case "$asset" in
+            *.tar.gz) tar xzf "$asset" -C c3c-install ;;
+            *.zip)    7z x -y "$asset" -oc3c-install > /dev/null ;;
+          esac
+          echo "$PWD/c3c-install/c3" >> "$GITHUB_PATH"
+          echo "C3_DIR=$PWD/c3c-install/c3" >> "$GITHUB_ENV"
+      - name: c3c version
+        shell: bash
+        run: c3c --version
+      - name: Build (-O3)
+        shell: bash
+        run: c3c build c3-guide-mcp -O3
+      - name: Smoke test
+        shell: bash
+        run: |
+          exe=build/c3-guide-mcp; [ "$RUNNER_OS" = Windows ] && exe=build/c3-guide-mcp.exe
+          python3 test/smoke.py "$exe"
+      - name: Package
+        shell: bash
+        run: |
+          set -e
+          name="c3-guide-mcp-${GITHUB_REF_NAME}-c3c0.8.5-${{ matrix.target }}"
+          mkdir "$name"
+          exe=c3-guide-mcp; [ "$RUNNER_OS" = Windows ] && exe=c3-guide-mcp.exe
+          cp "build/$exe" LICENSE NOTICE README.md "$name/"
+          if [ "${{ matrix.ext }}" = zip ]; then 7z a -tzip "$name.zip" "$name" > /dev/null; else tar czf "$name.tar.gz" "$name"; fi
+          ls -l "$name.${{ matrix.ext }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: c3-guide-mcp-*.${{ matrix.ext }}
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum c3-guide-mcp-* > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" c3-guide-mcp-* SHA256SUMS --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME (c3c 0.8.5)" \
+            --notes "Prebuilt c3-guide-mcp for c3c 0.8.5 (Linux x64, macOS arm64, Windows x64). Unpack, point your MCP client at the binary, set C3C to your c3c if it is not on PATH (only c3_check needs it). Verify with SHA256SUMS."

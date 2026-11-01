@@ -1,0 +1,69 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+env:
+  C3C_VERSION: v0.8.5            # the snapshot in data/corpus.rs and the tests belong to exactly this compiler
+  MCP_REF: cd4278f19624b6cb213b2cb04bf35dc48f5c13f3   # konimarti/mcp.c3l, pinned
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: SDK (mcp.c3l, pinned)
+        shell: bash
+        run: |
+          git clone https://github.com/konimarti/mcp.c3l deps/mcp.c3l
+          git -C deps/mcp.c3l checkout "$MCP_REF"
+      - name: c3c ${{ env.C3C_VERSION }}
+        shell: bash
+        run: |
+          set -e
+          case "$RUNNER_OS" in
+            Linux)   asset=c3-linux.tar.gz ;;
+            macOS)   asset=c3-macos.zip ;;
+            Windows) asset=c3-windows.zip ;;
+          esac
+          curl -fsSL -o "$asset" "https://github.com/c3lang/c3c/releases/download/$C3C_VERSION/$asset"
+          mkdir c3c-install
+          case "$asset" in
+            *.tar.gz) tar xzf "$asset" -C c3c-install ;;
+            *.zip)    7z x -y "$asset" -oc3c-install > /dev/null ;;
+          esac
+          echo "$PWD/c3c-install/c3" >> "$GITHUB_PATH"
+          echo "C3_DIR=$PWD/c3c-install/c3" >> "$GITHUB_ENV"
+      - name: c3c version
+        shell: bash
+        run: c3c --version
+      - name: Build (-O3)
+        shell: bash
+        run: c3c build c3-guide-mcp -O3
+      - name: Smoke test
+        shell: bash
+        run: |
+          exe=build/c3-guide-mcp; [ "$RUNNER_OS" = Windows ] && exe=build/c3-guide-mcp.exe
+          python3 test/smoke.py "$exe"
+      - name: Full test suite (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          python3 test/stdio_test.py
+          python3 test/limits_test.py
+          python3 test/quality_test.py
+          python3 test/growth_test.py
+      - name: Snapshot matches this c3c
+        if: runner.os == 'Linux'
+        run: python3 test/corpus_test.py "$C3_DIR"
+      - name: Default build passes too (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          c3c build c3-guide-mcp
+          python3 test/stdio_test.py
+          python3 test/limits_test.py

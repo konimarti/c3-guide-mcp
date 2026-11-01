@@ -141,7 +141,7 @@ def main():
     syms = symbols(c3)
     recs += syms
     meta = rec("meta", "c3c", ver, f"records={len(recs)}")
-    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "corpus.rs")
+    out = os.environ.get("C3GUIDE_OUT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "corpus.rs")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write(meta + "".join(recs))
