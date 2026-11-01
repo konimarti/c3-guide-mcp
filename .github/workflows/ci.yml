@@ -51,6 +51,7 @@ jobs:
           esac
           echo "$PWD/c3c-install/c3" >> "$GITHUB_PATH"
           echo "C3_DIR=$PWD/c3c-install/c3" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = Windows ]; then echo "C3C=$(cygpath -w "$PWD/c3c-install/c3/c3c.exe")" >> "$GITHUB_ENV"; fi
       - name: c3c version
         shell: bash
         run: c3c --version
