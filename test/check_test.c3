@@ -88,7 +88,8 @@ fn void stale_temp_dirs_are_swept_and_fresh_ones_kept() @test
 	Path tmp = path::temp_directory(tmem)!!;
 	String old = string::tformat("%s/c3guide-stale-test", (String)tmp);
 	String fresh = string::tformat("%s/c3guide-fresh-test", (String)tmp);
-	support::sh(string::tformat("mkdir -p '%s' '%s' && touch -d '2 hours ago' '%s'", old, fresh, old));
+	// two hours old; `date -r SECONDS` is BSD/macOS, `date -d @SECONDS` is GNU, and touch -d "2 hours ago" is GNU only
+	support::sh(string::tformat("mkdir -p '%s' '%s' && t=$(( $(date +%%s) - 7200 )) && touch -t \"$(date -r $t +%%Y%%m%%d%%H%%M.%%S 2>/dev/null || date -d @$t +%%Y%%m%%d%%H%%M.%%S)\" '%s'", old, fresh, old));
 	check::c3_check("fn void f() {}");
 	assert(!file::exists(old), "stale temp dir should be removed");
 	assert(file::exists(fresh), "fresh temp dir belongs to another server and stays");
