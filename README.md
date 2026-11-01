@@ -46,7 +46,7 @@ In our small comparisons (4 runs per round with and without the tools, same prom
 
 ## Install
 
-Download the archive for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, Windows x64), check it against `SHA256SUMS`, unpack it. The binary is built for **c3c 0.8.5** (its docs snapshot is embedded). Only `c3_check`, `c3_fix`, `c3_test` and `c3_run` need `c3c`: put it on `PATH` or set `C3C`. Without it the docs tools (`c3_search`, `c3_symbol`, `c3_examples`, `c3_changes`, `c3_syntax`) still work.
+Download the archive for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, Windows x64), check it against `SHA256SUMS`, unpack it. The binary is built for **c3c 0.8.6** (its docs snapshot is embedded). Only `c3_check`, `c3_fix`, `c3_test` and `c3_run` need `c3c`: put it on `PATH` or set `C3C`. Without it the docs tools (`c3_search`, `c3_symbol`, `c3_examples`, `c3_changes`, `c3_syntax`) still work.
 
 macOS blocks unsigned downloads: `xattr -d com.apple.quarantine ./c3-guide-mcp`. Other platforms (Intel Mac, Linux arm64): build from source, below.
 
@@ -65,7 +65,7 @@ Claude Desktop (`claude_desktop_config.json`) and Cursor (`~/.cursor/mcp.json`) 
 
 ## Build from source
 
-Needs c3c 0.8.5 and [c3l](https://github.com/konimarti/c3l). The dependency ([mcp.c3l](https://github.com/konimarti/mcp.c3l)) is pinned to an exact commit with a checksum in `c3l.lock`:
+Needs c3c 0.8.6 and [c3l](https://github.com/konimarti/c3l). The dependency ([mcp.c3l](https://github.com/konimarti/mcp.c3l)) is pinned to an exact commit with a checksum in `c3l.lock`:
 
 ```
 c3l sync --frozen                   # installs deps/mcp.c3l exactly as locked
@@ -76,7 +76,7 @@ c3c build c3-guide-mcp -O3          # -> build/c3-guide-mcp
 
 ## How it works
 
-The docs are a snapshot embedded in the binary (`$embed`, 1.8 MB, 7,294 entries). `scripts/gen_corpus.py` builds it from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`. Startup takes about 10 ms. A search scans every entry in about 10 ms (BM25), so there is no index to build or keep in sync.
+The docs are a snapshot embedded in the binary (`$embed`, 1.9 MB, 7,319 entries). `scripts/gen_corpus.py` builds it from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`. Startup takes about 10 ms. A search scans every entry in about 10 ms (BM25), so there is no index to build or keep in sync.
 
 The snapshot belongs to one `c3c` version (printed in its header). After a compiler update:
 
