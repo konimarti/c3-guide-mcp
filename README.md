@@ -23,19 +23,32 @@ model:  c3_symbol("file::open")  ->  fn File? open(String filename, String mode)
 
 Replies of the four docs tools are capped at 3.2 KB, `c3_check` at 4 KB. A server that dumps pages into the context makes the model worse.
 
-## Build and use
+## Install
 
-Needs [c3c](https://github.com/c3lang/c3c) 0.8.5 (the snapshot and the tests are built for exactly this version; `c3c` must be on `PATH`, or set `C3C`) and [mcp.c3l](https://github.com/konimarti/mcp.c3l) in `deps/mcp.c3l`.
+Download the archive for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, Windows x64), check it against `SHA256SUMS`, unpack it. The binary is built for **c3c 0.8.5** (its docs snapshot is embedded). Only `c3_check` needs `c3c`: put it on `PATH` or set `C3C`. Without it the four docs tools still work.
+
+macOS blocks unsigned downloads: `xattr -d com.apple.quarantine ./c3-guide-mcp`. Other platforms (Intel Mac, Linux arm64): build from source, below.
+
+Register it as a stdio server in your MCP client:
+
+```
+claude mcp add c3-guide -e C3C=/path/to/c3c -- /path/to/c3-guide-mcp     # Claude Code
+hermes mcp add c3-guide --command /path/to/c3-guide-mcp                    # Hermes
+```
+
+Claude Desktop (`claude_desktop_config.json`) and Cursor (`~/.cursor/mcp.json`) take the same JSON:
+
+```json
+{ "mcpServers": { "c3-guide": { "command": "/path/to/c3-guide-mcp", "env": { "C3C": "/path/to/c3c" } } } }
+```
+
+## Build from source
+
+Needs c3c 0.8.5 and [mcp.c3l](https://github.com/konimarti/mcp.c3l) in `deps/mcp.c3l`:
 
 ```
 git clone https://github.com/konimarti/mcp.c3l deps/mcp.c3l
 c3c build c3-guide-mcp -O3          # -> build/c3-guide-mcp
-```
-
-Register it in your MCP client as a stdio server. Set `C3C` to the compiler if it is not on `PATH` (only `c3_check` needs it):
-
-```json
-{ "mcpServers": { "c3-guide": { "command": "/path/to/build/c3-guide-mcp", "env": { "C3C": "/path/to/c3c" } } } }
 ```
 
 ## How it works
@@ -56,7 +69,7 @@ python3 scripts/gen_corpus.py /path/to/c3 all.md && c3c build c3-guide-mcp -O3
 ```
 C3C=/path/to/c3c python3 test/stdio_test.py   # every tool over stdio, protocol errors, $exec guard
 python3 test/limits_test.py                   # hanging and flooding compilers
-python3 test/quality_test.py                  # 20 questions, expected answer in the top 3
+python3 test/quality_test.py                  # 22 questions, expected answer in the top 3
 python3 test/growth_test.py                   # memory over 4,000 calls
 python3 test/mutation_test.py                 # breaks the code 8 ways; every break must fail a test (slow)
 ```
@@ -66,5 +79,5 @@ python3 test/mutation_test.py                 # breaks the code 8 ways; every br
 - The docs and the compiler do not always agree (the manual says `excuse`, other pages `faultdef`; the compiler accepts both). When they differ, `c3_check` is right.
 - Search is keyword based: it finds "Macro vaargs" for "vararg", but not a paraphrase with different words.
 - A killed server leaves its temp directory behind; the next `c3_check` removes `c3guide-*` directories older than an hour.
-- Only Linux x64 was tested.
-- Tested with `hermes mcp test` and tool calls from a Hermes session; no other client yet.
+- CI builds and runs a smoke test on Linux x64, macOS arm64 and Windows x64; the full suite runs on Linux and macOS. Only Linux x64 was also tested by hand.
+- Used from Hermes (`hermes mcp test` and real sessions). The Claude Code, Claude Desktop and Cursor lines above follow their documented formats but were not tried.

@@ -5,7 +5,7 @@ on:
   workflow_dispatch:     # dry run: builds and packages, uploads the files as artifacts, publishes nothing
 env:
   C3C_VERSION: v0.8.5            # the snapshot in data/corpus.rs and the tests belong to exactly this compiler
-  MCP_REF: cd4278f19624b6cb213b2cb04bf35dc48f5c13f3   # konimarti/mcp.c3l, pinned
+  MCP_REF: a7d0dd196640340ee9c1cc7d9dceb2a0128af5e7   # konimarti/mcp.c3l, pinned
 permissions:
   contents: write
 jobs:
@@ -25,17 +25,6 @@ jobs:
         run: |
           git clone https://github.com/konimarti/mcp.c3l deps/mcp.c3l
           git -C deps/mcp.c3l checkout "$MCP_REF"
-      - name: Windows only - add windows-x64 to the mcp.c3l manifest (CI-only patch, drop once the SDK lists it)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json
-          p = "deps/mcp.c3l/manifest.json"
-          m = json.load(open(p))
-          m["targets"]["windows-x64"] = {"dependencies": [], "linked-libraries": []}
-          json.dump(m, open(p, "w"), indent=2)
-          PY
       - name: c3c ${{ env.C3C_VERSION }}
         shell: bash
         run: |
