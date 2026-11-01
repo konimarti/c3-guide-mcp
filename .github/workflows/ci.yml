@@ -15,6 +15,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}   # experimental until mcp.c3l lists windows-x64
     steps:
       - uses: actions/checkout@v4
       - name: SDK (mcp.c3l, pinned)
@@ -22,6 +23,17 @@ jobs:
         run: |
           git clone https://github.com/konimarti/mcp.c3l deps/mcp.c3l
           git -C deps/mcp.c3l checkout "$MCP_REF"
+      - name: Windows (experiment) - mcp.c3l manifest lists no windows-x64
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          p = "deps/mcp.c3l/manifest.json"
+          m = json.load(open(p))
+          m["targets"]["windows-x64"] = {"dependencies": [], "linked-libraries": []}
+          json.dump(m, open(p, "w"), indent=2)
+          PY
       - name: c3c ${{ env.C3C_VERSION }}
         shell: bash
         run: |

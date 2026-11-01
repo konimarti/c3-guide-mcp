@@ -91,9 +91,10 @@ def sig(it):
     return f"{kind} {name}{gen}" + (f" {{ {mem} }}" if mem and len(mem) < 300 else "")
 
 def symbols(c3):
-    r = subprocess.run([os.path.join(c3, "c3c"), "docgen", os.path.join(c3, "lib/std"), "--json"],
-                       capture_output=True, text=True, check=True)
-    dg = json.loads(r.stdout)
+    # run inside the install dir: docgen prints locations relative to the working directory
+    r = subprocess.run([os.path.join(c3, "c3c"), "docgen", "lib/std", "--json"],
+                       capture_output=True, text=True, check=True, cwd=c3)
+    dg = json.loads(r.stdout.replace(os.path.realpath(c3), "<project>"))
     root = os.path.join(c3, "")
     out = []
     for mod in dg["modules"].values():

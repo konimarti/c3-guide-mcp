@@ -94,11 +94,16 @@ check("check: temp dir cleaned up", set(glob.glob(os.path.join(tempfile.gettempd
 def one(name, args, env=None):
     rr = session([(name, args)], env or dict(os.environ, **({"C3C": C3C} if C3C else {})))
     return rr[2]["result"]["content"][0]["text"] if "result" in rr[2] else json.dumps(rr[2])
-leak = 'module m; const char[*] X = $embed("/etc/passwd"); fn void f() { $for var $i = 0; $i < 4; $i++: $echo((int)X[$i]); $endfor }'
+sdir = tempfile.mkdtemp(prefix="c3secret-")
+secret = os.path.join(sdir, "secret.txt")
+open(secret, "w").write("rxyz")   # 114 120 121 122: a file of our own, so the test does not depend on /etc/passwd
+leak = 'module m; const char[*] X = $embed("%s"); fn void f() { $for var $i = 0; $i < 4; $i++: $echo((int)X[$i]); $endfor }' % secret.replace("\\", "/")
 t = one("c3_check", {"code": leak})
-check("embed: file read through $embed + $echo is rejected", "rejected" in t and "114" not in t, t)
+check("embed: file read through $embed + $echo is rejected", "rejected" in t and "114" not in t and "120" not in t, t)
 if C3C:
-    ctl = subprocess.run([C3C, "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", os.path.join(os.path.dirname(__file__), "embed_probe.c3")], capture_output=True, text=True)
+    probe = os.path.join(sdir, "probe.c3")
+    open(probe, "w").write(leak)
+    ctl = subprocess.run([C3C, "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", probe], capture_output=True, text=True)
     check("embed: positive control, the compiler itself prints the file under --trust=none", "114" in (ctl.stdout + ctl.stderr), ctl.stdout + ctl.stderr)
 for tok in ("$include", "$exec"):
     check("%s rejected" % tok, "rejected" in one("c3_check", {"code": "module m; " + tok + "(\"x\");"}))
@@ -134,6 +139,6 @@ one("c3_check", {"code": "fn void f() {}"})
 check("sweep: stale temp dir removed", not os.path.exists(old))
 check("sweep: fresh temp dir kept (another server may use it)", os.path.exists(fresh))
 shutil.rmtree(fresh, ignore_errors=True)
-shutil.rmtree(work2)
+shutil.rmtree(work2); shutil.rmtree(sdir)
 print("FAILED: %d" % fails if fails else "all passed")
 sys.exit(1 if fails else 0)
