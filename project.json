@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "sources": ["src/**"],
   "dependency-search-paths": ["deps"],
-  "dependencies": ["mcp"],
+  "dependencies": [ "mcp" ],
   "build-dir": "build",
   "output": "build",
   "targets": {

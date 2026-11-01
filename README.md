@@ -26,28 +26,7 @@ Replies of the four docs tools are capped at 3.2 KB, `c3_check` at 4 KB. A serve
 
 ## Use it
 
-The tools work best when the model is told to use them. Put this in your `CLAUDE.md`, `AGENTS.md`, Cursor rule or system prompt:
-
-```text
-You write C3 (c3c 0.8.5). Your memory of C3 is out of date: 0.8 changed syntax
-and the standard library, and guessed signatures usually do not compile.
-
-- Before you call a standard library function, macro or method, look it up with
-  c3_symbol. If you do not know its name, describe what you need
-  ("read line from stdin", "get environment variable").
-- If c3_symbol says a name does not exist, believe it and use what it suggests.
-- If you are unsure about syntax, use c3_search (manual), c3_changes (what changed
-  in a release) or c3_syntax (attributes, builtins, keywords).
-- Run every program through c3_check and fix all errors before you show it.
-  Do not say the code works until c3_check says OK.
-```
-
-A task prompt can then stay short:
-
-```text
-Write a C3 program that takes a file name, counts the lines of the file and prints
-"lines: N". Handle a missing argument and a file that cannot be opened.
-```
+Models call the tools more reliably when told to. One line in your `CLAUDE.md`, `AGENTS.md` or system prompt is enough: *"Look up every C3 standard library call with `c3_symbol` and run all code through `c3_check` before showing it."*
 
 In our small comparisons (4 runs per round with and without the tools, same prompt) the runs with the tools compiled on the first or second try. Without them the models guessed `File.open` and `File.read_line`, which do not exist, and one run did not get clean in 12 compiler runs. That is a handful of runs on a small model, not a benchmark, but it is the failure the server is built for.
 
@@ -72,12 +51,14 @@ Claude Desktop (`claude_desktop_config.json`) and Cursor (`~/.cursor/mcp.json`) 
 
 ## Build from source
 
-Needs c3c 0.8.5 and [mcp.c3l](https://github.com/konimarti/mcp.c3l) in `deps/mcp.c3l`:
+Needs c3c 0.8.5 and [c3l](https://github.com/konimarti/c3l). The dependency ([mcp.c3l](https://github.com/konimarti/mcp.c3l)) is pinned to an exact commit with a checksum in `c3l.lock`:
 
 ```
-git clone https://github.com/konimarti/mcp.c3l deps/mcp.c3l
+c3l sync --frozen                   # installs deps/mcp.c3l exactly as locked
 c3c build c3-guide-mcp -O3          # -> build/c3-guide-mcp
 ```
+
+`c3l verify` checks the installed files against the lock; `c3l update` moves it to a newer mcp.c3l.
 
 ## How it works
 
