@@ -1,6 +1,6 @@
 module c3guide::check;
 import mcp, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
-import c3guide::util;
+import c3guide::util, std::os::posix, std::time;
 
 // Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
 // fresh temp dir and compiled with a FIXED command line:
@@ -74,6 +74,23 @@ fn String redact(String s, String needle)
 	return out.str_view();
 }
 
+// A killed server cannot run its `defer`, so it leaves c3guide-* behind: remove those older than an hour.
+fn void sweep_stale(Path tmp)
+{
+	PathList? list = path::ls(tmem, tmp, no_dirs: false, relative: true);
+	if (catch list) return;
+	foreach (entry : list)
+	{
+		String name = entry.basename();
+		if (!name.starts_with("c3guide-")) continue;
+		Path? full = tmp.tappend(name);
+		if (catch full) continue;
+		Time? mt = file::last_modified((String)full);
+		if (catch mt) continue;
+		if ((long)time::now() - (long)mt > 3600L * (long)time::SEC) (void)path::rmtree(full);
+	}
+}
+
 fn String c3_check(String code @Desc("a C3 snippet or file content; a main function is not required"))
 	@Desc("Compile C3 code with the installed c3c (type-check only, nothing is linked or run) and return the compiler's diagnostics. Use it to verify code before showing it.")
 	@Timeout(30000)
@@ -86,7 +103,9 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	// No @pool here: the result lives in the caller's temp memory (a nested pool would free it on return).
 	Path? tmp = path::temp_directory(tmem);
 	if (catch tmp) return "no temp directory available";
-	Path? dir = tmp.tappend(string::tformat("c3guide-%d", (int)(clock::now() % 1000000000)));
+	sweep_stale(tmp);
+	// pid + clock: two servers (or two calls in one millisecond) never share a directory
+	Path? dir = tmp.tappend(string::tformat("c3guide-%d-%d", (int)posix::getpid(), (int)(clock::now() % 1000000000)));
 	if (catch dir) return "cannot create a temp path";
 	if (catch path::mkdir(dir)) return "cannot create a temp directory";
 	defer (void)path::rmtree(dir);

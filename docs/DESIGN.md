@@ -24,7 +24,7 @@ Each entry: decision, why, what it costs.
 - Fixed command line: `--trust=none` (no `$exec`/`$include`), `--no-obj --no-entry` (nothing emitted or linked), `timeout 10`, output cap 4 KB with kill and `join`. Compiler path only from `C3C`/`PATH`, never from the caller. Snippet in a fresh temp dir, removed after the call, path redacted from the output.
 - Tested with a payload that touches a marker file plus a positive control under `--trust=full`.
 - **`$embed`/`$include`/`$exec` are rejected by a text check.** Found by a reviewer: `--trust=none` blocks `$exec` but allows `$embed`, and `$echo` prints at compile time, so `$embed("/etc/passwd")` was readable byte by byte (reproduced, positive control: the compiler does it by itself). The three tokens cannot be spelled another way (`$eval` only builds identifiers). A real sandbox (bwrap, a container) would be stronger and is the user's job.
-- Known limits: a compiler that is slower than 10 s is cut, a compiler bomb below that limit is not; a killed server leaves one temp directory.
+- Known limits: a compiler that is slower than 10 s is cut, a compiler bomb below that limit is not; a killed server leaves one temp directory until the next `c3_check` sweeps directories older than an hour.
 
 ## c3c 0.8.5 findings
 - `String.replace` returned corrupted bytes for a 4 KB text without a match; `redact()` in check.c3 replaces it. Worth a bug report upstream.
@@ -40,5 +40,5 @@ Each entry: decision, why, what it costs.
 
 ## Open
 - Version follow-up: the server warns nothing when `c3c --version` differs from the snapshot.
-- The default (non-`-O3`) build of the first release candidate produced 0xAA bytes (invalid UTF-8) in `c3_check` replies; after the `clip`/`run_capped` rewrite it no longer does and the whole suite passes on both builds. The exact line was not isolated: treat any debug-build failure as a bug.
+- Root cause of the 0xAA replies in the first release candidate: `c3_check` returned strings from temp memory out of an `@pool()`, which frees them on exit (use-after-free; `-O3` happened to leave the bytes intact). Rule: a function that returns temp-allocated data must not wrap it in its own `@pool`. The suite runs on both the default and the `-O3` build.
 - `all.md` is a manual download; the generator takes it as an optional argument.

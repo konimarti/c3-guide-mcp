@@ -18,7 +18,7 @@ def peak_rss_kb(n):
 
 a = peak_rss_kb(200)
 b = peak_rss_kb(4000)  # maxrss of children is a running maximum: b >= a by construction
-print("peak RSS after 200 calls: %d KB, after 4000 more-or-less calls: %d KB (growth %d KB)" % (a, b, b - a))
+print("peak RSS after 200 calls: %d KB, after 4000 calls: %d KB (growth %d KB)" % (a, b, b - a))
 ok = b - a < 10 * 1024
 print("ok: no growth per call" if ok else "FAIL: memory grows with calls")
 sys.exit(0 if ok else 1)

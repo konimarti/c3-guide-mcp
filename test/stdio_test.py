@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """stdio smoke + regression test: python3 test/stdio_test.py [binary]"""
-import json, subprocess, sys, os, shutil
+import time, json, subprocess, sys, os, shutil
 
 BIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "build", "c3-guide-mcp")
 MAX_TEXT = 3300  # reply cap (3200) plus the cut marker
@@ -126,6 +126,14 @@ t = one("c3_changes", {"topic": "type properties"})
 heads = [l for l in t.split("\n") if l.startswith("### ")]
 vers = [tuple(int(x) for x in h[4:].split(" ")[0].split(".")) for h in heads]
 check("c3_changes: newest version first", len(vers) >= 2 and vers == sorted(vers, reverse=True), str(heads))
-shutil.rmtree(work2); 
+# a killed server leaves c3guide-* behind: the next call removes old ones and keeps fresh ones
+old = os.path.join(tempfile.gettempdir(), "c3guide-stale-test"); fresh = os.path.join(tempfile.gettempdir(), "c3guide-fresh-test")
+os.makedirs(old, exist_ok=True); os.makedirs(fresh, exist_ok=True)
+os.utime(old, (time.time() - 7200, time.time() - 7200))
+one("c3_check", {"code": "fn void f() {}"})
+check("sweep: stale temp dir removed", not os.path.exists(old))
+check("sweep: fresh temp dir kept (another server may use it)", os.path.exists(fresh))
+shutil.rmtree(fresh, ignore_errors=True)
+shutil.rmtree(work2)
 print("FAILED: %d" % fails if fails else "all passed")
 sys.exit(1 if fails else 0)

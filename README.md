@@ -65,6 +65,6 @@ python3 test/mutation_test.py                 # breaks the code 8 ways; every br
 
 - The docs and the compiler do not always agree (the manual says `excuse`, other pages `faultdef`; the compiler accepts both). When they differ, `c3_check` is right.
 - Search is keyword based: it finds "Macro vaargs" for "vararg", but not a paraphrase with different words.
-- A killed server leaves its temp directory (`c3guide-*` in `$TMPDIR`) behind; it is tiny and the next call does not need it.
+- A killed server leaves its temp directory behind; the next `c3_check` removes `c3guide-*` directories older than an hour.
 - Only Linux x64 was tested. `c3_check` needs the `timeout` program.
 - Tested with `hermes mcp test` and tool calls from a Hermes session; no other client yet.
