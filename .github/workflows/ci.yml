@@ -5,7 +5,7 @@ on:
   pull_request:
 env:
   C3C_VERSION: v0.8.5            # the snapshot in data/corpus.dat and the tests belong to exactly this compiler
-  C3L_REF: 1943d378af53bcc28dd0422ade6f8dfe56f0971c   # konimarti/c3l (a shell script), pinned
+  C3L_REF: 6d9943dcfcf5a1b5b6563413633ec7fe537c3502   # konimarti/c3l (a shell script), pinned
 permissions:
   contents: read
 jobs:
@@ -45,6 +45,7 @@ jobs:
           chmod +x "$HOME/bin/c3l"
           export PATH="$HOME/bin:$PATH"
           c3l sync --frozen
+          c3l verify
       - name: Build (-O3)
         shell: bash
         run: c3c build c3-guide-mcp -O3
