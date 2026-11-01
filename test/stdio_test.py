@@ -77,7 +77,7 @@ check("check: temp path not leaked", "c3guide-" not in text(16), text(16))
 check("check: empty code rejected", "give 1 to" in text(17), text(17))
 check("check: oversized code rejected", "give 1 to" in text(18), text(18))
 m = session([("c3_check", {"code": "fn void f() {}"})], dict(os.environ, C3C="/nonexistent/c3c"))
-check("check: missing compiler gives a clear message", "c3c not found" in m[2]["result"]["content"][0]["text"], json.dumps(m[2]))
+check("check: missing compiler gives a clear message", "could not start c3c" in m[2]["result"]["content"][0]["text"], json.dumps(m[2]))
 import tempfile
 work = tempfile.mkdtemp(prefix="c3work-")
 marker = os.path.join(work, "marker")

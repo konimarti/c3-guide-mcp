@@ -10,7 +10,7 @@ MUT = [
     ("invert version sort", "src/tools.c3", 'version_key(corpus::entries[b.idx].title) - version_key(corpus::entries[a.idx].title)', 'version_key(corpus::entries[a.idx].title) - version_key(corpus::entries[b.idx].title)'),
     ("no utf8 boundary", "src/util.c3", 'while (n > 0 && (s[n] & 0xC0) == 0x80) n--;', ''),
     ("exit code ignored", "src/check.c3", 'return status == 0 ? "OK: no errors" : string::tformat("c3c failed (exit code %d) without a message", status);', 'return "OK: no errors";'),
-    ("timeout removed", "src/check.c3", '"timeout", "10", ', ''),
+    ("deadline disabled", "src/check.c3", 'const ulong DEADLINE_MS = 10000;', 'const ulong DEADLINE_MS = 100000000;'),
 ]
 only = sys.argv[1:]
 shutil.copytree(root + "src", "/opt/data/cache/scratch/src_pristine", dirs_exist_ok=True)

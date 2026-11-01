@@ -1,12 +1,12 @@
 module c3guide::check;
-import mcp, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
+import mcp, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
 import c3guide::util, std::os::posix, std::time;
 
 // Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
 // fresh temp dir and compiled with a FIXED command line:
 //   --trust=none  no $exec / $include at compile time, whatever the user's c3c config says
 //   --no-obj      nothing is emitted or linked, so nothing can run
-//   timeout 10    a compile-time loop in the snippet cannot hang the server
+//   a 10 s deadline, enforced here (watchdog thread kills the compiler), so no `timeout` program is needed
 // The compiler binary is not a tool argument: C3C env var, else "c3c" from PATH.
 //
 // `--trust=none` still allows $embed, and $echo prints to stdout, so a snippet could read any file the
@@ -15,6 +15,7 @@ import c3guide::util, std::os::posix, std::time;
 // builds identifiers). Do not run the server as a user that can read secrets regardless.
 const sz MAX_CODE = 32 * 1024;
 const sz MAX_OUTPUT = 4 * 1024;
+const ulong DEADLINE_MS = 10000;
 const String[*] FORBIDDEN = { "$embed", "$include", "$exec" };
 
 fn String c3c_binary()
@@ -24,12 +25,56 @@ fn String c3c_binary()
 	return "c3c";
 }
 
-// Run argv (no shell), capture stdout+stderr up to MAX_OUTPUT, kill the child past that, always join.
-// *code gets the exit status (0 when the child was killed because of the cap).
-fn String? run_capped(String[] cmd, int* code)
+// Kills the child when the deadline passes. The mutex makes "check done, then kill" atomic against the
+// main thread's "set done, then join": the kill can never hit a pid that was already reaped.
+faultdef WATCHDOG_FAILED;
+
+struct Watchdog
+{
+	Mutex mutex;
+	ConditionVariable cond;
+	Process* proc;
+	bool done;
+	bool fired;
+}
+
+fn int watch(void* arg) @private
+{
+	Watchdog* w = (Watchdog*)arg;
+	Clock start = clock::now();
+	(void)w.mutex.lock();
+	while (!w.done)
+	{
+		long left = (long)DEADLINE_MS - (long)(start.to_now() / 1_000_000);
+		if (left <= 0)
+		{
+			w.fired = true;
+			(void)w.proc.terminate();
+			break;
+		}
+		(void)w.cond.wait_timeout(&w.mutex, (ulong)left);
+	}
+	w.mutex.unlock();
+	return 0;
+}
+
+// Run argv (no shell), capture stdout+stderr up to MAX_OUTPUT, kill the child past that or past the
+// deadline, always join. *code gets the exit status (0 when we killed it ourselves), *timed_out says
+// whether the deadline fired. A killed child closes its pipe, so the blocking read below always ends.
+fn String? run_capped(String[] cmd, int* code, bool* timed_out)
 {
 	Process p = process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT | process::SpawnOptions.INHERIT_ENV)!;
 	defer (void)p.destroy();
+	Watchdog w = { .proc = &p };
+	(void)w.mutex.init();
+	(void)w.cond.init();
+	Thread th;
+	if (catch th.create(&watch, &w))
+	{
+		(void)p.terminate();   // no deadline without a watchdog: do not run the compiler at all
+		(void)p.join();
+		return WATCHDOG_FAILED~;
+	}
 	DString out = dstring::temp();
 	char[2048] buf;
 	bool capped = false;
@@ -47,13 +92,16 @@ fn String? run_capped(String[] cmd, int* code)
 			break;
 		}
 	}
+	(void)w.mutex.lock();
+	w.done = true;
+	w.cond.signal();
+	w.mutex.unlock();
+	(void)th.join();
+	*timed_out = w.fired;
 	*code = p.join()!;
 	String s = out.str_view();
-	if (capped)
-	{
-		*code = 0;
-		return string::tformat("%s\n[output cut]", s[:util::utf8_boundary(s, s.len)]);
-	}
+	if (capped || w.fired) *code = 0;
+	if (capped) return string::tformat("%s\n[output cut]", s[:util::utf8_boundary(s, s.len)]);
 	return s;
 }
 
@@ -111,14 +159,14 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	defer (void)path::rmtree(dir);
 	String file = string::tformat("%s/snippet.c3", (String)dir);
 	if (catch file::save(file, code)) return "cannot write the snippet";
-	String[] argv = { "timeout", "10", c3c_binary(), "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", file };
+	String[] argv = { c3c_binary(), "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", file };
 	int status = 0;
-	String? out = run_capped(argv, &status);
-	if (catch out) return "could not start `timeout` or c3c (set the C3C environment variable to the c3c path; `timeout` must be on PATH)";
-	if (status == 127) return "c3c not found: set the C3C environment variable to its path or put c3c on PATH";
+	bool timed_out = false;
+	String? out = run_capped(argv, &status, &timed_out);
+	if (catch out) return "could not start c3c: set the C3C environment variable to its path or put c3c on PATH";
 	String shown = redact(out, (String)dir);
-	if (status == 124) shown = string::tformat("%s\n[timeout: the compiler ran longer than 10 s]", shown);
-	if (shown.trim().len == 0)
+	if (timed_out) shown = string::tformat("%s\n[timeout: the compiler ran longer than 10 s]", shown);
+	if (shown.trim().len == 0 && !timed_out)
 	{
 		return status == 0 ? "OK: no errors" : string::tformat("c3c failed (exit code %d) without a message", status);
 	}

@@ -49,7 +49,7 @@ curl -o all.md https://c3-lang.org/all.md      # optional: adds the sections the
 python3 scripts/gen_corpus.py /path/to/c3 all.md && c3c build c3-guide-mcp -O3
 ```
 
-`c3_check` runs `c3c --trust=none --no-obj` on the snippet in a fresh temp directory, killed after 10 s, output capped at 4 KB. `$exec` does not run (tested, with a positive control). `--trust=none` still allows `$embed`, which with `$echo` can print any file the server can read, so snippets containing `$embed`, `$include` or `$exec` are rejected before they reach the compiler. The server is not a sandbox: run it as a user without secrets.
+`c3_check` runs `c3c --trust=none --no-obj` on the snippet in a fresh temp directory, killed after 10 s by a watchdog thread, output capped at 4 KB. `$exec` does not run (tested, with a positive control). `--trust=none` still allows `$embed`, which with `$echo` can print any file the server can read, so snippets containing `$embed`, `$include` or `$exec` are rejected before they reach the compiler. The server is not a sandbox: run it as a user without secrets.
 
 ## Tests
 
@@ -66,5 +66,5 @@ python3 test/mutation_test.py                 # breaks the code 8 ways; every br
 - The docs and the compiler do not always agree (the manual says `excuse`, other pages `faultdef`; the compiler accepts both). When they differ, `c3_check` is right.
 - Search is keyword based: it finds "Macro vaargs" for "vararg", but not a paraphrase with different words.
 - A killed server leaves its temp directory behind; the next `c3_check` removes `c3guide-*` directories older than an hour.
-- Only Linux x64 was tested. `c3_check` needs the `timeout` program.
+- Only Linux x64 was tested.
 - Tested with `hermes mcp test` and tool calls from a Hermes session; no other client yet.
