@@ -117,6 +117,26 @@ def symbols(c3):
                 out.append(rec(code, it["uid"], body, it.get("file", "").replace(root, "")))
     return out
 
+ALIAS = re.compile(r"(?:<\*(?P<doc>.*?)\*>\s*)?^alias\s+(?P<name>\w+)\s*@builtin\s*=\s*(?P<to>[^;]+);", re.S | re.M)
+
+def aliases(c3):
+    """`mem`, `tmem`, `I` ...: docgen skips aliases, but they are what models use in almost every program."""
+    out, root = [], os.path.join(c3, "")
+    for dirpath, _, files in sorted(os.walk(os.path.join(c3, "lib", "std"))):
+        for fn in sorted(files):
+            if not fn.endswith(".c3"):
+                continue
+            path = os.path.join(dirpath, fn)
+            text = open(path, encoding="utf-8").read()
+            mod = re.search(r"^module\s+([\w:]+)", text, re.M)
+            for m in ALIAS.finditer(text):
+                doc = " ".join((m.group("doc") or "").split())
+                line = text.count("\n", 0, m.start("name")) + 1
+                to = " ".join(m.group("to").split())
+                body = f"alias {m.group('name')} = {to}" + (("\n" + doc) if doc else "")
+                out.append(rec("var", f"{mod.group(1)}::{m.group('name')}", body, f"{path.replace(root, '')}:{line}"))
+    return out
+
 def lists(c3):
     out = []
     for flag in ("attributes", "builtins", "keywords", "type-properties", "operators", "precedence"):
@@ -139,7 +159,7 @@ def main():
         recs += [rec("doc", p + " [all.md]", b) for p, b in extra]
     recs += [rec("change", p, b) for p, b in chunk_md(open(os.path.join(c3, "releasenotes.md"), encoding="utf-8").read())]
     recs += lists(c3)
-    syms = symbols(c3)
+    syms = symbols(c3) + aliases(c3)
     recs += syms
     meta = rec("meta", "c3c", ver, f"records={len(recs)}")
     out = os.environ.get("C3GUIDE_OUT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "corpus.dat")

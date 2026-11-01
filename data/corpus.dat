@@ -1,4 +1,4 @@
-metac3c0.8.5records=7283docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
+metac3c0.8.5records=7267docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
 
 
 
@@ -14609,436 +14609,6 @@ in regard to error handling, macros, generics and strings.
 
 
 
----doc6_3 Enums > 6_3_2 Constset [all.md]### 6_3_2 Constset
-
-When interfacing with C code, you may encounter enums that are not sequential. For situations like this, you can use a constset in C3:
-
-```c3
-extern fn KeyCode get_key_code();
-
-constset KeyCode
-{
-    UNKNOWN   = 0,
-    RETURN    = 13,
-    ESCAPE    = 27,
-    BACKSPACE = 8,
-    TAB       = 9,
-    SPACE     = 32,
-    EXCLAIM, // automatically incremented to 33
-    QUOTEDBL,
-    HASH,
-}
-
-fn void main()
-{
-    int a = (int)KeyCode.SPACE; // assigns 32 to a
-    // constset behave like typedef and will not enforce 
-    // that every value has been declared beforehand
-    KeyCode b = (KeyCode)2; 
-    // can safely interact with a C function that returns the same enum
-    KeyCode key = get_key_code();
-    // Use as cast to convert from the underlying type. 
-    KeyCode conv = (KeyCode)a; 
-}
-```doc6_3 Enums > 6_3_2 Constset > Inline constset and @constinit [all.md]#### Inline constset and @constinit
-
-If you need a `constset` to be converted to its assigned value without using a cast, `inline` can be used:
-```c3
-constset ConstInline : inline String
-{
-    A = "Hello",
-    B = "World",
-}
-
-fn void main()
-{
-    // implicitly converted to string due to inline
-    String a = ConstInline.A; 
-    ConstInline b = B;
-    String b_str = b;
-
-    io::printfn("%s, %s!", a, b_str); // Prints "Hello, World!"
-}
-```
-
-We can use `@constinit` to allow the constset to implicitly convert from a literal:
-```c3
-constset ConstInline2 : String @constinit
-{
-    A = "Hello",
-    B = "World",
-}
-
-fn void main()
-{
-    ConstInline2 a = "Bye";
-}
-```
-
-These conversion rules are the same as for `typedef`.
-
-
----doc6_11 Contracts > Return value documentation [all.md]## Return value documentation
-
-The `@return` annotation documents the return value of a function:
-
-```c3
-<*
- @return `The scaled value of foo.`
-*>
-fn int scale_foo(int foo)
-{
-    return foo * 10;
-}
-```doc6_11 Contracts > Return value documentation > 6_11_1 Fault documentation [all.md]### 6_11_1 Fault documentation
-
-The `@return?` annotation documents the faults that a function may return.
-Specific faults can be listed, faults from another function can be referenced
-using the `<func>!` syntax, or both can be combined:
-
-```c3
-<*
- @return? check_triangle!, io::EOF
-*>
-fn TriangleKind? get_triangle_kind(Triangle* triangle)
-{
-    check_triangle(triangle)!;
-    // ...
-}
-```
-
-Using `@return? some_func!` will include all faults returned by `some_func`.
-This can be combined with additional fault values.doc6_11 Contracts > Return value documentation > 6_11_2 Parameter annotations [all.md]### 6_11_2 Parameter annotations
-
-`@param` supports `[in]`, `[out]`, `[inout]`, `[own]`, `[drop]` and `[init]`.
-These are only applicable for pointer arguments.
-
-`[in]` disallows writing to the variable, `[out]` disallows reading from the
-variable. Without an annotation, pointers may both be read from and written to
-without checks. If an `&` is placed in front of the annotation (e.g. `[&in]`),
-then this means the pointer must be non-null and is checked for `null`.
-
-`[own]` signifies that the function will in some way retain the variable beyond
-the scope of the function, `[drop]` means that the pointer and the data pointed
-to will be invalid when the function returns, and `[init]` means that the data
-pointed to will be initialized by the function.
-
-These annotations can be used by the compiler for static analysis and also
-documents the function or macro.
-
-| Type          | readable? | writable? | use as "in"? | use as "out"? | use as "inout"? |
-|---------------|:---------:|:---------:|:------------:|:-------------:|:---------------:|
-| no annotation |    Yes    |    Yes    |     Yes      |      Yes      |       Yes       |
-| `in`          |    Yes    |    No     |     Yes      |      No       |        No       |
-| `out`         |    No     |    Yes    |      No      |      Yes      |        No       |
-| `inout`       |    Yes    |    Yes    |     Yes      |      Yes      |       Yes       |
-
-However, it should be noted that the compiler might not detect whether the
-annotation is correct or not! This program might compile, even though it's
-strictly incorrect.
-
-```c3
-<*
- @param [&in] i
-*>
-fn void lying_func(int* i)
-{
-    int* b = i;
-    *b = 2; // Circumvent checks!
-}
-
-fn void test()
-{
-    int a = 1;
-    lying_func(&a);
-    io::printfn("%d", a); // Might print 2!
-}
-```doc6_11 Contracts > Return value documentation > 6_11_2 Parameter annotations [all.md]However, compilers detect this(\*)
-
-```c3
-<*
- @param [&in] i
-*>
-fn void bad_func(int* i)
-{
-    *i = 2; // <- Compiler error: cannot write to "in" parameter
-}
-```
-
-\* *The spec allows a barebones compiler to completely ignore contracts.
-   Using such a compiler even this check might be ignored.*doc6_11 Contracts > Return value documentation > 6_11_2 Parameter annotations > Pure in detail [all.md]#### Pure in detail
-
-The `pure` annotation allows a program to make assumptions in regard to how the function treats global variables.
-Unlike for `const`, a pure function is not allowed to call a function which is known to be impure.
-
-However, just like for `const` the compiler might not detect whether the annotation
-is correct or not! This program might compile, but will behave strangely:
-
-```c3
-int i = 0;
-
-fn void bad_func()
-{
-    i = 2;
-}
-
-<*
- @pure
-*>
-fn void lying_func()
-{
-    bad_func() @pure; // Call bad_func by assuring it is pure!
-}
-
-fn void main()
-{
-    i = 1;
-    lying_func();
-    io::printfn("%d", i); // Might print 2!
-}
-```
-
-Circumventing "pure" annotations will cause the compiler to optimize under the assumption
-that globals are not affected, even if this isn't true.doc6_11 Contracts > Annotations quick reference [all.md]## Annotations quick reference
-
-| Name          | Format                                                                         |
-|---------------|:-------------------------------------------------------------------------------|
-| `@param     ` | `@param [<ref>]`[^1] `<param> [ : <description>]`[^3]                          |
-| `@return    ` | `@return <description>`                                                        |
-| `@return?   ` | `@return? [<func>!], [<fault1>, <fault2>, ..., [: <description>]]`[^3]         |
-| `@require   ` | `@require [<param>]`[^2] `<expr1>, <expr2>, ..., [: <description>]`[^3]        |
-| `@ensure    ` | `@ensure <expr1>, <expr2>, ..., [: <description>]`[^3]                         |
-| `@deprecated` | `@deprecated [<description>]`[^3]                                              |
-| `@pure      ` | `@pure`                                                                        |
-
-[^1]: `[<ref>]` is an optional mutability description e.g. `[&in]`
-[^2]: `[<param>]` is an optional pinpoint parameter target e.g. `@require [a] a > 0`
-[^3]: `[<description>]` denotes that a description is optional
-
-
----doc6_13 Attributes > 6_13_1 Built in attributes > `@asmname` [all.md]#### `@asmname`
-
-*Used for: function, global, const*
-
-Sets the external (linkage) name of this declaration to exactly the given string, like [`@cname`](#cname), but
-without the platform's usual symbol decoration. For example, on macOS the linker name for a C symbol `foo` is `_foo`:
-`@cname("foo")` refers to `_foo`, whereas `@asmname("foo")` refers to a symbol that is literally `foo`.
-This is useful for symbols that are defined in assembly or with names that are not following the platform's C conventions.
-
-```c3
-// Refers to the symbol "asm_helper" on all platforms.
-extern fn int asm_helper(int) @asmname("asm_helper");
-```
-
-The attribute requires a string argument and cannot be used on generic declarations.doc8_2 Project Config > Customizing A Project > 8_2_2 Target options > `compress` [all.md]##### `compress`
-
-For `"source-lib"` targets. If `true` (the default), the library is written as a single compressed `.c3l` file, otherwise as an uncompressed `.c3l` directory.doc8_2 Project Config > Customizing A Project > 8_2_2 Target options > `depends-on` [all.md]##### `depends-on`
-
-Target only. A list of other targets in the project that are built before this target, in the listed order.
-
-```json
-{
-  "targets": {
-    "generate": {
-      "type": "prepare",
-      "exec": [ "./generate_sources.sh" ]
-    },
-    "my_lib": {
-      "type": "static-lib",
-      "depends-on": [ "generate" ]
-    },
-    "my_app": {
-      "type": "executable",
-      "depends-on": [ "my_lib" ]
-    }
-  }
-}
-```
-
-Building `my_app` above first builds `generate`, then `my_lib`, and finally `my_app`.
-The dependencies of a dependency are built first, and a target is only built once even if it's listed several times.
-It is an error to depend on a target that doesn't exist, or to have targets that depend on each other in a cycle.
-
-Each dependency is built by a separate `c3c` invocation, which gets the command line options given to the original build (except those that only make sense for the selected target).
-Use `--no-deps` to build only the selected target. The `clean` command does not clean the dependencies.doc8_2 Project Config > Customizing A Project > 8_2_3 Running scripts > `exec` [all.md]##### `exec`
-
-A list of commands run before the target is compiled. For a `"prepare"` target, the scripts are all that is run.
-Running scripts requires **full trust level**, which is enabled with `--trust=full` from the command line.
-
-```json
-{
-  "exec": [ "./generate_version.sh", "gen_bindings.c3 --verbose" ],
-  "targets": {
-    "my_target": {
-      "type": "executable",
-      "exec": [ "./target_specific.sh" ]
-    }
-  }
-}
-```
-
-There are two kinds of entries:
-
-- If the first word ends with `.c3`, the C3 file is compiled on the fly and run, with the rest of the entry as its command line arguments.
-  Several files can be compiled together by separating them with `;`, as in `"foo.c3;bar.c3 arg"`.
-- Otherwise the entry is run as a shell command.
-
-Entries are run in the listed order, but the `exec` entries of a target are run *before* the top level `exec` entries.
-Any output from the scripts is printed, unless `-q` / `--quiet` is used. If a script fails, the build stops.
-
-`exec` entries are not expanded by `c3c` (see [using environment variables](#using-environment-variables)),
-the shell handles any `$VAR` in them, and sees the variables set by `env`.doc8_2 Project Config > Customizing A Project > 8_2_3 Running scripts > `exec-override` [all.md]##### `exec-override`
-
-Target only. A list of scripts that replaces the top level `exec` for the target, instead of being added to it.doc8_2 Project Config > Customizing A Project > 8_2_3 Running scripts > `script-dir` [all.md]##### `script-dir`
-
-The directory where `.c3` scripts are found. It is relative to the project file. Default: `"scripts"`.doc8_2 Project Config > Customizing A Project > 8_2_3 Running scripts > `exec-dir` [all.md]##### `exec-dir`
-
-The directory where the `exec` entries are run, relative to the project file. Default: the same as `script-dir`.
-
-These are the same directories that the `$exec` compile time directive uses (see [Modules](../language-fundamentals/modules.md)),
-and may also be set with the `--script-dir` and `--exec-dir` command line options.doc8_2 Project Config > Customizing A Project > 8_2_4 Using environment variables [all.md]### 8_2_4 Using environment variables
-
-Environment variables can be used in `project.json` strings with `${NAME}`. The variable is replaced by its value when the project is loaded:
-
-```json
-{
-  "targets": {
-    "my_target": {
-      "type": "executable",
-      "cc": "${CC}",
-      "sources": [ "${HOME}/my_sources/**" ],
-      "linker-search-paths": [ "${SDK_PATH}/lib" ]
-    }
-  }
-}
-```
-
-The expansion works in all strings, including those in lists, with these exceptions:
-
-- `exec` and `exec-override` are not expanded by `c3c`, they are run by the shell, which expands them itself.
-- `type`, `targets`, `vendor` and `$schema` are not expanded.
-
-Only the `${NAME}` form is expanded: `$NAME`, `$1` or a lone `$` are left unchanged. A name may contain letters, digits and `_`, but it can't start with a digit.
-
-To write a literal `${`, use `$${`. For example `"$${HOME}"` becomes the plain string `"${HOME}"`.
-
-If a variable is not defined, it is an error. This is only reported if the target using it is selected (or is built as a dependency through `depends-on`), so a target needing a variable only available on some platforms doesn't prevent building other targets. An error in the top level settings (outside of `targets`) is always reported.doc8_2 Project Config > Customizing A Project > 8_2_4 Using environment variables > `env` [all.md]#### `env`
-
-Environment variables can be set for the scripts run by `exec`, using a list of `"NAME=value"` strings:
-
-```json
-{
-  "env": [ "MODE=release" ],
-  "targets": {
-    "my_target": {
-      "type": "prepare",
-      "env": [ "OUTPUT=${HOME}/out", "EXTRA=1" ],
-      "exec": [ "./build.sh" ]
-    }
-  }
-}
-```
-
-The `env` entries are expanded like other strings, using the environment `c3c` was started with.
-The variables only exist while the `exec` scripts of the target run, afterwards the previous values are restored.
-They are not set for `$exec` in the source code.
-
-`env` at the top level is used by all targets. The `env` of a target is added to the top level `env`. If the same name appears more than once, the last entry is used,
-so a target `env` takes precedence over the top level `env`. Use `env-override` to replace the top level `env` completely for a target.
-
-!!! tip "JSON5 Support"
-    `project.json5` is also supported if comments are needed.
-
-
----doc10_4 Library Packaging > 10_4_2 Source libraries [all.md]### 10_4_2 Source libraries
-
-A *source library* contains the C3 sources (and optionally C sources and headers) of a project, and no precompiled binaries. It is therefore usable on every platform.
-There are two ways to create one.
-
-From a project, add a target with the type `"source-lib"` and build it:
-
-```json
-{
-  "version": "0.1.0",
-  "authors": [ "John Doe <john.doe@example.com>" ],
-  "langrev": "1",
-  "sources": [ "src/**" ],
-  "c-sources": [ "csource/*" ],
-  "c-include-dirs": [ "csource/include" ],
-  "targets": {
-    "my_lib": {
-      "type": "source-lib"
-    }
-  }
-}
-```
-
-```bash
-c3c build my_lib
-```
-
-Without a project, files can be packed directly:
-
-```bash
-c3c source-lib src/my_lib.c3 src/extra.c3 -o my_lib
-```
-
-The library is written to the output directory as `<name>.c3l`, where the name is the target name (which can be changed using the target's `name`), or the name given with `-o`.
-The name may only contain lowercase letters, digits and `_`.
-
-The library contains:
-
-- All C3 `sources` of the target. It is an error if there are none.
-- The `c-sources`, together with the header files (`.h`, `.hh`, `.hpp`, `.hxx` and `.inc`) in the same directories, and all headers found in `c-include-dirs`.
-- A `LICENSE`, `LICENSE.md`, `LICENSE.txt` or `README.md` in the project directory, if present (projects only).
-- A generated `manifest.json` with `provides`, the `dependencies`, `sources`, `c-sources`, `c-include-dirs`, `cc` and `cflags` of the target. For a project also `version`, `authors` and `langrev` are included.
-
-All files must be inside the project directory, as paths are stored relative to it.
-
-`linked-libraries` and `link-args` are not stored in source libraries (the compiler warns if they are set). Use the `@link` attribute in the source instead.doc10_4 Library Packaging > 10_4_2 Source libraries [all.md]By default the library is a single compressed file. Use `"compress": false` in the target, or `--no-compress` on the command line, to get an uncompressed `<name>.c3l` directory instead.doc10_4 Library Packaging > 10_4_3 How to – automatically – export libraries [all.md]### 10_4_3 How to – automatically – export libraries
-
-*This feature is not implemented yet. The documentation for this feature will materialize once it is finished.*doc10_4 Library Packaging > 10_4_4 Manifest Reference [all.md]### 10_4_4 Manifest Reference
-
-The full list of supported keys can be viewed in your terminal at any time by running `c3c --list-manifest-properties`. Below is the complete reference of these properties.
-
-??? info "Global Manifest Properties"
-
-    | Property | Type | Description |
-    | :--- | :--- | :--- |
-    | `provides` | String | The library name. |
-    | `version` | String | The version of the library. |
-    | `authors` | Array | Authors of the library. |
-    | `langrev` | String | The version of the C3 language used. |
-    | `targets` | Object | The map of supported platforms, if missing the library supports all platforms. |
-    | `dependencies` | Array | List of C3 libraries to also include. |
-    | `sources` | Array | Paths to library sources for targets, such as interface files. |
-    | `c-sources` | Array | Set the C sources to be compiled. |
-    | `c-include-dirs`| Array | Set the include directories for C sources. |
-    | `cc` | String | Set C compiler (defaults to 'cc'). |
-    | `cflags` | Array | C compiler flags. |
-    | `exec` | Array | Scripts run for all platforms. |
-    | `linklib-dir` | String | Set the directory where to find linked libraries. |
-    | `wincrt` | String | Windows CRT linking: `none`, `static`, `dynamic`. |
-    | `vendor` | Object | Vendor specific extensions, ignored by `c3c`. |
-
-??? info "Target-Specific Properties"doc10_4 Library Packaging > 10_4_4 Manifest Reference [all.md]| Property | Type | Description |
-    | :--- | :--- | :--- |
-    | `sources` | Array | Additional library sources to be compiled for this target. |
-    | `sources-override` | Array | Paths to library sources for this target, overriding global settings. |
-    | `c-sources` | Array | Additional C sources to be compiled for the target. |
-    | `c-sources-override` | Array | C sources to be compiled, overriding global settings. |
-    | `c-include-dirs` | Array | C source include directories for the target. |
-    | `c-include-dirs-override` | Array | Additional C source include directories for the target, overriding global settings. |
-    | `cc` | String | Set C compiler (defaults to 'cc'). |
-    | `cflags` | Array | Additional C compiler flags for the target. |
-    | `cflags-override` | Array | C compiler flags for the target, overriding global settings. |
-    | `dependencies` | Array | List of C3 libraries to also include for this target. |
-    | `exec` | Array | Scripts to also run for the target. |
-    | `linked-libraries` | Array | Libraries linked by the linker for this target, overriding global settings. |
-    | `link-args` | Array | Linker arguments for this target. |
-    | `wincrt` | String | Windows CRT linking: `none`, `static`, `dynamic`. |
-    | `vendor` | Object | Vendor specific extensions, ignored by `c3c`. |
-
 ---changeC3C Release Notes > 0.8.5 Change list > Changes / improvements### Changes / improvements
 - Fetching MSVC also optionally fetches C/C++ headers for cross-compilation
 - Experimental C backend.
@@ -19456,4 +19026,6 @@ Get a float between 0 and 1.0, not including 1.0.lib/std/math/random.c3:118:13
 Get a double between 0 and 1.0, not including 1.0.lib/std/math/random.c3:129:14macrostd::math::random::is_randommacro bool is_random(random)lib/std/math/random.c3:136:12macrostd::math::random::@long_to_int128macro uint128 @long_to_int128(#function)lib/std/math/random.c3:138:15macrostd::math::random::@int_to_longmacro ulong @int_to_long(#function)lib/std/math/random.c3:139:13macrostd::math::random::@short_to_intmacro uint @short_to_int(#function)lib/std/math/random.c3:140:12macrostd::math::random::@char_to_shortmacro ushort @char_to_short(#function)lib/std/math/random.c3:141:14macrostd::math::random::@random_value_to_bytesmacro void @random_value_to_bytes(#function, char[] bytes)lib/std/math/random.c3:143:12macrostd::math::random::make_seedmacro make_seed($Type, char[] input)lib/std/math/random/math.seeder.c3:8:7macrostd::math::random::@xorshift_seed_from_inputmacro void @xorshift_seed_from_input(#xorshift_instance, sz $bits, seed)lib/std/math/random/math.xoshiro.c3:21:12typestd::math::random::DefaultRandomalias DefaultRandomlib/std/math/random.c3:63:7typestd::math::random::Randominterface Random { void set_seed, char next_byte, ushort next_short, uint next_int, ulong next_long, uint128 next_int128, void next_bytes }lib/std/math/random.c3:165:11typestd::math::random::Pcg128Randomdistinct type Pcg128Randomlib/std/math/random/math.pcg.c3:18:9typestd::math::random::Pcg64Randomdistinct type Pcg64Randomlib/std/math/random/math.pcg.c3:47:9typestd::math::random::Pcg32Randomdistinct type Pcg32Randomlib/std/math/random/math.pcg.c3:76:9typestd::math::random::Pcg16Randomdistinct type Pcg16Randomlib/std/math/random/math.pcg.c3:104:9typestd::math::random::Msws128Randomstruct Msws128Random { uint128 state0, uint128 state1, uint128 weyl0, uint128 weyl1 }lib/std/math/random/math.msws.c3:11:8typestd::math::random::Msws64Randomstruct Msws64Random { ulong state0, ulong state1, ulong weyl0, ulong weyl1 }lib/std/math/random/math.msws.c3:49:8typestd::math::random::Msws32Randomstruct Msws32Random { uint state0, uint state1, uint weyl0, uint weyl1 }lib/std/math/random/math.msws.c3:85:8typestd::math::random::Msws16Randomstruct Msws16Random { ushort state0, ushort state1, ushort weyl0, ushort weyl1 }lib/std/math/random/math.msws.c3:123:8typestd::math::random::Msws8Randomstruct Msws8Random { char state0, char state1, char weyl0, char weyl1 }lib/std/math/random/math.msws.c3:160:8typestd::math::random::Xoshiro128palias Xoshiro128plib/std/math/random/math.xoshiro.c3:41:7typestd::math::random::Xoshiro128ppalias Xoshiro128pplib/std/math/random/math.xoshiro.c3:42:7typestd::math::random::Xoshiro128ssalias Xoshiro128sslib/std/math/random/math.xoshiro.c3:43:7typestd::math::random::Xoshiro256palias Xoshiro256plib/std/math/random/math.xoshiro.c3:45:7typestd::math::random::Xoshiro256ppalias Xoshiro256pplib/std/math/random/math.xoshiro.c3:46:7typestd::math::random::Xoshiro256ssalias Xoshiro256sslib/std/math/random/math.xoshiro.c3:47:7typestd::math::random::Xoshiro512palias Xoshiro512plib/std/math/random/math.xoshiro.c3:49:7typestd::math::random::Xoshiro512ppalias Xoshiro512pplib/std/math/random/math.xoshiro.c3:50:7typestd::math::random::Xoshiro512ssalias Xoshiro512sslib/std/math/random/math.xoshiro.c3:51:7typestd::math::random::Xoroshiro64salias Xoroshiro64slib/std/math/random/math.xoshiro.c3:53:7typestd::math::random::Xoroshiro64ssalias Xoroshiro64sslib/std/math/random/math.xoshiro.c3:54:7typestd::math::random::Xoroshiro128palias Xoroshiro128plib/std/math/random/math.xoshiro.c3:56:7typestd::math::random::Xoroshiro128ppalias Xoroshiro128pplib/std/math/random/math.xoshiro.c3:57:7typestd::math::random::Xoroshiro128ssalias Xoroshiro128sslib/std/math/random/math.xoshiro.c3:58:7typestd::math::random::Xoroshiro1024salias Xoroshiro1024slib/std/math/random/math.xoshiro.c3:60:7typestd::math::random::Xoroshiro1024ssalias Xoroshiro1024sslib/std/math/random/math.xoshiro.c3:61:7typestd::math::random::Xoroshiro1024ppalias Xoroshiro1024pplib/std/math/random/math.xoshiro.c3:62:7typestd::math::random::Lcg128Randomdistinct type Lcg128Randomlib/std/math/random/math.lcg.c3:16:9typestd::math::random::Lcg64Randomdistinct type Lcg64Randomlib/std/math/random/math.lcg.c3:43:9typestd::math::random::Lcg32Randomdistinct type Lcg32Randomlib/std/math/random/math.lcg.c3:70:9typestd::math::random::Lcg16Randomdistinct type Lcg16Randomlib/std/math/random/math.lcg.c3:93:9typestd::math::random::Mcg128Randomdistinct type Mcg128Randomlib/std/math/random/math.mcg.c3:10:9typestd::math::random::Mcg64Randomdistinct type Mcg64Randomlib/std/math/random/math.mcg.c3:43:9typestd::math::random::Mcg32Randomdistinct type Mcg32Randomlib/std/math/random/math.mcg.c3:74:9typestd::math::random::Mcg16Randomdistinct type Mcg16Randomlib/std/math/random/math.mcg.c3:100:9typestd::math::random::Sfc128Randomdistinct type Sfc128Randomlib/std/math/random/math.sfc.c3:13:9typestd::math::random::Sfc64Randomdistinct type Sfc64Randomlib/std/math/random/math.sfc.c3:43:9typestd::math::random::Sfc32Randomdistinct type Sfc32Randomlib/std/math/random/math.sfc.c3:72:9typestd::math::random::Sfc16Randomdistinct type Sfc16Randomlib/std/math/random/math.sfc.c3:101:9typestd::math::random::Sfc8Randomdistinct type Sfc8Randomlib/std/math/random/math.sfc.c3:132:9typestd::math::random::SplitMix64distinct type SplitMix64lib/std/math/random/splitmix64.c3:11:9typestd::math::random::SimpleRandomdistinct type SimpleRandomlib/std/math/random/math.simple_random.c3:3:9varstd::math::random::GOLDEN_RATIO_64ulong GOLDEN_RATIO_64 = 11400714819323198485lib/std/math/random/splitmix64.c3:13:13varstd::math::random::SILVER_RATIO_64ulong SILVER_RATIO_64 = 7640891576956012809lib/std/math/random/splitmix64.c3:14:13fnstd::math::quaternion::from_eulerfn QuaternionNumber from_euler{Real}(Real pitch, Real yaw, Real roll)lib/std/math/quaternion.c3:115:21fnstd::math::quaternion::from_axis_anglefn QuaternionNumber from_axis_angle{Real}(Real[<3>] axis, Real angle)lib/std/math/quaternion.c3:154:21fnstd::math::quaternion::from_normalized_rotationfn QuaternionNumber from_normalized_rotation{Real}(Real[<3>] from, Real[<3>] to)
 Create a quaternion transform from `from` to `to`, assuming they are not parallel and that they are normalized. Use `from_rotation` for non-normalized vectors.lib/std/math/quaternion.c3:194:21fnstd::math::quaternion::from_rotationfn QuaternionNumber from_rotation{Real}(Real[<3>] from, Real[<3>] to)
 Create a quaternion transform from `from` to `to`, assuming they are not parallel. Use `from_normalized_rotation` for normalized vectors.lib/std/math/quaternion.c3:205:21methodstd::math::quaternion::QuaternionNumber.to_formatfn sz? to_format{Real}(&self, Formatter* f)lib/std/math/quaternion.c3:26:25methodstd::math::quaternion::QuaternionNumber.is_normalizedfn bool is_normalized{Real}(self)lib/std/math/quaternion.c3:41:26methodstd::math::quaternion::QuaternionNumber.nlerpfn QuaternionNumber nlerp{Real}(self, QuaternionNumber q2, Real amount)lib/std/math/quaternion.c3:47:38methodstd::math::quaternion::QuaternionNumber.invertfn QuaternionNumber invert{Real}(self)lib/std/math/quaternion.c3:52:38methodstd::math::quaternion::QuaternionNumber.transformfn QuaternionNumber transform{Real}(self, Matrix4x4{Real} transform)lib/std/math/quaternion.c3:60:38methodstd::math::quaternion::QuaternionNumber.conjugatefn QuaternionNumber conjugate{Real}(self)lib/std/math/quaternion.c3:72:38methodstd::math::quaternion::QuaternionNumber.slerpfn QuaternionNumber slerp{Real}(self, QuaternionNumber q2, Real amount)lib/std/math/quaternion.c3:74:38methodstd::math::quaternion::QuaternionNumber.mulfn QuaternionNumber mul{Real}(self, QuaternionNumber b)lib/std/math/quaternion.c3:101:38methodstd::math::quaternion::QuaternionNumber.to_eulerfn Real[<3>] to_euler{Real}(self)
-Get the Euler angles equivalent to quaternion (roll, pitch, yaw) @return a vector containing { roll, pitch, yaw }lib/std/math/quaternion.c3:139:31methodstd::math::quaternion::QuaternionNumber.to_axis_anglefn Real[<4>] to_axis_angle{Real}(self)lib/std/math/quaternion.c3:166:31methodstd::math::quaternion::QuaternionNumber.rotate_vec3fn Real[<3>] rotate_vec3{Real}(self, Real[<3>] vector)lib/std/math/quaternion.c3:179:31mmethodstd::math::quaternion::QuaternionNumber.addmacro QuaternionNumber add{Real}(self, QuaternionNumber b)lib/std/math/quaternion.c3:33:41mmethodstd::math::quaternion::QuaternionNumber.add_eachmacro QuaternionNumber add_each{Real}(self, Real b)lib/std/math/quaternion.c3:34:41mmethodstd::math::quaternion::QuaternionNumber.submacro QuaternionNumber sub{Real}(self, QuaternionNumber b)lib/std/math/quaternion.c3:35:41mmethodstd::math::quaternion::QuaternionNumber.negatemacro QuaternionNumber negate{Real}(self)lib/std/math/quaternion.c3:36:41mmethodstd::math::quaternion::QuaternionNumber.sub_eachmacro QuaternionNumber sub_each{Real}(self, Real b)lib/std/math/quaternion.c3:37:41mmethodstd::math::quaternion::QuaternionNumber.scalemacro QuaternionNumber scale{Real}(self, Real s)lib/std/math/quaternion.c3:38:41mmethodstd::math::quaternion::QuaternionNumber.to_anglemacro to_angle{Real}(self)lib/std/math/quaternion.c3:39:24mmethodstd::math::quaternion::QuaternionNumber.normalizemacro QuaternionNumber normalize{Real}(self)lib/std/math/quaternion.c3:40:41mmethodstd::math::quaternion::QuaternionNumber.equalsmacro bool equals{Real}(self, QuaternionNumber other)lib/std/math/quaternion.c3:42:29mmethodstd::math::quaternion::QuaternionNumber.not_equalsmacro bool not_equals{Real}(self, QuaternionNumber other)lib/std/math/quaternion.c3:43:29mmethodstd::math::quaternion::QuaternionNumber.lengthmacro Real length{Real}(self)lib/std/math/quaternion.c3:44:29mmethodstd::math::quaternion::QuaternionNumber.length_sqmacro Real length_sq{Real}(self)lib/std/math/quaternion.c3:45:29mmethodstd::math::quaternion::QuaternionNumber.lerpmacro QuaternionNumber lerp{Real}(self, QuaternionNumber q2, Real amount)lib/std/math/quaternion.c3:46:41mmethodstd::math::quaternion::QuaternionNumber.to_matrixmacro Matrix4x4{Real} to_matrix{Real}(&self)lib/std/math/quaternion.c3:49:40typestd::math::quaternion::Quaternionfalias Quaternionflib/std/math/quaternion.c3:4:7typestd::math::quaternion::Quaternionalias Quaternionlib/std/math/quaternion.c3:5:7typestd::math::quaternion::Quatalias Quatlib/std/math/quaternion.c3:7:7typestd::math::quaternion::QuaternionNumberunion QuaternionNumber{Real} { , Real[<4>] v }lib/std/math/quaternion.c3:17:7varstd::math::quaternion::IDENTITYQuaternionNumber IDENTITY = { 0, 0, 0, 1 }lib/std/math/quaternion.c3:31:24
+Get the Euler angles equivalent to quaternion (roll, pitch, yaw) @return a vector containing { roll, pitch, yaw }lib/std/math/quaternion.c3:139:31methodstd::math::quaternion::QuaternionNumber.to_axis_anglefn Real[<4>] to_axis_angle{Real}(self)lib/std/math/quaternion.c3:166:31methodstd::math::quaternion::QuaternionNumber.rotate_vec3fn Real[<3>] rotate_vec3{Real}(self, Real[<3>] vector)lib/std/math/quaternion.c3:179:31mmethodstd::math::quaternion::QuaternionNumber.addmacro QuaternionNumber add{Real}(self, QuaternionNumber b)lib/std/math/quaternion.c3:33:41mmethodstd::math::quaternion::QuaternionNumber.add_eachmacro QuaternionNumber add_each{Real}(self, Real b)lib/std/math/quaternion.c3:34:41mmethodstd::math::quaternion::QuaternionNumber.submacro QuaternionNumber sub{Real}(self, QuaternionNumber b)lib/std/math/quaternion.c3:35:41mmethodstd::math::quaternion::QuaternionNumber.negatemacro QuaternionNumber negate{Real}(self)lib/std/math/quaternion.c3:36:41mmethodstd::math::quaternion::QuaternionNumber.sub_eachmacro QuaternionNumber sub_each{Real}(self, Real b)lib/std/math/quaternion.c3:37:41mmethodstd::math::quaternion::QuaternionNumber.scalemacro QuaternionNumber scale{Real}(self, Real s)lib/std/math/quaternion.c3:38:41mmethodstd::math::quaternion::QuaternionNumber.to_anglemacro to_angle{Real}(self)lib/std/math/quaternion.c3:39:24mmethodstd::math::quaternion::QuaternionNumber.normalizemacro QuaternionNumber normalize{Real}(self)lib/std/math/quaternion.c3:40:41mmethodstd::math::quaternion::QuaternionNumber.equalsmacro bool equals{Real}(self, QuaternionNumber other)lib/std/math/quaternion.c3:42:29mmethodstd::math::quaternion::QuaternionNumber.not_equalsmacro bool not_equals{Real}(self, QuaternionNumber other)lib/std/math/quaternion.c3:43:29mmethodstd::math::quaternion::QuaternionNumber.lengthmacro Real length{Real}(self)lib/std/math/quaternion.c3:44:29mmethodstd::math::quaternion::QuaternionNumber.length_sqmacro Real length_sq{Real}(self)lib/std/math/quaternion.c3:45:29mmethodstd::math::quaternion::QuaternionNumber.lerpmacro QuaternionNumber lerp{Real}(self, QuaternionNumber q2, Real amount)lib/std/math/quaternion.c3:46:41mmethodstd::math::quaternion::QuaternionNumber.to_matrixmacro Matrix4x4{Real} to_matrix{Real}(&self)lib/std/math/quaternion.c3:49:40typestd::math::quaternion::Quaternionfalias Quaternionflib/std/math/quaternion.c3:4:7typestd::math::quaternion::Quaternionalias Quaternionlib/std/math/quaternion.c3:5:7typestd::math::quaternion::Quatalias Quatlib/std/math/quaternion.c3:7:7typestd::math::quaternion::QuaternionNumberunion QuaternionNumber{Real} { , Real[<4>] v }lib/std/math/quaternion.c3:17:7varstd::math::quaternion::IDENTITYQuaternionNumber IDENTITY = { 0, 0, 0, 1 }lib/std/math/quaternion.c3:31:24varstd::core::mem::allocators::memalias mem = thread_allocator
+The default heap allocator for the current thread.lib/std/core/allocators.c3:19varstd::core::mem::allocators::tmemalias tmem = current_temp
+The current thread's active temp allocator, see `push_pool`/`pop_pool` and `@pool`.lib/std/core/allocators.c3:24varstd::math::COMPLEX_IDENTITYalias COMPLEX_IDENTITY = complex::IDENTITY {double}lib/std/math/complex.c3:7varstd::math::COMPLEXF_IDENTITYalias COMPLEXF_IDENTITY = complex::IDENTITY {float}lib/std/math/complex.c3:8varstd::math::Ialias I = complex::IMAGINARY { double }lib/std/math/complex.c3:10varstd::math::I_Falias I_F = complex::IMAGINARY { float }lib/std/math/complex.c3:11

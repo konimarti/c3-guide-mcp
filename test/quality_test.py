@@ -24,6 +24,9 @@ CASES = [
     ("c3_symbol", "HashMap", "HashMap"),
     ("c3_symbol", "tnew_array", "does not exist"),
     # descriptions instead of names: words in the name or in the doc comment; `top` shows five symbols
+    # compiler-known aliases that docgen does not list
+    ("c3_symbol", "tmem", "alias tmem = current_temp"),
+    ("c3_symbol", "mem", "alias mem = thread_allocator"),
     ("c3_symbol", "read line", "std::io::readline"),
     ("c3_symbol", "File.read_line", "std::io::readline"),
     ("c3_symbol", "sort array", "std::sort::quicksort"),

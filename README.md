@@ -24,6 +24,33 @@ model:  c3_symbol("read line")    ->  std::io::readline: macro String? readline(
 
 Replies of the four docs tools are capped at 3.2 KB, `c3_check` at 4 KB. A server that dumps pages into the context makes the model worse.
 
+## Use it
+
+The tools work best when the model is told to use them. Put this in your `CLAUDE.md`, `AGENTS.md`, Cursor rule or system prompt:
+
+```text
+You write C3 (c3c 0.8.5). Your memory of C3 is out of date: 0.8 changed syntax
+and the standard library, and guessed signatures usually do not compile.
+
+- Before you call a standard library function, macro or method, look it up with
+  c3_symbol. If you do not know its name, describe what you need
+  ("read line from stdin", "get environment variable").
+- If c3_symbol says a name does not exist, believe it and use what it suggests.
+- If you are unsure about syntax, use c3_search (manual), c3_changes (what changed
+  in a release) or c3_syntax (attributes, builtins, keywords).
+- Run every program through c3_check and fix all errors before you show it.
+  Do not say the code works until c3_check says OK.
+```
+
+A task prompt can then stay short:
+
+```text
+Write a C3 program that takes a file name, counts the lines of the file and prints
+"lines: N". Handle a missing argument and a file that cannot be opened.
+```
+
+In our small comparisons (4 runs per round with and without the tools, same prompt) the runs with the tools compiled on the first or second try. Without them the models guessed `File.open` and `File.read_line`, which do not exist, and one run did not get clean in 12 compiler runs. That is a handful of runs on a small model, not a benchmark, but it is the failure the server is built for.
+
 ## Install
 
 Download the archive for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, Windows x64), check it against `SHA256SUMS`, unpack it. The binary is built for **c3c 0.8.5** (its docs snapshot is embedded). Only `c3_check` needs `c3c`: put it on `PATH` or set `C3C`. Without it the four docs tools still work.
@@ -78,7 +105,7 @@ python3 test/mutation_test.py                 # breaks the code 12 ways; every b
 ## Limits
 
 - The docs and the compiler do not always agree (the manual says `excuse`, other pages `faultdef`; the compiler accepts both). When they differ, `c3_check` is right.
-- Search is keyword based: it finds "Macro vaargs" for "vararg", but not a paraphrase with different words. This is sharper for symbols: `read line` finds `readline`, but `create directory` does not find `mkdir`, and many stdlib functions have no doc comment, so only their name can match.
+- Search is keyword based: it finds "Macro vaargs" for "vararg", but not a paraphrase with different words. This is sharper for symbols: `read line` finds `readline`, but `create directory` does not find `mkdir`, and many stdlib functions have no doc comment, so only their name can match. `temp allocator` lists `TempAllocator` before the alias `tmem`; ask for `tmem` by name.
 - A killed server leaves its temp directory behind; the next `c3_check` removes `c3guide-*` directories older than an hour.
 - CI builds and runs a smoke test on Linux x64, macOS arm64 and Windows x64; the full suite runs on Linux and macOS. Only Linux x64 was also tested by hand.
 - Used from Hermes (`hermes mcp test` and real sessions). The Claude Code, Claude Desktop and Cursor lines above follow their documented formats but were not tried.
