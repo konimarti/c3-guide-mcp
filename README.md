@@ -75,18 +75,20 @@ python3 scripts/gen_corpus.py /path/to/c3 all.md && c3c build c3-guide-mcp -O3
 
 ## Recipes
 
-`recipes/*.c3` are small complete programs for the things models get wrong most: files, directories, HashMap, List, strings, sorting, faults, enums, macros, generics, threads, processes. The first line is the title, `// expect:` lines are the output. `test/recipes_test.py` compiles and runs each one, so a recipe the server shows has worked on the pinned compiler. To add one, write the file, run the test, and regenerate the snapshot (`scripts/gen_corpus.py`).
+`recipes/*.c3` are small complete programs for the things models get wrong most: files, directories, HashMap, List, strings, sorting, faults, enums, macros, generics, threads, processes. The first line is the title, `// expect:` lines are the output. `test/recipes_test.c3` compiles and runs each one, so a recipe the server shows has worked on the pinned compiler. To add one, write the file, run `c3c test c3-guide-mcp`, and regenerate the snapshot (`scripts/gen_corpus.py`).
 
 ## Tests
 
 ```
-C3C=/path/to/c3c python3 test/stdio_test.py   # every tool over stdio, protocol errors, $exec guard
-python3 test/limits_test.py                   # hanging and flooding compilers
-python3 test/quality_test.py                  # 58 questions, expected answer in the reply (top 3 hits for search)
-python3 test/growth_test.py                   # memory over 4,000 calls
-python3 test/recipes_test.py                  # every recipe compiles and prints what it says
-python3 test/mutation_test.py                 # breaks the code 15 ways; every break must fail a test (slow)
+C3C=/path/to/c3c c3c test c3-guide-mcp   # the C3 test runner: tools, search quality, c3_check and its limits, every recipe
+python3 test/stdio_test.py               # JSON-RPC over the built binary
+python3 test/smoke.py                    # the same binary, one call per tool
+python3 test/growth_test.py              # memory over 4,000 calls
+python3 test/corpus_test.py /path/to/c3  # the snapshot matches the installed c3c
+python3 test/mutation_test.py            # breaks the code 15 ways; every break must fail a test (slow)
 ```
+
+`c3c test` needs `sh` and takes about 40 s: two tests wait out the 10 s compiler deadline, and the recipes test compiles all recipes. The tests are `@test` functions in `test/*.c3` and call the tool functions directly, so no binary has to be built first.
 
 ## Limits
 

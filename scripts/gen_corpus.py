@@ -138,7 +138,7 @@ def aliases(c3):
     return out
 
 def recipes():
-    """recipes/*.c3: small programs that compile and print what their `// expect:` lines say (test/recipes_test.py runs them)."""
+    """recipes/*.c3: small programs that compile and print what their `// expect:` lines say (test/recipes_test.c3 runs them)."""
     out, here = [], os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "recipes")
     for fn in sorted(os.listdir(here)):
         if not fn.endswith(".c3"):

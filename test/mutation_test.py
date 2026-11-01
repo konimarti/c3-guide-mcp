@@ -29,9 +29,8 @@ try:
         b = subprocess.run([C3C, "build", "c3-guide-mcp", "-O3"], cwd=root, capture_output=True, text=True)
         caught = []
         if b.returncode == 0:
-            for t in ("stdio", "limits", "quality"):
-                r = subprocess.run(["python3", "test/%s_test.py" % t], cwd=root, capture_output=True, text=True, env=env, timeout=200)
-                if r.returncode != 0: caught.append(t)
+            r = subprocess.run([C3C, "test", "c3-guide-mcp"], cwd=root, capture_output=True, text=True, env=env, timeout=600)
+            if r.returncode != 0: caught = [l.split("::")[-1].split(" ")[0] for l in r.stdout.splitlines() if "FAIL" in l and l.startswith("Testing")] or ["c3c test"]
         else:
             caught = ["BUILD BROKEN"]
         print("%-24s %s" % (name, ", ".join(caught) or "NOT CAUGHT"), flush=True)

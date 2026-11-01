@@ -4,6 +4,7 @@
   "authors": ["Koni Marti <koni.marti@gmail.com>"],
   "version": "0.1.0",
   "sources": ["src/**"],
+  "test-sources": ["test/**"],
   "dependency-search-paths": ["deps"],
   "dependencies": [ "mcp" ],
   "build-dir": "build",
