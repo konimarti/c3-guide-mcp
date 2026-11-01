@@ -14,7 +14,7 @@ Trust the compiler over this documentation when they disagree.`;
 fn void main()
 {
 	corpus::load();
-	mcp::Server server = mcp::new_server("c3-guide-mcp", "0.2.0");
+	mcp::Server server = mcp::new_server("c3-guide-mcp", "0.3.0");
 	server.instructions = INSTRUCTIONS;
 	defer server.free();
 	tools::register(&server);
