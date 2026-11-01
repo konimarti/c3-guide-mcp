@@ -1,6 +1,6 @@
 module c3guide::tools;
 import mcp, std::core::string;
-import c3guide::corpus, c3guide::search;
+import c3guide::corpus, c3guide::search, c3guide::util;
 import std::sort;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
@@ -8,26 +8,17 @@ const sz MAX_REPLY = 3200;
 const sz MAX_SNIPPET = 900;
 const String[*] SYMBOL_KINDS = { "fn", "macro", "method", "mmethod", "type", "var" };
 
-// Cut at a line boundary below `max` bytes.
-fn String clip(String s, sz max)
-{
-	if (s.len <= max) return s;
-	String head = s[:max];
-	sz cut = head.rindex_of("\n") ?? max;
-	return string::tformat("%s\n[...cut]", head[:cut]);
-}
-
 fn String hit_text(Entry* e, sz snippet)
 {
 	String loc = e.loc.len > 0 ? string::tformat("  (%s)", e.loc) : "";
-	return string::tformat("### %s%s\n%s\n", e.title, loc, clip(e.body, snippet));
+	return string::tformat("### %s%s\n%s\n", e.title, loc, util::clip(e.body, snippet));
 }
 
 fn String format_hits(Hit[] hits, sz snippet)
 {
 	DString out = dstring::temp();
 	foreach (h : hits) out.append(hit_text(&corpus::entries[h.idx], snippet));
-	return clip(out.str_view(), MAX_REPLY);
+	return util::clip(out.str_view(), MAX_REPLY);
 }
 
 // "C3C Release Notes > 0.8.5 Change list > Fixes" -> 800005 (0.8.5), so newer versions sort higher.
@@ -58,7 +49,7 @@ fn String matching_lines(String body, String[] terms, bool all)
 		int hit = 0;
 		foreach (t : terms) if (low.contains(t)) hit++;
 		if (hit == 0 || (all && hit < terms.len)) continue;
-		out.appendf("%s\n", clip(line, 240));
+		out.appendf("%s\n", util::clip(line, 240));
 		n++;
 	}
 	return out.str_view();
@@ -105,7 +96,7 @@ fn String c3_changes(String topic @Desc("keyword, e.g. 'foreach', 'faultdef', 't
 		if (shown > 0) break;
 	}
 	if (out.len() == 0) return "nothing in the release notes";
-	return clip(out.str_view(), MAX_REPLY);
+	return util::clip(out.str_view(), MAX_REPLY);
 }
 
 fn String c3_syntax(String topic @Desc("one of: attributes, builtins, keywords, type-properties, operators, precedence; or a word to find in them"))
@@ -116,14 +107,14 @@ fn String c3_syntax(String topic @Desc("one of: attributes, builtins, keywords, 
 	foreach (&e : corpus::entries)
 	{
 		if (e.kind != "list") continue;
-		if (e.title == topic) return clip(e.body, MAX_REPLY);
+		if (e.title == topic) return util::clip(e.body, MAX_REPLY);
 		foreach (line : e.body.tsplit("\n"))
 		{
 			if (line.contains(topic)) out.appendf("%s: %s\n", e.title, line);
 		}
 	}
 	if (out.len() == 0) return "no such list or entry; lists: attributes, builtins, keywords, type-properties, operators, precedence";
-	return clip(out.str_view(), MAX_REPLY);
+	return util::clip(out.str_view(), MAX_REPLY);
 }
 
 // "std::io::printfn" -> "printfn", "std::core::string::String.split" -> "split"
@@ -155,6 +146,7 @@ fn String c3_symbol(String name @Desc("stdlib symbol, e.g. 'printfn', 'io::print
 	@ReadOnly
 {
 	String n = name.trim(" \t\n");
+	if (n.len == 0) return "give a symbol name, e.g. printfn or String.split";
 	DString out = dstring::temp();
 	int found = 0;
 	foreach (&e : corpus::entries)
@@ -165,7 +157,7 @@ fn String c3_symbol(String name @Desc("stdlib symbol, e.g. 'printfn', 'io::print
 	if (found > 0)
 	{
 		if (found > 6) out.appendf("[%d more matches; qualify the name, e.g. io::%s]\n", found - 6, n);
-		return clip(out.str_view(), MAX_REPLY);
+		return util::clip(out.str_view(), MAX_REPLY);
 	}
 	// not found: say so (a model must not assume a guessed API exists), then offer close names
 	out.appendf("'%s' does not exist in the standard library of c3c %s.\n", n, corpus::snapshot_version);
@@ -187,7 +179,7 @@ fn String c3_symbol(String name @Desc("stdlib symbol, e.g. 'printfn', 'io::print
 		if (hits.len > 0) out.append("Related symbols:\n");
 		foreach (h : hits) out.appendf("  %s\n", corpus::entries[h.idx].title);
 	}
-	return clip(out.str_view(), MAX_REPLY);
+	return util::clip(out.str_view(), MAX_REPLY);
 }
 
 fn void register(mcp::Server* s)

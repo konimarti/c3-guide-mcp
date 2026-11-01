@@ -27,10 +27,14 @@ fn int count_terms(String text, String[] terms, int[] tf)
 		sz s = i;
 		while (i < text.len && is_word(text[i])) i++;
 		words++;
+		sz full = s;
+		while (s < i && (text[s] == '@' || text[s] == '$')) s++;   // `@require` in the manual also counts as `require`
 		String w = text[s:i - s];
+		String wf = text[full:i - full];
 		foreach (k, t : terms)
 		{
-			if (matches_term(w, t)) tf[k]++;
+			bool marked = t[0] == '@' || t[0] == '$';
+			if (matches_term(marked ? wf : w, t)) tf[k]++;
 		}
 	}
 	return words;
@@ -70,11 +74,14 @@ fn String[] query_terms(String query)
 	out.init(tmem);
 	foreach (w : query.tsplit(" "))
 	{
-		String t = w.trim("@$ \t\n,.?!");
-		if (t.len == 0) continue;
-		String low = canonical(t.to_lower_tcopy());
+		String t = w.trim(" \t\n,.?!");
+		bool marked = t.starts_with("@") || t.starts_with("$");   // `$for`, `@require`: a name, not filler
+		String bare = t.trim("@$");
+		if (bare.len == 0) continue;
+		// a marked term keeps its marker and then only matches the same marked word in the text
+		String low = marked ? string::tformat("%c%s", t[0], canonical(bare.to_lower_tcopy())) : canonical(bare.to_lower_tcopy());
 		bool stop = false;
-		foreach (sw : STOPWORDS) if (sw == low) stop = true;
+		if (!marked) foreach (sw : STOPWORDS) if (sw == low) stop = true;
 		if (!stop) out.push(low);
 	}
 	return out.array_view();

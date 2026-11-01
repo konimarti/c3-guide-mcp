@@ -21,11 +21,11 @@ model:  c3_symbol("file::open")  ->  fn File? open(String filename, String mode)
 | `c3_syntax(topic)` | the compiler's lists: attributes, builtins, keywords, type properties, operators |
 | `c3_check(code)` | the compiler's diagnostics for a snippet (type-check only, nothing is linked or run) |
 
-Every reply is capped at about 3 KB. A server that dumps pages into the context makes the model worse.
+Replies of the four docs tools are capped at 3.2 KB, `c3_check` at 4 KB. A server that dumps pages into the context makes the model worse.
 
 ## Build and use
 
-Needs `c3c` 0.8.x and [mcp.c3l](https://github.com/konimarti/mcp.c3l) in `deps/mcp.c3l`.
+Needs [c3c](https://github.com/c3lang/c3c) 0.8.5 (the snapshot and the tests are built for exactly this version; `c3c` must be on `PATH`, or set `C3C`) and [mcp.c3l](https://github.com/konimarti/mcp.c3l) in `deps/mcp.c3l`.
 
 ```
 git clone https://github.com/konimarti/mcp.c3l deps/mcp.c3l
@@ -45,10 +45,11 @@ The docs are a snapshot embedded in the binary (`$embed`, 1.8 MB, 7,283 entries)
 The snapshot belongs to one `c3c` version (printed in its header). After a compiler update:
 
 ```
-python3 scripts/gen_corpus.py /path/to/c3 [all.md] && c3c build c3-guide-mcp -O3
+curl -o all.md https://c3-lang.org/all.md      # optional: adds the sections the manual lacks (22 in 0.8.5)
+python3 scripts/gen_corpus.py /path/to/c3 all.md && c3c build c3-guide-mcp -O3
 ```
 
-`c3_check` runs `c3c --trust=none --no-obj` on the snippet in a fresh temp directory, killed after 10 s, output capped at 4 KB. `$exec` in a snippet does not run (tested, with a positive control).
+`c3_check` runs `c3c --trust=none --no-obj` on the snippet in a fresh temp directory, killed after 10 s, output capped at 4 KB. `$exec` does not run (tested, with a positive control). `--trust=none` still allows `$embed`, which with `$echo` can print any file the server can read, so snippets containing `$embed`, `$include` or `$exec` are rejected before they reach the compiler. The server is not a sandbox: run it as a user without secrets.
 
 ## Tests
 
@@ -57,11 +58,13 @@ C3C=/path/to/c3c python3 test/stdio_test.py   # every tool over stdio, protocol 
 python3 test/limits_test.py                   # hanging and flooding compilers
 python3 test/quality_test.py                  # 20 questions, expected answer in the top 3
 python3 test/growth_test.py                   # memory over 4,000 calls
+python3 test/mutation_test.py                 # breaks the code 8 ways; every break must fail a test (slow)
 ```
 
 ## Limits
 
 - The docs and the compiler do not always agree (the manual says `excuse`, other pages `faultdef`; the compiler accepts both). When they differ, `c3_check` is right.
 - Search is keyword based: it finds "Macro vaargs" for "vararg", but not a paraphrase with different words.
+- A killed server leaves its temp directory (`c3guide-*` in `$TMPDIR`) behind; it is tiny and the next call does not need it.
 - Only Linux x64 was tested. `c3_check` needs the `timeout` program.
 - Tested with `hermes mcp test` and tool calls from a Hermes session; no other client yet.

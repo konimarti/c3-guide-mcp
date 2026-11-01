@@ -4,7 +4,7 @@ python3 test/quality_test.py  (prints the score; fails below the threshold)"""
 import json, os, subprocess, sys
 
 BIN = os.path.join(os.path.dirname(__file__), "..", "build", "c3-guide-mcp")
-THRESHOLD = 0.9
+THRESHOLD = 1.0   # a regression set: every question must keep working
 
 # (tool, argument, substring expected in one of the top-3 results)
 CASES = [
@@ -28,6 +28,8 @@ CASES = [
     ("c3_changes", "type properties", "propert"),
     ("c3_changes", "void! main", "main"),
     ("c3_syntax", "attributes", "@noreturn"),
+    ("c3_search", "@require", "@require"),
+    ("c3_search", "$for", "$for"),
 ]
 
 def ask(calls):

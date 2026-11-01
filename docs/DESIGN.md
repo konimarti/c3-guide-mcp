@@ -14,6 +14,7 @@ Each entry: decision, why, what it costs.
 - **Record format: `\x1e`/`\x1f` separators in one text blob.** No JSON parser at startup, entries are slices into the blob (one allocation for the table).
 
 ## Search
+- **`@name` and `$name` are words of their own.** A marked query term only matches the marked word (`$for` is not the stopword `for`), while the text index also counts `@require` as `require`. Found by a reviewer.
 - **BM25 scan over all entries per query, no index.** About 10 ms for 7,283 entries; an index would be more code and a second thing to keep in sync. Revisit if the corpus grows 10x.
 - **Title hits count extra; stopwords and plural/spelling aliases (`vararg` to `vaarg`) are handled in `query_terms`.** Found by a failing question, not by guessing.
 - **`c3_changes` shows only matching bullets, newest version first.** A whole release-note section answered nothing; old and new syntax mixed up.
@@ -22,7 +23,8 @@ Each entry: decision, why, what it costs.
 ## Safety of `c3_check`
 - Fixed command line: `--trust=none` (no `$exec`/`$include`), `--no-obj --no-entry` (nothing emitted or linked), `timeout 10`, output cap 4 KB with kill and `join`. Compiler path only from `C3C`/`PATH`, never from the caller. Snippet in a fresh temp dir, removed after the call, path redacted from the output.
 - Tested with a payload that touches a marker file plus a positive control under `--trust=full`.
-- Known limit: a compiler that is slower than 10 s is cut, a compiler bomb below that limit is not.
+- **`$embed`/`$include`/`$exec` are rejected by a text check.** Found by a reviewer: `--trust=none` blocks `$exec` but allows `$embed`, and `$echo` prints at compile time, so `$embed("/etc/passwd")` was readable byte by byte (reproduced, positive control: the compiler does it by itself). The three tokens cannot be spelled another way (`$eval` only builds identifiers). A real sandbox (bwrap, a container) would be stronger and is the user's job.
+- Known limits: a compiler that is slower than 10 s is cut, a compiler bomb below that limit is not; a killed server leaves one temp directory.
 
 ## c3c 0.8.5 findings
 - `String.replace` returned corrupted bytes for a 4 KB text without a match; `redact()` in check.c3 replaces it. Worth a bug report upstream.
@@ -38,4 +40,5 @@ Each entry: decision, why, what it costs.
 
 ## Open
 - Version follow-up: the server warns nothing when `c3c --version` differs from the snapshot.
+- The default (non-`-O3`) build of the first release candidate produced 0xAA bytes (invalid UTF-8) in `c3_check` replies; after the `clip`/`run_capped` rewrite it no longer does and the whole suite passes on both builds. The exact line was not isolated: treat any debug-build failure as a bug.
 - `all.md` is a manual download; the generator takes it as an optional argument.

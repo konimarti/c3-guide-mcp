@@ -3,7 +3,8 @@
 
 usage: scripts/gen_corpus.py [C3_DIR] [all.md]
   C3_DIR  c3c install dir (MANUAL.md, releasenotes.md, lib/std, c3c); default: dir of `c3c` on PATH
-  all.md  optional copy of https://c3-lang.org/all.md; only sections absent from MANUAL.md are kept
+  all.md  optional copy of https://c3-lang.org/all.md (curl -o all.md https://c3-lang.org/all.md);
+          only sections absent from MANUAL.md are kept. The committed snapshot was built WITH it.
 
 Record format (parsed by src/corpus.c3): records end with \\x1e, fields split by \\x1f:
   kind, title, body, loc
@@ -16,8 +17,16 @@ RS, US = "\x1e", "\x1f"
 
 def c3_dir():
     if len(sys.argv) > 1:
-        return sys.argv[1]
-    return os.path.dirname(os.path.realpath(shutil.which("c3c")))
+        d = sys.argv[1]
+    else:
+        exe = shutil.which("c3c")
+        if not exe:
+            sys.exit("give the c3c install dir as first argument (or put c3c on PATH)")
+        d = os.path.dirname(os.path.realpath(exe))
+    for f in ("c3c", "MANUAL.md", "releasenotes.md", "lib/std"):
+        if not os.path.exists(os.path.join(d, f)):
+            sys.exit(f"{d} is not a c3c install dir: {f} is missing")
+    return d
 
 def chunk_md(text, min_level=1):
     """Split at headings (ignoring fenced code), keep breadcrumb titles, cap size at blank lines."""
@@ -50,8 +59,11 @@ def chunk_md(text, min_level=1):
     flush()
     return out
 
+CWD = os.getcwd()
+
 def clean(s):
-    return s.replace(RS, " ").replace(US, " ")
+    # docgen evaluates $$PROJECT_PATH and similar: keep the machine's paths out of the snapshot
+    return s.replace(RS, " ").replace(US, " ").replace(CWD, "<project>")
 
 def rec(kind, title, body, loc=""):
     return RS.join([US.join(clean(x) for x in (kind, title, body, loc)), ""])
@@ -129,9 +141,10 @@ def main():
     syms = symbols(c3)
     recs += syms
     meta = rec("meta", "c3c", ver, f"records={len(recs)}")
-    os.makedirs("data", exist_ok=True)
-    with open("data/corpus.rs", "w", encoding="utf-8") as f:
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "corpus.rs")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
         f.write(meta + "".join(recs))
-    print(f"c3c {ver}: {len(recs)} records ({len(syms)} symbols), data/corpus.rs = {os.path.getsize('data/corpus.rs')/1024:.0f} KB")
+    print(f"c3c {ver}: {len(recs)} records ({len(syms)} symbols), {out} = {os.path.getsize(out)/1024:.0f} KB")
 
 main()

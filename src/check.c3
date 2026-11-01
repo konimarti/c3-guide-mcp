@@ -1,5 +1,6 @@
 module c3guide::check;
 import mcp, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
+import c3guide::util;
 
 // Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
 // fresh temp dir and compiled with a FIXED command line:
@@ -7,8 +8,14 @@ import mcp, std::core::string, std::io, std::io::path, std::io::file, std::os::p
 //   --no-obj      nothing is emitted or linked, so nothing can run
 //   timeout 10    a compile-time loop in the snippet cannot hang the server
 // The compiler binary is not a tool argument: C3C env var, else "c3c" from PATH.
+//
+// `--trust=none` still allows $embed, and $echo prints to stdout, so a snippet could read any file the
+// server can read and print it byte by byte. Snippets that mention $embed, $include or $exec are
+// rejected before they reach the compiler (the tokens cannot be spelled any other way: $eval only
+// builds identifiers). Do not run the server as a user that can read secrets regardless.
 const sz MAX_CODE = 32 * 1024;
 const sz MAX_OUTPUT = 4 * 1024;
+const String[*] FORBIDDEN = { "$embed", "$include", "$exec" };
 
 fn String c3c_binary()
 {
@@ -18,12 +25,14 @@ fn String c3c_binary()
 }
 
 // Run argv (no shell), capture stdout+stderr up to MAX_OUTPUT, kill the child past that, always join.
-fn String? run_capped(String[] cmd)
+// *code gets the exit status (0 when the child was killed because of the cap).
+fn String? run_capped(String[] cmd, int* code)
 {
 	Process p = process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT | process::SpawnOptions.INHERIT_ENV)!;
 	defer (void)p.destroy();
 	DString out = dstring::temp();
 	char[2048] buf;
+	bool capped = false;
 	while (true)
 	{
 		sz? n = p.read_stdout(&buf, buf.len);
@@ -33,15 +42,19 @@ fn String? run_capped(String[] cmd)
 		out.append((String)buf[:n > room ? room : n]);
 		if (out.len() >= MAX_OUTPUT)
 		{
-			out.append("\n[output cut]");
+			capped = true;
 			(void)p.terminate();
 			break;
 		}
 	}
-	int code = p.join()!;
-	if (code == 127) return "c3c not found: set the C3C environment variable to its path or put c3c on PATH";
-	if (code == 124) out.append("\n[timeout: the compiler ran longer than 10 s]");
-	return out.str_view();
+	*code = p.join()!;
+	String s = out.str_view();
+	if (capped)
+	{
+		*code = 0;
+		return string::tformat("%s\n[output cut]", s[:util::utf8_boundary(s, s.len)]);
+	}
+	return s;
 }
 
 // Replace every `needle` in `s` by "<code>". (std String.replace returned corrupted bytes for a 4 KB
@@ -66,22 +79,31 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	@Timeout(30000)
 {
 	if (code.len == 0 || code.len > MAX_CODE) return "give 1 to 32768 bytes of code";
-	@pool()
+	foreach (f : FORBIDDEN)
 	{
-		Path? tmp = path::temp_directory(tmem);
-		if (catch tmp) return "no temp directory available";
-		Path? dir = tmp.tappend(string::tformat("c3guide-%d", (int)(clock::now() % 1000000000)));
-		if (catch dir) return "cannot create a temp path";
-		if (catch path::mkdir(dir)) return "cannot create a temp directory";
-		defer (void)path::rmtree(dir);
-		String file = string::tformat("%s/snippet.c3", (String)dir);
-		if (catch file::save(file, code)) return "cannot write the snippet";
-		String[] argv = { "timeout", "10", c3c_binary(), "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", file };
-		String? out = run_capped(argv);
-		if (catch out) return "could not start c3c (set the C3C environment variable to its path)";
-		String shown = redact(out, (String)dir);
-		return shown.trim().len == 0 ? "OK: no errors" : shown;
-	};
+		if (code.contains(f)) return string::tformat("rejected: %s reads files or runs programs at compile time and is not allowed here", f);
+	}
+	// No @pool here: the result lives in the caller's temp memory (a nested pool would free it on return).
+	Path? tmp = path::temp_directory(tmem);
+	if (catch tmp) return "no temp directory available";
+	Path? dir = tmp.tappend(string::tformat("c3guide-%d", (int)(clock::now() % 1000000000)));
+	if (catch dir) return "cannot create a temp path";
+	if (catch path::mkdir(dir)) return "cannot create a temp directory";
+	defer (void)path::rmtree(dir);
+	String file = string::tformat("%s/snippet.c3", (String)dir);
+	if (catch file::save(file, code)) return "cannot write the snippet";
+	String[] argv = { "timeout", "10", c3c_binary(), "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", file };
+	int status = 0;
+	String? out = run_capped(argv, &status);
+	if (catch out) return "could not start `timeout` or c3c (set the C3C environment variable to the c3c path; `timeout` must be on PATH)";
+	if (status == 127) return "c3c not found: set the C3C environment variable to its path or put c3c on PATH";
+	String shown = redact(out, (String)dir);
+	if (status == 124) shown = string::tformat("%s\n[timeout: the compiler ran longer than 10 s]", shown);
+	if (shown.trim().len == 0)
+	{
+		return status == 0 ? "OK: no errors" : string::tformat("c3c failed (exit code %d) without a message", status);
+	}
+	return shown;
 }
 
 fn void register(mcp::Server* s)

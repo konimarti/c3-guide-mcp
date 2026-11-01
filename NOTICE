@@ -1,0 +1,11 @@
+c3-guide-mcp contains material from other projects:
+
+- data/corpus.rs is a snapshot generated from the C3 project (https://github.com/c3lang/c3c and
+  https://c3-lang.org): the language manual, the release notes, and the documentation and signatures
+  of the standard library. The C3 project licenses everything outside the compiler source (src/) under
+  the MIT license; this includes the standard library and its documentation. The snapshot is
+  Copyright (c) the C3 contributors.
+- deps/mcp.c3l (not part of this repository, fetched at build time) is the MCP SDK by Koni Marti, MIT.
+
+The compiler c3c itself (LGPL 3.0) is not included or linked: c3_check starts it as a separate process
+from the user's installation.

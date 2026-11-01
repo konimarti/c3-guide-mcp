@@ -49,6 +49,8 @@ calls = [
     ("c3_check", {"code": ""}),
     ("c3_check", {"code": "fn void f() { $for (int i = 0; i < 10; i++): $endfor }" + " " * 40000}),
 ]
+import glob, tempfile as _t
+before = set(glob.glob(os.path.join(_t.gettempdir(), "c3guide-*")))
 r = session(calls, dict(os.environ, **({"C3C": C3C} if C3C else {})))
 text = lambda i: r[i]["result"]["content"][0]["text"] if "result" in r[i] else json.dumps(r[i])
 
@@ -77,16 +79,53 @@ check("check: oversized code rejected", "give 1 to" in text(18), text(18))
 m = session([("c3_check", {"code": "fn void f() {}"})], dict(os.environ, C3C="/nonexistent/c3c"))
 check("check: missing compiler gives a clear message", "c3c not found" in m[2]["result"]["content"][0]["text"], json.dumps(m[2]))
 import tempfile
-work = tempfile.mkdtemp(prefix="c3guide-test-")
+work = tempfile.mkdtemp(prefix="c3work-")
 marker = os.path.join(work, "marker")
 payload = 'module evil;\n$exec("touch", { "%s" });\nfn void main() {}\n' % marker
 x = session([("c3_check", {"code": payload})], dict(os.environ, C3C=C3C or ""))
 check("exec: c3_check never runs $exec", not os.path.exists(marker), x[2]["result"]["content"][0]["text"])
 evil = os.path.join(work, "evil.c3"); open(evil, "w").write(payload)
-subprocess.run([C3C, "--trust=full", "--no-obj", "--no-entry", "-q", "compile-only", evil], capture_output=True, cwd=work, timeout=60)
-check("exec: positive control, payload runs under --trust=full", os.path.exists(marker))
+if C3C: subprocess.run([C3C, "--trust=full", "--no-obj", "--no-entry", "-q", "compile-only", evil], capture_output=True, cwd=work, timeout=60)
+check("exec: positive control, payload runs under --trust=full", os.path.exists(marker) or not C3C)
 shutil.rmtree(work)
 import glob
-check("check: temp dir cleaned up", not glob.glob(os.path.join(tempfile.gettempdir(), "c3guide-*")), str(glob.glob(os.path.join(tempfile.gettempdir(), "c3guide-*"))))
+check("check: temp dir cleaned up", set(glob.glob(os.path.join(tempfile.gettempdir(), "c3guide-*"))) <= before, str(glob.glob(os.path.join(tempfile.gettempdir(), "c3guide-*"))))
+# --- review findings (each one reproduced before it was fixed)
+def one(name, args, env=None):
+    rr = session([(name, args)], env or dict(os.environ, **({"C3C": C3C} if C3C else {})))
+    return rr[2]["result"]["content"][0]["text"] if "result" in rr[2] else json.dumps(rr[2])
+leak = 'module m; const char[*] X = $embed("/etc/passwd"); fn void f() { $for var $i = 0; $i < 4; $i++: $echo((int)X[$i]); $endfor }'
+t = one("c3_check", {"code": leak})
+check("embed: file read through $embed + $echo is rejected", "rejected" in t and "114" not in t, t)
+if C3C:
+    ctl = subprocess.run([C3C, "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", os.path.join(os.path.dirname(__file__), "embed_probe.c3")], capture_output=True, text=True)
+    check("embed: positive control, the compiler itself prints the file under --trust=none", "114" in (ctl.stdout + ctl.stderr), ctl.stdout + ctl.stderr)
+for tok in ("$include", "$exec"):
+    check("%s rejected" % tok, "rejected" in one("c3_check", {"code": "module m; " + tok + "(\"x\");"}))
+t = one("c3_search", {"query": "@require"})
+check("search @require: finds the contract sections", "@require" in t, t[:200])
+t = one("c3_search", {"query": "$for"})
+check("search $for: not dropped as a stopword", "no match" not in t, t[:200])
+check("search @nodiscard", "no match" not in one("c3_search", {"query": "@nodiscard"}))
+t = one("c3_symbol", {"name": "a" * 3190 + "\U0001F980" * 4})
+check("clip never cuts inside a UTF-8 character", "\ufffd" not in t, repr(t[-40:]))
+check("c3_symbol empty name", "give a symbol" in one("c3_symbol", {"name": ""}))
+open(os.path.join(work2 := tempfile.mkdtemp(prefix="c3fake-"), "exit1.sh"), "w").write("#!/bin/sh\nexit 1\n")
+os.chmod(os.path.join(work2, "exit1.sh"), 0o755)
+t = one("c3_check", {"code": "fn void f() {}"}, dict(os.environ, C3C=os.path.join(work2, "exit1.sh")))
+check("exit code 1 without output is not reported as OK", "OK" not in t and "exit code 1" in t, t)
+# the fixed flags: a fake compiler records its argv (removing --trust=none must fail this test)
+argv_file = os.path.join(work2, "argv.txt")
+open(os.path.join(work2, "rec.sh"), "w").write('#!/bin/sh\necho "$@" > %s\n' % argv_file)
+os.chmod(os.path.join(work2, "rec.sh"), 0o755)
+one("c3_check", {"code": "fn void f() {}"}, dict(os.environ, C3C=os.path.join(work2, "rec.sh")))
+argv = open(argv_file).read() if os.path.exists(argv_file) else ""
+check("compiler flags are fixed", all(f in argv for f in ("--trust=none", "--no-obj", "--no-entry", "compile-only")), argv)
+# newest release notes first (inverting the sort must fail this test)
+t = one("c3_changes", {"topic": "type properties"})
+heads = [l for l in t.split("\n") if l.startswith("### ")]
+vers = [tuple(int(x) for x in h[4:].split(" ")[0].split(".")) for h in heads]
+check("c3_changes: newest version first", len(vers) >= 2 and vers == sorted(vers, reverse=True), str(heads))
+shutil.rmtree(work2); 
 print("FAILED: %d" % fails if fails else "all passed")
 sys.exit(1 if fails else 0)
