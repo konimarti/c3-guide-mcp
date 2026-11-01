@@ -14,7 +14,8 @@ def peak_rss_kb(n):
     p = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     out, _ = p.communicate("\n".join(map(json.dumps, reqs)).encode() + b"\n")
     assert len(out.splitlines()) == n + 1, "missing replies"
-    return resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    return rss // 1024 if sys.platform == "darwin" else rss   # macOS reports bytes, Linux KB
 
 a = peak_rss_kb(200)
 b = peak_rss_kb(4000)  # maxrss of children is a running maximum: b >= a by construction
