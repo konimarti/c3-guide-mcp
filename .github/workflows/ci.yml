@@ -22,7 +22,7 @@ jobs:
         run: |
           git clone https://github.com/konimarti/mcp.c3l deps/mcp.c3l
           git -C deps/mcp.c3l checkout "$MCP_REF"
-      - name: Windows: mcp.c3l's manifest lists no windows-x64 yet (CI-only patch; drop once the SDK has it)
+      - name: Windows only - add windows-x64 to the mcp.c3l manifest (CI-only patch, drop once the SDK lists it)
         if: runner.os == 'Windows'
         shell: bash
         run: |
