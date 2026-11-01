@@ -1,4 +1,4 @@
-metac3c0.8.5records=7267docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
+metac3c0.8.5records=7289docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
 
 
 
@@ -17494,7 +17494,394 @@ valueslistoperators&
  9. And        | && &&&
 10. Or         | || |||
 11. Ternary    | ? ???
-12. Assign     | = *= /= %= -= += |= &= ^= <<= >>= +++=typestd::core::ReflectedParamstruct ReflectedParam { String name, typeid type }
+12. Assign     | = *= /= %= -= += |= &= ^= <<= >>= +++=recipeRecipe: command line arguments (main with String[] args)import std::io;
+
+fn void main(String[] args)
+{
+	// args[0] is the program name
+	io::printfn("args: %d", args.len - 1);
+	foreach (i, a : args[1..]) io::printfn("%d: %s", i, a);
+}recipes/args.c3recipeRecipe: defer, @pool and the temporary allocator tmem (no free needed inside @pool)import std::io;
+
+fn String build()
+{
+	@pool()
+	{
+		// tmem memory is released when the @pool block ends: copy what you return out of it
+		String s = string::tformat("%s-%s-%s", "x", "y", "z");
+		return s.copy(mem);
+	};
+}
+
+fn void main()
+{
+	defer io::printn("cleanup");       // runs when main returns, last defer first
+	io::printn("working");
+	String s = build();
+	defer s.free(mem);
+	io::printfn("built: %s", s);
+}recipes/defer_pool.c3recipeRecipe: enum with a method, enum with associated values, switch on an enumimport std::io;
+
+enum Status { IDLE, ACTIVE, DONE }
+
+fn bool Status.is_active(self) => self == ACTIVE;
+
+enum Light : int (String action)           // associated value per constant
+{
+	RED { "stop" },
+	GREEN { "go" },
+}
+
+fn void main()
+{
+	Status s = ACTIVE;
+	io::printfn("%s is active: %s", s, s.is_active());
+
+	Light l = GREEN;
+	io::printfn("GREEN=%d name=%s", l.ordinal, l);
+	switch (l)
+	{
+		case RED: io::printn(l.action);
+		case GREEN: io::printn(l.action);   // no fallthrough, no break needed
+	}
+}recipes/enum_method.c3recipeRecipe: read an environment variable (env::tget_var, get_var, set_var)import std::io;
+import std::os::env;
+
+fn void main()
+{
+	env::set_var("RECIPE_X", "42");
+	String? x = env::tget_var("RECIPE_X");      // temp allocator; get_var(allocator, name) for your own
+	if (try x) io::printfn("RECIPE_X=%s", x);
+
+	String? y = env::tget_var("RECIPE_Y");
+	if (catch y) io::printn("RECIPE_Y is not set");
+}recipes/env_var.c3recipeRecipe: faults and optionals (faultdef, int? return, return FAULT~, if catch, try, ??, rethrow with !, !! to panic)import std::io;
+
+faultdef NEGATIVE_INPUT;                  // 0.8: faultdef, not "fault Name { ... }"
+
+fn int? check(int val)
+{
+	if (val < 0) return NEGATIVE_INPUT~;  // returning a fault: add ~
+	return val;
+}
+
+fn int? twice(int val)
+{
+	int v = check(val)!;                  // ! passes the fault up to the caller
+	return v * 2;
+}
+
+fn void main()
+{
+	int? r = check(-5);
+	if (catch err = r) io::printfn("error: %s", err);
+
+	if (try v = check(7)) io::printfn("ok: %d", v);
+
+	io::printfn("default: %d", twice(-1) ?? 0);   // ?? gives a fallback when there is a fault
+}recipes/faults.c3recipeRecipe: formatting and printing (printfn, %d %s %f %x %p, width, padding, string::format, DString)import std::io;
+
+fn void main()
+{
+	io::printfn("n=%d hex=%x pi=%.2f [%4d] [%04d]", 42, 42, 3.14159, 7, 7);
+
+	String s = string::format(mem, "hello, %d", 3);   // allocates: free it
+	defer s.free(mem);
+	io::printn(s);
+
+	DString d = dstring::temp();                      // growable string builder
+	d.append("a");
+	d.append_char('b');
+	d.appendf("%s", "c");
+	io::printn(d.str_view());
+}recipes/format.c3recipeRecipe: generic function and generic struct (module with {Type}, instantiate with {int})module recipe_generics <Type>;
+import std::io;
+
+struct Box
+{
+	Type value;
+}
+
+fn Type Box.get(self) => self.value;
+
+
+module recipe_max <Type>;      // every function of a module is instantiated: keep max away from Box{String}
+
+fn Type max(Type a, Type b) => a > b ? a : b;
+
+module recipe_generics;
+import std::io, recipe_max;
+
+alias IntBox = recipe_generics::Box{int};
+alias StrBox = recipe_generics::Box{String};
+
+fn void main()
+{
+	IntBox a = { 7 };
+	io::printn(a.get());
+	io::printfn("max=%d", recipe_max::max{int}(4, 9));
+	StrBox b = { "abc" };
+	io::printfn("box=%s", b.get());
+}recipes/generics.c3recipeRecipe: HashMap with String keys (init, set, get with default, has_key, iterate, free)import std::io;
+import std::collections::map;
+
+fn void main()
+{
+	HashMap{String, int} counts;
+	counts.init(mem);          // mem = heap; tmem = temp allocator
+	defer counts.free();
+
+	foreach (w : "the cat the dog the".tsplit(" "))
+	{
+		counts.set(w, (counts.get(w) ?? 0) + 1);    // get returns an optional: ?? gives a default
+	}
+	io::printfn("the=%d", counts.get("the") ?? 0);
+	io::printfn("bird=%d", counts.get("bird") ?? 0);
+	io::printfn("distinct: %d", counts.len());
+
+	counts.@each(; String key, int value) { /* visit every pair; order is not defined */ };
+}recipes/hashmap.c3recipeRecipe: List (dynamic array): push, index, foreach, pop, remove, freeimport std::io;
+import std::collections::list;
+
+fn void main()
+{
+	List{int} xs;
+	xs.init(mem);
+	defer xs.free();
+
+	for (int i = 1; i <= 5; i++) xs.push(i);
+	int sum;
+	foreach (x : xs) sum += x;
+	io::printfn("sum=%d len=%d", sum, xs.len());
+	io::printfn("last=%d", xs[xs.len() - 1]);
+	xs.pop()!!;
+	io::printfn("after pop: %d", xs.len());
+}recipes/list.c3recipeRecipe: loops: foreach with index, foreach over a slice of an array, for, while, break and continue (there is no range in foreach)import std::io;
+
+fn void main()
+{
+	String[] xs = { "a", "b" };
+	foreach (i, x : xs) io::printf(i == 0 ? "%d:%s" : " %d:%s", i, x);
+	io::printn("");
+
+	for (int i = 1; i < 4; i++) io::printf(i == 1 ? "%d" : " %d", i);   // counting: use for
+	io::printn("");
+
+	int n;
+	while (n < 10)
+	{
+		if (n == 3) break;
+		io::printf(n == 0 ? "%d" : " %d", n);
+		n++;
+	}
+	io::printn("");
+
+	int[4] a = { 10, 20, 30, 40 };
+	foreach (v : a[1..2]) io::printf(v == 20 ? "%d" : " %d", v);       // slice a[1..2] includes index 2
+	io::printn("");
+}recipes/loops.c3recipeRecipe: macros: @macro name, #expr (unevaluated expression), $stringify, $typeof, generic parameter, compile-time $ifimport std::io;
+
+macro @print_expr(#expr)
+{
+	io::printfn("%s = %s", $stringify(#expr), #expr);
+}
+
+macro twice(x) => x + x;                       // no # : x is evaluated once, any type
+
+fn void main()
+{
+	@print_expr(1 + 2);
+	io::printn(twice(2) + 1);
+	$if $feat(NEVER_DEFINED):
+		io::printn("not compiled");
+	$endif
+}recipes/macros.c3recipeRecipe: create a directory (mkdir), list a directory (ls), check that a path exists, delete a directory (rmtree)import std::io;
+import std::io::path;
+
+fn void main()
+{
+	Path? dir = path::temp_directory(tmem);
+	if (catch err = dir) return;
+	Path? sub = dir.tappend("recipe_dir");
+	if (catch err = sub) return;
+	if (path::exists(sub)) path::rmtree(sub)!!;
+
+	path::mkdir(sub, true)!!;            // true: also create missing parents
+	String base = (String)sub;           // a Path is a String underneath
+	file::save(string::tformat("%s/a.txt", base), "a")!!;
+	file::save(string::tformat("%s/b.txt", base), "b")!!;
+	io::printfn("exists: %s", path::exists(sub));
+
+	PathList? list = path::ls(tmem, sub);
+	if (try l = list) io::printfn("entries: %d", l.len());
+
+	path::rmtree(sub)!!;
+	io::printfn("gone: %s", !path::exists(sub));
+}recipes/mkdir_ls.c3recipeRecipe: parse a string to an integer or a float; a failed parse is a fault, not a crashimport std::io;
+
+fn void main()
+{
+	int? v = "1234".to_int();
+	if (try x = v) io::printfn("value=%d", x);
+
+	int? bad = "12x".to_int();
+	if (catch bad) io::printn("invalid");
+
+	double? d = "3.14".to_double();
+	if (try y = d) io::printfn("pi=%.2f", y);
+}recipes/parse_int.c3recipeRecipe: random numbers (random::rand, seeded generator)import std::io;
+import std::math::random;
+
+fn void main()
+{
+	int n = random::rand(10);                  // 0..9
+	io::printfn("in range: %s", n >= 0 && n < 10);
+
+	Sfc64Random a, b;
+	random::seed(&a, 42);                      // the same seed gives the same sequence
+	random::seed(&b, 42);
+	io::printfn("same sequence: %s", a.next_int() == b.next_int());
+}recipes/random.c3recipeRecipe: read a file line by line (open, readline, close)import std::io;
+
+fn void main()
+{
+	file::save("recipe_lines.txt", "ab\nlonger\nxyz\n")!!;
+	defer (void)file::delete("recipe_lines.txt");
+
+	File? f = file::open("recipe_lines.txt", "r");
+	if (catch err = f)
+	{
+		io::printfn("cannot open: %s", err);
+		return;
+	}
+	defer (void)f.close();
+
+	int n;
+	String longest;
+	// readline returns the next line without the newline, and the fault io::EOF at the end
+	while (try line = io::treadline(&f))
+	{
+		n++;
+		if (line.len > longest.len) longest = line.tcopy();
+	}
+	io::printfn("lines: %d", n);
+	io::printfn("longest: %s", longest);
+}recipes/read_lines.c3recipeRecipe: run an external command and capture its output (process::run_capture_stdout)import std::io;
+import std::os::process;
+
+fn void main()
+{
+	char[256] buffer;
+	String? out = process::run_capture_stdout(buffer[..], { "echo", "hi" });
+	if (catch err = out)
+	{
+		io::printfn("failed: %s", err);
+		return;
+	}
+	io::printn(out.trim());
+}recipes/run_command.c3recipeRecipe: sort an array or a List with a comparison function (std::sort quicksort, insertion_sort)import std::io;
+import std::sort;
+
+fn int desc(int a, int b) => b - a;      // negative: a comes first
+
+fn void main()
+{
+	int[4] a = { 5, 1, 9, 3 };
+	sort::quicksort(a[..], &desc);
+	foreach (i, v : a) io::printf(i == 0 ? "%d" : " %d", v);
+	io::printn("");
+
+	// without a comparison function, the elements' own order is used
+	sort::quicksort(a[..]);
+	foreach (i, v : a) io::printf(i == 0 ? "%d" : " %d", v);
+	io::printn("");
+}recipes/sort.c3recipeRecipe: strings: split, join, trim, upper case, contains, starts_with, replace, parse (temp-allocator versions end in t)import std::io;
+
+fn void main()
+{
+	String[] parts = "a,b,c".tsplit(",");
+	io::printn(string::tjoin(parts, "-"));
+	io::printfn("[%s]", "   hi there  ".trim());
+	io::printn("hello".to_upper_tcopy());
+	io::printfn("%s %s", "hello world".contains("o w"), "hello".starts_with("he"));
+	io::printn("a,b,c".treplace(",", "_"));
+}recipes/strings.c3recipeRecipe: struct with methods (fn Type.method), construction, interface implementationimport std::io;
+
+struct Rect (Describe)
+{
+	int w, h;
+}
+
+fn int Rect.area(self) => self.w * self.h;
+fn void Rect.scale(&self, int f) { self.w *= f; self.h *= f; }   // &self: modifies the original
+
+interface Describe
+{
+	fn String describe();
+}
+
+fn String Rect.describe(&self) @dynamic => string::tformat("Rect %dx%d", self.w, self.h);
+
+fn void main()
+{
+	Rect r = { .w = 3, .h = 4 };
+	io::printfn("area=%d", r.area());
+
+	Describe d = &r;                       // interface value from a pointer
+	io::printn(d.describe());
+}recipes/struct_method.c3recipeRecipe: threads: Thread.create, join, Mutex lock/unlockimport std::io;
+import std::thread;
+
+Mutex lock;
+int counter;
+
+fn int work(void* arg)
+{
+	for (int i = 0; i < 1000; i++)
+	{
+		lock.lock()!!;
+		counter++;
+		lock.unlock();
+	}
+	return 0;
+}
+
+fn void main()
+{
+	lock.init()!!;
+	defer (void)lock.destroy();
+	Thread a, b;
+	a.create(&work, null)!!;
+	b.create(&work, null)!!;
+	a.join()!!;
+	b.join()!!;
+	io::printfn("counter=%d", counter);
+}recipes/threads.c3recipeRecipe: time: measure elapsed time (clock::now, mark), sleep (thread::sleep, ms)import std::io;
+import std::time;
+import std::thread;
+
+fn void main()
+{
+	Clock start = clock::now();
+	thread::sleep(time::ms(50))!!;
+	NanoDuration elapsed = start.to_now();
+	io::printfn("slept at least 50ms: %s", elapsed.to_ms() >= 50);
+}recipes/time_sleep.c3recipeRecipe: write a string to a file and read a whole file back (file::save, file::load_temp)import std::io;
+
+fn void main()
+{
+	String path = "recipe_rw.txt";
+	if (catch err = file::save(path, "hello file"))
+	{
+		io::printfn("write failed: %s", err);
+		return;
+	}
+	defer (void)file::delete(path);
+
+	char[]? data = file::load_temp(path);   // temp allocator: no free needed
+	if (catch err = data) return;
+	io::printn((String)data);
+}recipes/write_read_file.c3typestd::core::ReflectedParamstruct ReflectedParam { String name, typeid type }
 DEPRECATED: No longer in uselib/std/core/runtime.c3:18:8typestd::core::AnyRawstruct AnyRaw { void* ptr, typeid type }lib/std/core/runtime.c3:24:8typestd::core::SliceRawstruct SliceRaw { void* ptr, sz len }lib/std/core/runtime.c3:30:8mmethodstd::core::cinterop::CVaList.nextmacro next(CVaList self, $Type)
 Fetch the next variadic argument of the given type and advance the list past it, following the SysV AMD64 ABI's register-save-area / stack-overflow-area rules. @param self: The va_list to read from and advance @param $Type: The type of the next argument @return The next argument, read from the register save area or the stack overflow arealib/std/core/cinterop.c3:148:15typestd::core::cinterop::CShortalias CShort
 The C `short` type on this platform.lib/std/core/cinterop.c3:26:7typestd::core::cinterop::CUShortalias CUShort

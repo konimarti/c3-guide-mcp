@@ -58,6 +58,7 @@ jobs:
           python3 test/limits_test.py
           python3 test/quality_test.py
           python3 test/growth_test.py
+          python3 test/recipes_test.py
       - name: Snapshot matches this c3c
         if: runner.os == 'Linux'
         run: python3 test/corpus_test.py "$C3_DIR"

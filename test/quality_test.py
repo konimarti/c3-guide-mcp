@@ -24,6 +24,16 @@ CASES = [
     ("c3_symbol", "HashMap", "HashMap"),
     ("c3_symbol", "tnew_array", "does not exist"),
     # descriptions instead of names: words in the name or in the doc comment; `top` shows five symbols
+    # recipes: the question a model has, the recipe it should get (c3_search shows recipes first)
+    ("c3_search", "create a directory mkdir", "Recipe: create a directory"),
+    ("c3_search", "read a file line by line", "Recipe: read a file line by line"),
+    ("c3_search", "hashmap word count", "Recipe: HashMap"),
+    ("c3_search", "sort array with comparator", "Recipe: sort"),
+    ("c3_search", "faultdef optional return fault", "Recipe: faults"),
+    ("c3_search", "threads mutex", "Recipe: threads"),
+    ("c3_search", "run external command capture output", "Recipe: run an external command"),
+    ("c3_search", "generic struct module Type", "Recipe: generic"),
+    ("c3_symbol", "create directory", "Working program: c3_search"),
     # compiler-known aliases that docgen does not list
     ("c3_symbol", "tmem", "alias tmem = current_temp"),
     ("c3_symbol", "mem", "alias mem = thread_allocator"),

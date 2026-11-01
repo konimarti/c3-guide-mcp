@@ -6,6 +6,7 @@ import std::sort;
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
 const sz MAX_REPLY = 3200;
 const sz MAX_SNIPPET = 900;
+const sz MAX_RECIPE = 1800;
 const String[*] SYMBOL_KINDS = { "fn", "macro", "method", "mmethod", "type", "var" };
 
 fn String hit_text(Entry* e, sz snippet)
@@ -17,7 +18,11 @@ fn String hit_text(Entry* e, sz snippet)
 fn String format_hits(Hit[] hits, sz snippet)
 {
 	DString out = dstring::temp();
-	foreach (h : hits) out.append(hit_text(&corpus::entries[h.idx], snippet));
+	foreach (h : hits)
+	{
+		Entry* e = &corpus::entries[h.idx];
+		out.append(hit_text(e, e.kind == "recipe" ? MAX_RECIPE : snippet));   // a recipe is useless cut in half
+	}
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
@@ -61,10 +66,10 @@ fn int clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
 
 fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach with index', 'defer catch'"),
 	int limit @Desc("number of results (1..5)") = 3)
-	@Desc("Search the C3 language manual (the installed compiler's version). Use this before writing C3 you are not sure about.")
+	@Desc("Search the C3 language manual (the installed compiler's version) and the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...). Use this before writing C3 you are not sure about.")
 	@ReadOnly
 {
-	Hit[] hits = search::search(query, { "doc" }, clamp(limit, 1, 5));
+	Hit[] hits = search::search(query, { "recipe", "doc" }, clamp(limit, 1, 5));
 	if (hits.len == 0) return "no match in the manual; try other words or c3_symbol for a stdlib name";
 	return format_hits(hits, MAX_SNIPPET);
 }
@@ -160,6 +165,9 @@ fn String describe(String query)
 	DString out = dstring::temp();
 	out.appendf("Symbols matching '%s' (c3c %s):\n", query, corpus::snapshot_version);
 	foreach (h : hits) out.append(brief(&corpus::entries[h.idx]));
+	// a recipe that matches is worth more than five signatures: point to it (c3_search shows the program)
+	Hit[] rec = search::search(query, { "recipe" }, 1, true);
+	if (rec.len > 0) out.appendf("Working program: c3_search \"%s\"\n", util::clip(corpus::entries[rec[0].idx].title, 120));
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 

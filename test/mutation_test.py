@@ -14,6 +14,7 @@ MUT = [
     ("no joined word pairs", "src/search.c3", "if (symbols && terms.len >= 2) terms = with_joined_pairs(terms);", ""),
     ("no abbreviations", "src/search.c3", "if (abbrev) foreach", "if (false) foreach"),
     ("name hit not boosted", "src/search.c3", "3.0f * short_bonus[i] * (tt > 0 ? 1.0f : 0.0f)", "0.0f"),
+    ("recipes not searched", "src/tools.c3", '{ "recipe", "doc" }', '{ "doc" }'),
     ("deadline disabled", "src/check.c3", 'const ulong DEADLINE_MS = 10000;', 'const ulong DEADLINE_MS = 100000000;'),
 ]
 only = sys.argv[1:]

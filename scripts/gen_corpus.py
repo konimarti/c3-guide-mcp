@@ -8,7 +8,7 @@ usage: scripts/gen_corpus.py [C3_DIR] [all.md]
 
 Record format (parsed by src/corpus.c3): records end with \\x1e, fields split by \\x1f:
   kind, title, body, loc
-kinds: meta | doc | change | list | fn | macro | method | mmethod | type | var
+kinds: meta | doc | change | list | recipe | fn | macro | method | mmethod | type | var
 """
 import json, os, re, shutil, subprocess, sys
 
@@ -137,6 +137,18 @@ def aliases(c3):
                 out.append(rec("var", f"{mod.group(1)}::{m.group('name')}", body, f"{path.replace(root, '')}:{line}"))
     return out
 
+def recipes():
+    """recipes/*.c3: small programs that compile and print what their `// expect:` lines say (test/recipes_test.py runs them)."""
+    out, here = [], os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "recipes")
+    for fn in sorted(os.listdir(here)):
+        if not fn.endswith(".c3"):
+            continue
+        lines = open(os.path.join(here, fn), encoding="utf-8").read().split("\n")
+        title = lines[0].removeprefix("// Recipe: ")
+        code = "\n".join(l for l in lines[1:] if not l.startswith("// expect:")).strip()
+        out.append(rec("recipe", "Recipe: " + title, code, "recipes/" + fn))
+    return out
+
 def lists(c3):
     out = []
     for flag in ("attributes", "builtins", "keywords", "type-properties", "operators", "precedence"):
@@ -159,6 +171,7 @@ def main():
         recs += [rec("doc", p + " [all.md]", b) for p, b in extra]
     recs += [rec("change", p, b) for p, b in chunk_md(open(os.path.join(c3, "releasenotes.md"), encoding="utf-8").read())]
     recs += lists(c3)
+    recs += recipes()
     syms = symbols(c3) + aliases(c3)
     recs += syms
     meta = rec("meta", "c3c", ver, f"records={len(recs)}")
