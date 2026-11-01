@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build data/corpus.rs from a c3c install (dev-time only; the binary needs no Python).
+"""Build data/corpus.dat from a c3c install (dev-time only; the binary needs no Python).
 
 usage: scripts/gen_corpus.py [C3_DIR] [all.md]
   C3_DIR  c3c install dir (MANUAL.md, releasenotes.md, lib/std, c3c); default: dir of `c3c` on PATH
@@ -142,7 +142,7 @@ def main():
     syms = symbols(c3)
     recs += syms
     meta = rec("meta", "c3c", ver, f"records={len(recs)}")
-    out = os.environ.get("C3GUIDE_OUT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "corpus.rs")
+    out = os.environ.get("C3GUIDE_OUT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "corpus.dat")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         f.write(meta + "".join(recs))

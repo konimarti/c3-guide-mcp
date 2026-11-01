@@ -3,7 +3,7 @@ import std::core::string;
 
 // Embedded snapshot built by scripts/gen_corpus.py. Records end with \x1e, fields split by \x1f:
 // kind, title, body, loc. All strings are slices into the embedded blob: nothing is copied.
-const char[*] BLOB = $embed("../data/corpus.rs");
+const char[*] BLOB = $embed("../data/corpus.dat");
 
 struct Entry
 {
