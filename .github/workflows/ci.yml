@@ -49,7 +49,7 @@ jobs:
             *.tar.gz) tar xzf "$asset" -C c3c-install ;;
             *.zip)    7z x -y "$asset" -oc3c-install > /dev/null ;;
           esac
-          echo "$PWD/c3c-install/c3" >> "$GITHUB_PATH"
+          if [ "$RUNNER_OS" = Windows ]; then echo "$(cygpath -w "$PWD/c3c-install/c3")" >> "$GITHUB_PATH"; else echo "$PWD/c3c-install/c3" >> "$GITHUB_PATH"; fi
           echo "C3_DIR=$PWD/c3c-install/c3" >> "$GITHUB_ENV"
       - name: c3c version
         shell: bash
