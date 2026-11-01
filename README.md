@@ -76,7 +76,7 @@ c3c build c3-guide-mcp -O3          # -> build/c3-guide-mcp
 
 ## How it works
 
-The docs are a snapshot embedded in the binary (`$embed`, 1.8 MB, 7,294 entries). `scripts/gen_corpus.py` builds it from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`. Startup takes about 10 ms. A search scans every entry in about 10 ms (BM25), so there is no index to build or keep in sync.
+The docs are a snapshot embedded in the binary (`$embed`, 1.8 MB, 7,313 entries). `scripts/gen_corpus.py` builds it from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`. Startup takes about 10 ms. A search scans every entry in about 10 ms (BM25), so there is no index to build or keep in sync.
 
 The snapshot belongs to one `c3c` version (printed in its header). After a compiler update:
 

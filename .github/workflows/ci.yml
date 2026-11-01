@@ -4,7 +4,7 @@ on:
     branches: [main]
   pull_request:
 env:
-  C3C_VERSION: v0.8.5            # the snapshot in data/corpus.dat and the tests belong to exactly this compiler
+  C3C_VERSION: v0.8.5_1            # the snapshot in data/corpus.dat and the tests belong to exactly this compiler
   C3L_REF: 3f599138ccdbf3ae872d15337e958f43e6189a58   # konimarti/c3l (a shell script), pinned
 permissions:
   contents: read
