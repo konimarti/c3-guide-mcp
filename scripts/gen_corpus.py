@@ -145,7 +145,7 @@ def recipes():
             continue
         lines = open(os.path.join(here, fn), encoding="utf-8").read().split("\n")
         title = lines[0].removeprefix("// Recipe: ")
-        code = "\n".join(l for l in lines[1:] if not l.startswith("// expect:")).strip()
+        code = "\n".join(l for l in lines[1:] if not l.startswith(("// expect:", "// stdin:"))).strip()
         out.append(rec("recipe", "Recipe: " + title, code, "recipes/" + fn))
     return out
 

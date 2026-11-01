@@ -34,6 +34,18 @@ CASES = [
     ("c3_search", "run external command capture output", "Recipe: run an external command"),
     ("c3_search", "generic struct module Type", "Recipe: generic"),
     ("c3_symbol", "create directory", "Working program: c3_search"),
+    # queries the models really sent in the study and that found nothing before
+    ("c3_search", "main(String[] args)", "Recipe: command line arguments"),
+    ("c3_search", "args[0]", "Recipe: command line arguments"),
+    ("c3_search", "List{", "Recipe: List"),
+    ("c3_search", "coalescing", "Recipe: faults"),
+    ("c3_search", "quicksort cmp", "Recipe: sort"),
+    ("c3_search", "path::ls", "Recipe: list a directory"),
+    ("c3_search", "sort::quicksort", "Recipe: sort"),
+    ("c3_search", "read_line", "readline"),
+    ("c3_search", "sort struct array by field", "Recipe: sort structs"),
+    ("c3_search", "list files matching *.txt", "Recipe: list a directory, only"),
+    ("c3_search", "read lines from stdin", "Recipe: read lines from standard input"),
     # compiler-known aliases that docgen does not list
     ("c3_symbol", "tmem", "alias tmem = current_temp"),
     ("c3_symbol", "mem", "alias mem = thread_allocator"),

@@ -1,4 +1,5 @@
 // Recipe: HashMap with String keys (init, set, get with default, has_key, iterate, free)
+// Also: dictionary, map, key value, HashMap{String, int}, count words, frequency, set, get
 // expect: the=3
 // expect: bird=0
 // expect: distinct: 3

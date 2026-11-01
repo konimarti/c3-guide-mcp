@@ -1,4 +1,5 @@
 // Recipe: List (dynamic array): push, index, foreach, pop, remove, free
+// Also: List{int}, dynamic array, vector, ArrayList, push_back, append, remove
 // expect: sum=15 len=5
 // expect: last=5
 // expect: after pop: 4

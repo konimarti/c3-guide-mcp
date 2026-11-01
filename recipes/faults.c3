@@ -1,4 +1,5 @@
 // Recipe: faults and optionals (faultdef, int? return, return FAULT~, if catch, try, ??, rethrow with !, !! to panic)
+// Also: optional, result, error handling, null, ?? coalescing default value, rethrow, try catch, Result
 // expect: error: faults::NEGATIVE_INPUT
 // expect: ok: 7
 // expect: default: 0

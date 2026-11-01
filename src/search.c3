@@ -7,6 +7,8 @@ import std::sort, std::math;
 // No prebuilt index: a query scans the ~2 MB snapshot (BM25 over case-insensitive word matches,
 // title hits weighted x3). Costs a few ms per query and keeps startup at zero.
 
+const float RECIPE_BOOST = 1.4f;
+
 struct Hit
 {
 	float score;
@@ -115,6 +117,15 @@ fn String words_only(String q)
 	return out.str_view();
 }
 
+// Code the way people paste it into a question (`main(String[] args)`, `List{`, `path::ls`):
+// every character that cannot be part of a word becomes a space; `_` stays, as in `read_line`.
+fn String code_words(String q)
+{
+	DString out = dstring::temp();
+	foreach (c : q) out.append_char(is_word(c, false) ? c : ' ');
+	return out.str_view();
+}
+
 // Top `limit` entries whose kind is in `kinds` (empty = all), best first.
 // symbols: match on words inside identifiers (`read_line`, `std::io::file`) instead of whole identifiers.
 fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
@@ -185,6 +196,7 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 			float norm = f * 2.2f / (f + 1.2f * (0.25f + 0.75f * len_cache[i] / avg));
 			s += idf * (norm + 3.0f * short_bonus[i] * (tt > 0 ? 1.0f : 0.0f));
 		}
+		if (e.kind == "recipe") s *= RECIPE_BOOST;   // a program that was compiled and run beats prose that says the same
 		if (s > 0) hits.push({ s, (int)i });
 	}
 	Hit[] sorted = hits.array_view();

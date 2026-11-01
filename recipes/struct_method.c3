@@ -1,4 +1,5 @@
 // Recipe: struct with methods (fn Type.method), construction, interface implementation
+// Also: class, object, member function, impl, trait, interface, vtable, struct{} methods
 // expect: area=12
 // expect: Rect 3x4
 import std::io;

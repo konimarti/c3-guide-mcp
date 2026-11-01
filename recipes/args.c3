@@ -1,4 +1,5 @@
 // Recipe: command line arguments (main with String[] args)
+// Also: argv, argc, main arguments, command line parameters, program name
 // expect: args: 0
 import std::io;
 

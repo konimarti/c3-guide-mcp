@@ -1,4 +1,5 @@
 // Recipe: loops: foreach with index, foreach over a slice of an array, for, while, break and continue (there is no range in foreach)
+// Also: range, for each, 0..n, iterate, enumerate, index, while, for loop
 // expect: 0:a 1:b
 // expect: 1 2 3
 // expect: 0 1 2

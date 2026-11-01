@@ -1,4 +1,5 @@
 // Recipe: threads: Thread.create, join, Mutex lock/unlock
+// Also: pthread, concurrency, parallel, mutex lock, race, join, spawn, Thread.create
 // expect: counter=2000
 import std::io;
 import std::thread;

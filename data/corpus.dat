@@ -1,4 +1,4 @@
-metac3c0.8.5records=7289docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
+metac3c0.8.5records=7292docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
 
 
 
@@ -17494,7 +17494,8 @@ valueslistoperators&
  9. And        | && &&&
 10. Or         | || |||
 11. Ternary    | ? ???
-12. Assign     | = *= /= %= -= += |= &= ^= <<= >>= +++=recipeRecipe: command line arguments (main with String[] args)import std::io;
+12. Assign     | = *= /= %= -= += |= &= ^= <<= >>= +++=recipeRecipe: command line arguments (main with String[] args)// Also: argv, argc, main arguments, command line parameters, program name
+import std::io;
 
 fn void main(String[] args)
 {
@@ -17555,7 +17556,8 @@ fn void main()
 
 	String? y = env::tget_var("RECIPE_Y");
 	if (catch y) io::printn("RECIPE_Y is not set");
-}recipes/env_var.c3recipeRecipe: faults and optionals (faultdef, int? return, return FAULT~, if catch, try, ??, rethrow with !, !! to panic)import std::io;
+}recipes/env_var.c3recipeRecipe: faults and optionals (faultdef, int? return, return FAULT~, if catch, try, ??, rethrow with !, !! to panic)// Also: optional, result, error handling, null, ?? coalescing default value, rethrow, try catch, Result
+import std::io;
 
 faultdef NEGATIVE_INPUT;                  // 0.8: faultdef, not "fault Name { ... }"
 
@@ -17622,7 +17624,8 @@ fn void main()
 	io::printfn("max=%d", recipe_max::max{int}(4, 9));
 	StrBox b = { "abc" };
 	io::printfn("box=%s", b.get());
-}recipes/generics.c3recipeRecipe: HashMap with String keys (init, set, get with default, has_key, iterate, free)import std::io;
+}recipes/generics.c3recipeRecipe: HashMap with String keys (init, set, get with default, has_key, iterate, free)// Also: dictionary, map, key value, HashMap{String, int}, count words, frequency, set, get
+import std::io;
 import std::collections::map;
 
 fn void main()
@@ -17640,7 +17643,8 @@ fn void main()
 	io::printfn("distinct: %d", counts.len());
 
 	counts.@each(; String key, int value) { /* visit every pair; order is not defined */ };
-}recipes/hashmap.c3recipeRecipe: List (dynamic array): push, index, foreach, pop, remove, freeimport std::io;
+}recipes/hashmap.c3recipeRecipe: List (dynamic array): push, index, foreach, pop, remove, free// Also: List{int}, dynamic array, vector, ArrayList, push_back, append, remove
+import std::io;
 import std::collections::list;
 
 fn void main()
@@ -17656,7 +17660,8 @@ fn void main()
 	io::printfn("last=%d", xs[xs.len() - 1]);
 	xs.pop()!!;
 	io::printfn("after pop: %d", xs.len());
-}recipes/list.c3recipeRecipe: loops: foreach with index, foreach over a slice of an array, for, while, break and continue (there is no range in foreach)import std::io;
+}recipes/list.c3recipeRecipe: loops: foreach with index, foreach over a slice of an array, for, while, break and continue (there is no range in foreach)// Also: range, for each, 0..n, iterate, enumerate, index, while, for loop
+import std::io;
 
 fn void main()
 {
@@ -17679,7 +17684,35 @@ fn void main()
 	int[4] a = { 10, 20, 30, 40 };
 	foreach (v : a[1..2]) io::printf(v == 20 ? "%d" : " %d", v);       // slice a[1..2] includes index 2
 	io::printn("");
-}recipes/loops.c3recipeRecipe: macros: @macro name, #expr (unevaluated expression), $stringify, $typeof, generic parameter, compile-time $ifimport std::io;
+}recipes/loops.c3recipeRecipe: list a directory, only the files that match a mask (*.txt), sorted by name// Also: glob, filter files, extension, readdir, opendir, scandir, directory listing, file names
+import std::io;
+import std::io::path;
+import std::sort;
+
+fn int by_text(String a, String b) => a.compare_to(b);
+
+fn void main()
+{
+	Path? dir = path::temp_directory(tmem);
+	if (catch err = dir) return;
+	Path? sub = dir.tappend("recipe_mask");
+	if (catch err = sub) return;
+	if (path::exists(sub)) path::rmtree(sub)!!;
+	path::mkdir(sub, true)!!;
+	defer (void)path::rmtree(sub);
+	String base = (String)sub;
+	file::save(string::tformat("%s/b.txt", base), "b")!!;
+	file::save(string::tformat("%s/a.txt", base), "a")!!;
+	file::save(string::tformat("%s/c.log", base), "c")!!;
+
+	// path::ls(allocator, dir, no_dirs, no_symlinks, mask)
+	PathList? entries = path::ls(tmem, sub, true, false, "*.txt");
+	if (catch err = entries) return;
+	String[] names = mem::talloc_array(String, entries.len());
+	foreach (i, e : entries) names[i] = e.basename();
+	sort::quicksort(names, &by_text);
+	foreach (n : names) io::printn(n);
+}recipes/ls_mask.c3recipeRecipe: macros: @macro name, #expr (unevaluated expression), $stringify, $typeof, generic parameter, compile-time $ifimport std::io;
 
 macro @print_expr(#expr)
 {
@@ -17779,7 +17812,8 @@ fn void main()
 		return;
 	}
 	io::printn(out.trim());
-}recipes/run_command.c3recipeRecipe: sort an array or a List with a comparison function (std::sort quicksort, insertion_sort)import std::io;
+}recipes/run_command.c3recipeRecipe: sort an array or a List with a comparison function (std::sort quicksort, insertion_sort)// Also: quicksort, insertion_sort, comparator, cmp, order by field, sort struct array, sort by key, qsort
+import std::io;
 import std::sort;
 
 fn int desc(int a, int b) => b - a;      // negative: a comes first
@@ -17795,7 +17829,48 @@ fn void main()
 	sort::quicksort(a[..]);
 	foreach (i, v : a) io::printf(i == 0 ? "%d" : " %d", v);
 	io::printn("");
-}recipes/sort.c3recipeRecipe: strings: split, join, trim, upper case, contains, starts_with, replace, parse (temp-allocator versions end in t)import std::io;
+}recipes/sort.c3recipeRecipe: sort structs by a field, sort strings, and list a HashMap's keys in sorted order// Also: order by key, sort by age, compare_to, keys(), alphabetical, string compare, qsort
+import std::io;
+import std::sort;
+import std::collections::map;
+
+struct Person
+{
+	String name;
+	int age;
+}
+
+fn int by_age(Person a, Person b) => a.age - b.age;
+fn int by_text(String a, String b) => a.compare_to(b);     // String cannot be ordered with < >: use compare_to
+
+fn void main()
+{
+	Person[2] people = { { "Ann", 31 }, { "Bob", 25 } };
+	sort::quicksort(people[..], &by_age);
+	foreach (p : people) io::printfn("%s %d", p.name, p.age);
+
+	HashMap{String, int} m;
+	m.init(mem);
+	defer m.free();
+	m.set("c", 3);
+	m.set("a", 1);
+	m.set("b", 2);
+	String[] keys = m.keys(tmem);          // iteration order of a map is not defined: sort the keys
+	sort::quicksort(keys, &by_text);
+	foreach (i, k : keys) io::printf(i == 0 ? "%s" : " %s", k);
+	io::printn("");
+}recipes/sort_structs.c3recipeRecipe: read lines from standard input until the end (treadline returns a fault at EOF)// Also: stdin, scanf, gets, getline, input, read line from console, interactive, pipe
+import std::io;
+
+fn void main()
+{
+	int n;
+	while (try line = io::treadline())      // io::EOF ends the loop
+	{
+		n++;
+		io::printfn("%d: %s", n, line);
+	}
+}recipes/stdin_lines.c3recipeRecipe: strings: split, join, trim, upper case, contains, starts_with, replace, parse (temp-allocator versions end in t)import std::io;
 
 fn void main()
 {
@@ -17805,7 +17880,8 @@ fn void main()
 	io::printn("hello".to_upper_tcopy());
 	io::printfn("%s %s", "hello world".contains("o w"), "hello".starts_with("he"));
 	io::printn("a,b,c".treplace(",", "_"));
-}recipes/strings.c3recipeRecipe: struct with methods (fn Type.method), construction, interface implementationimport std::io;
+}recipes/strings.c3recipeRecipe: struct with methods (fn Type.method), construction, interface implementation// Also: class, object, member function, impl, trait, interface, vtable, struct{} methods
+import std::io;
 
 struct Rect (Describe)
 {
@@ -17829,7 +17905,8 @@ fn void main()
 
 	Describe d = &r;                       // interface value from a pointer
 	io::printn(d.describe());
-}recipes/struct_method.c3recipeRecipe: threads: Thread.create, join, Mutex lock/unlockimport std::io;
+}recipes/struct_method.c3recipeRecipe: threads: Thread.create, join, Mutex lock/unlock// Also: pthread, concurrency, parallel, mutex lock, race, join, spawn, Thread.create
+import std::io;
 import std::thread;
 
 Mutex lock;

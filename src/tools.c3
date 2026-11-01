@@ -69,9 +69,21 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 	@Desc("Search the C3 language manual (the installed compiler's version) and the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...). Use this before writing C3 you are not sure about.")
 	@ReadOnly
 {
-	Hit[] hits = search::search(query, { "recipe", "doc" }, clamp(limit, 1, 5));
-	if (hits.len == 0) return "no match in the manual; try other words or c3_symbol for a stdlib name";
-	return format_hits(hits, MAX_SNIPPET);
+	int n = clamp(limit, 1, 5);
+	Hit[] hits = search::search(query, { "recipe", "doc" }, n);
+	// pasted code (`main(String[] args)`, `path::ls`, `List{`) has no words until the punctuation is gone
+	if (hits.len == 0) hits = search::search(search::code_words(query), { "recipe", "doc" }, n);
+	if (hits.len > 0) return format_hits(hits, MAX_SNIPPET);
+	// `sort::quicksort`, `read_line`: a name, not a topic; the manual has no section, the standard library has
+	Hit[] syms = search::search(query, { "fn", "macro", "method", "mmethod", "type", "var" }, 3, true);
+	if (syms.len > 0)
+	{
+		DString out = dstring::temp();
+		out.append("not in the manual; closest standard library names:\n");
+		foreach (h : syms) out.append(brief(&corpus::entries[h.idx]));
+		return util::clip(out.str_view(), MAX_REPLY);
+	}
+	return "no match in the manual; try other words or c3_symbol for a stdlib name";
 }
 
 fn String c3_changes(String topic @Desc("keyword, e.g. 'foreach', 'faultdef', 'type properties'"),

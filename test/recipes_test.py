@@ -13,13 +13,14 @@ for path in files:
     name = os.path.basename(path)[:-3]
     text = open(path, encoding="utf-8").read()
     want = [l[len("// expect:"):].strip() for l in text.split("\n") if l.startswith("// expect:")]
+    stdin = "".join(l[len("// stdin:"):].strip().encode().decode("unicode_escape") for l in text.split("\n") if l.startswith("// stdin:"))
     ok = text.startswith("// Recipe: ") and want
     tmp = tempfile.mkdtemp()
     try:
         r = subprocess.run([c3c, "compile", path, "-o", os.path.join(tmp, name)], capture_output=True, text=True, cwd=tmp)
         out = ""
         if r.returncode == 0:
-            p = subprocess.run([os.path.join(tmp, name + exe)], capture_output=True, text=True, cwd=tmp, timeout=30)
+            p = subprocess.run([os.path.join(tmp, name + exe)], capture_output=True, text=True, cwd=tmp, timeout=30, input=stdin)
             out = p.stdout
         got = [l.strip() for l in out.strip().split("\n")] if out.strip() else []
         ok = ok and r.returncode == 0 and got == want
