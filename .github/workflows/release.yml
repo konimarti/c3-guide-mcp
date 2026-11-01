@@ -4,7 +4,7 @@ on:
     tags: ['v*']
   workflow_dispatch:     # dry run: builds and packages, uploads the files as artifacts, publishes nothing
 env:
-  C3C_VERSION: v0.8.5            # the snapshot in data/corpus.dat and the tests belong to exactly this compiler
+  C3C_VERSION: v0.8.6            # the snapshot in data/corpus.dat and the tests belong to exactly this compiler
   MCP_REF: a7d0dd196640340ee9c1cc7d9dceb2a0128af5e7   # konimarti/mcp.c3l, pinned
 permissions:
   contents: write
@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          name="c3-guide-mcp-${GITHUB_REF_NAME}-c3c0.8.5-${{ matrix.target }}"
+          name="c3-guide-mcp-${GITHUB_REF_NAME}-c3c0.8.6-${{ matrix.target }}"
           mkdir "$name"
           exe=c3-guide-mcp; [ "$RUNNER_OS" = Windows ] && exe=c3-guide-mcp.exe
           cp "build/$exe" LICENSE NOTICE README.md "$name/"
@@ -85,5 +85,5 @@ jobs:
           cat SHA256SUMS
           pre=""; case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" c3-guide-mcp-* SHA256SUMS --repo "$GITHUB_REPOSITORY" $pre \
-            --title "$GITHUB_REF_NAME (c3c 0.8.5)" \
-            --notes "Prebuilt c3-guide-mcp for c3c 0.8.5 (Linux x64, macOS arm64, Windows x64). Unpack, point your MCP client at the binary, set C3C to your c3c if it is not on PATH (only c3_check needs it). Verify with SHA256SUMS."
+            --title "$GITHUB_REF_NAME (c3c 0.8.6)" \
+            --notes "Prebuilt c3-guide-mcp for c3c 0.8.6 (Linux x64, macOS arm64, Windows x64). Unpack, point your MCP client at the binary, set C3C to your c3c if it is not on PATH (only c3_check needs it). Verify with SHA256SUMS."

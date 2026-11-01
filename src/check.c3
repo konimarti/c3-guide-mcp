@@ -115,7 +115,7 @@ fn String? run_capped(String[] cmd, int* code, bool* timed_out, ulong deadline_m
 }
 
 // Replace every `needle` in `s` by `replacement`. (std String.replace returned corrupted bytes for a 4 KB
-// string without a match in c3c 0.8.5, hence the small loop.)
+// string without a match in c3c 0.8.6, hence the small loop.)
 fn String redact(String s, String needle, String replacement)
 {
 	DString out = dstring::temp();
