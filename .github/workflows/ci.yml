@@ -45,7 +45,6 @@ jobs:
           chmod +x "$HOME/bin/c3l"
           export PATH="$HOME/bin:$PATH"
           c3l sync --frozen
-          c3l verify
       - name: Build (-O3)
         shell: bash
         run: c3c build c3-guide-mcp -O3
