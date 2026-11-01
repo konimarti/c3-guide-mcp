@@ -22,7 +22,11 @@ fn String c3c_binary()
 {
 	String? v = env::tget_var("C3C");
 	if (try v) { if (v.len > 0) return v; }
-	return "c3c";
+	$if env::WIN32:
+		return "c3c.exe";   // CreateProcess finds a program on PATH only with its extension
+	$else
+		return "c3c";
+	$endif
 }
 
 // Kills the child when the deadline passes. The mutex makes "check done, then kill" atomic against the
