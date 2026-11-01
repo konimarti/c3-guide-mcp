@@ -1,6 +1,6 @@
 module c3guide::tools;
 import mcp, std::core::string;
-import c3guide::corpus, c3guide::search, c3guide::util;
+import c3guide::corpus, c3guide::search, c3guide::util, c3guide::hints;
 import std::sort;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
@@ -222,8 +222,62 @@ fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
+// Is `word` in `line` as a whole identifier (not inside `readline_all`)?
+fn bool has_word(String line, String word)
+{
+	sz from = 0;
+	while (from < line.len)
+	{
+		sz? at = line[from..].index_of(word);
+		if (catch at) return false;
+		sz a = from + at;
+		sz b = a + word.len;
+		bool left = a == 0 || !hints::ident_char(line[a - 1]);
+		bool right = b >= line.len || !hints::ident_char(line[b]);
+		if (left && right) return true;
+		from = a + 1;
+	}
+	return false;
+}
+
+fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'HashMap', 'String.split', 'sort::quicksort'"),
+	int limit @Desc("number of examples (1..5)") = 3)
+	@Desc("Working code that uses a standard library function or type: the verified recipes and the manual's examples, with the lines around each use. Use it after c3_symbol when the signature is not enough to see how it is called.")
+	@ReadOnly
+{
+	String n = symbol.trim(" \t\n");
+	if (n.len == 0) return "give a stdlib name, e.g. HashMap or readline";
+	String word = last_segment(n);
+	int max = clamp(limit, 1, 5);
+	DString out = dstring::temp();
+	int shown = 0;
+	for (int pass = 0; pass < 2 && shown < max; pass++)
+	{
+		foreach (&e : corpus::entries)
+		{
+			if (shown >= max) break;
+			if (e.kind != (pass == 0 ? "recipe" : "doc")) continue;
+			String[] lines = e.body.tsplit("\n");
+			foreach (i, line : lines)
+			{
+				if (!has_word(line, word)) continue;
+				// a few lines before and after the first use; a recipe is short, so show it all when it is
+				sz from = e.kind == "recipe" && lines.len <= 24 ? 0 : (i > 3 ? i - 3 : 0);
+				sz to = e.kind == "recipe" && lines.len <= 24 ? lines.len : (i + 6 < lines.len ? i + 6 : lines.len);
+				out.appendf("### %s\n", util::clip(e.title, 100));
+				foreach (l : lines[from:to - from]) out.appendf("%s\n", util::clip(l, 160));
+				shown++;
+				break;
+			}
+		}
+	}
+	if (shown == 0) return string::tformat("no recipe or manual example uses '%s'. c3_symbol '%s' gives the signature.", word, n);
+	return util::clip(out.str_view(), MAX_REPLY);
+}
+
 fn void register(mcp::Server* s)
 {
+	s.@tool(c3_examples);
 	s.@tool(c3_search);
 	s.@tool(c3_symbol);
 	s.@tool(c3_changes);

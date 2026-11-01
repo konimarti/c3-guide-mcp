@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "/path/to/c3-guide-mcp/integrations/claude-code/redirect-c3c.sh" }
+        ]
+      }
+    ]
+  }
+}

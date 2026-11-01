@@ -1,5 +1,5 @@
 module c3guide::test::check;
-import c3guide::check, c3guide::test::support;
+import c3guide::check, c3guide::hints, c3guide::test::support;
 import std::core::string, std::io, std::io::file, std::io::path, std::os::env, std::time, std::time::clock;
 
 const String[*] TOKENS = { "$include", "$exec", "$embed" };
@@ -27,7 +27,7 @@ fn void syntax_error_has_line_and_column() @test
 
 fn void empty_and_oversized_code_is_rejected() @test
 {
-	assert(has(check::c3_check(""), "give 1 to"));
+	assert(has(check::c3_check(""), "give code"));
 	DString big = dstring::temp();
 	big.append("fn void f() {}");
 	for (int i = 0; i < 40000; i++) big.append_char(' ');
@@ -167,4 +167,151 @@ fn void flooding_compiler_is_cut_and_killed() @test
 	String t = check::c3_check("fn void f() {}");
 	ulong ms = (ulong)start.to_now() / 1_000_000;
 	assert(t.len < 4200 && has(t, "[output cut]") && ms < 5000, "%d ms, len %d", ms, t.len);
+}
+
+// ---------------------------------------------------------------- project / file paths, fix, hints, run
+
+// A two-file project in a temp dir: `body` is the content of src/main.c3.
+fn Path make_project(String body)
+{
+	Path dir = support::make_temp_dir("c3proj");
+	support::sh(string::tformat("mkdir -p '%s/src'", (String)dir));
+	file::save(string::tformat("%s/project.json", (String)dir), `{"langrev":"1","sources":["src/**"],"targets":{"app":{"type":"executable"}}}`)!!;
+	file::save(string::tformat("%s/src/main.c3", (String)dir), body)!!;
+	return dir;
+}
+
+const String PROJECT_OK = "module app;\nimport std::io;\nfn int add(int a, int b) => a + b;\nfn void main() { io::printn(add(1, 2)); }\nfn void t_ok() @test { assert(add(1, 1) == 2); }\nfn void t_bad() @test { assert(add(1, 1) == 3, \"nope\"); }\n";
+
+fn void project_path_is_checked_and_tree_stays_clean() @test
+{
+	Path dir = make_project(PROJECT_OK);
+	defer (void)path::rmtree(dir);
+	String t = check::c3_check(path: (String)dir);
+	assert(has(t, "OK"), "%s", t);
+	String listing = support::sh(string::tformat("ls '%s'", (String)dir));
+	assert(!has(listing, "build") && !has(listing, "out") && !has(listing, "obj"), "the check wrote into the project: %s", listing);
+}
+
+fn void project_error_has_relative_path() @test
+{
+	Path dir = make_project("module app;\nfn void main() { int x = ; }\n");
+	defer (void)path::rmtree(dir);
+	String t = check::c3_check(path: (String)dir);
+	assert(has(t, "src/main.c3:2:") && !has(t, "c3proj-"), "%s", t);
+}
+
+fn void single_file_path_is_checked() @test
+{
+	Path dir = make_project("module app;\nfn int f() { return 1; }\n");
+	defer (void)path::rmtree(dir);
+	String t = check::c3_check(path: string::tformat("%s/src/main.c3", (String)dir));
+	assert(has(t, "OK"), "%s", t);
+}
+
+fn void bad_paths_and_argument_mixes_are_refused() @test
+{
+	assert(has(check::c3_check(path: "/nonexistent/dir"), "project directory"));
+	assert(has(check::c3_check(path: "/tmp"), "project directory"), "a directory without project.json");
+	assert(has(check::c3_check("fn void f() {}", "/tmp"), "not both"));
+	assert(has(check::c3_check(), "give code"));
+}
+
+fn void old_property_error_gets_a_hint() @test
+{
+	String t = check::c3_check("fn void f() { int a = int.sizeof; }");
+	assert(has(t, "Hints:") && has(t, "int::size") && has(t, "c3_fix"), "%s", t);
+}
+
+fn void guessed_stdlib_name_gets_a_signature_hint() @test
+{
+	String t = check::c3_check("import std::io;\nfn void f() { io::read_line(); }");
+	assert(has(t, "Hints:") && has(t, "readline"), "%s", t);
+}
+
+fn void valid_code_has_no_hints() @test
+{
+	assert(!has(check::c3_check("fn void f() {}"), "Hints"));
+}
+
+fn void fix_rewrites_old_syntax_and_verifies() @test
+{
+	String t = check::c3_fix("import std::io;\nstruct Foo { int x; }\nfn void f(isz z) { int a = int.sizeof; usz n = $sizeof(Foo); io::printn(a); }\n");
+	assert(has(t, "int::size") && has(t, "Foo::size") && has(t, "sz z") && has(t, "OK: no errors"), "%s", t);
+}
+
+fn void fix_leaves_strings_comments_and_variables_alone() @test
+{
+	hints::Rewrite r = hints::rewrite("// isz int.sizeof\nfn void f() { String s = \"isz int.sizeof\"; var m = x.max; /* $sizeof(a) */ }");
+	assert(r.count == 0 && r.code.contains("\"isz int.sizeof\"") && r.code.contains("x.max") && r.code.contains("// isz"), "%s", r.code);
+	hints::Rewrite q = hints::rewrite("fn int g() { return int.max + Foo.min; }");
+	assert(q.code == "fn int g() { return int::max + Foo::min; }" && q.count == 2, "%s", q.code);
+}
+
+fn void fix_reports_when_nothing_applies() @test
+{
+	String t = check::c3_fix("fn void f() {}");
+	assert(has(t, "no mechanical") && has(t, "OK"), "%s", t);
+}
+
+fn void test_tool_reports_failures_without_noise() @test
+{
+	Path dir = make_project(PROJECT_OK);
+	defer (void)path::rmtree(dir);
+	String t = check::c3_test((String)dir);
+	assert(has(t, "t_bad") && has(t, "nope") && has(t, "main.c3:6") && has(t, "1 passed, 1 failed"), "%s", t);
+	assert(!has(t, "std.core.runtime") && !has(t, "\x1b"), "%s", t);
+	String f = check::c3_test((String)dir, "t_ok");
+	assert(has(f, "1 passed") && !has(f, "FAIL"), "%s", f);
+	String listing = support::sh(string::tformat("ls '%s'", (String)dir));
+	assert(!has(listing, "out") && !has(listing, "build"), "the test run wrote into the project: %s", listing);
+}
+
+fn void run_tool_runs_snippet_and_project() @test
+{
+	String t = check::c3_run("import std::io;\nfn void main() { io::printn(\"hello run\"); }");
+	assert(has(t, "hello run"), "%s", t);
+	Path dir = make_project(PROJECT_OK);
+	defer (void)path::rmtree(dir);
+	String p = check::c3_run(path: (String)dir);
+	assert(has(p, "3"), "%s", p);
+	String e = check::c3_run("fn void main() { int x = ; }");
+	assert(has(e, "snippet.c3:1:") && !has(e, "c3guide-"), "%s", e);
+}
+
+fn void run_tool_rejects_embed_in_snippets() @test
+{
+	assert(has(check::c3_run("module m; const char[*] X = $embed(\"x\");"), "rejected"));
+}
+
+fn void run_tools_need_the_environment_switch() @test
+{
+	String saved = env::get_var(mem, "C3_GUIDE_ALLOW_RUN") ?? "";
+	defer
+	{
+		if (saved.len > 0)
+		{
+			env::set_var("C3_GUIDE_ALLOW_RUN", saved);
+		}
+		else
+		{
+			env::clear_var("C3_GUIDE_ALLOW_RUN");
+		}
+	}
+	env::clear_var("C3_GUIDE_ALLOW_RUN");
+	assert(!check::run_allowed());
+	env::set_var("C3_GUIDE_ALLOW_RUN", "0");
+	assert(!check::run_allowed());
+	env::set_var("C3_GUIDE_ALLOW_RUN", "1");
+	assert(check::run_allowed());
+}
+
+fn void run_tool_kills_a_hanging_compiler_after_its_deadline_flag() @test
+{
+	// the run deadline is longer than the check deadline: a fake that exits fast must not be cut
+	Path dir = support::make_temp_dir("c3fake");
+	defer (void)path::rmtree(dir);
+	defer support::restore_c3c();
+	support::set_c3c(support::write_fake(dir, "ok.sh", "echo fake-output"));
+	assert(has(check::c3_run("fn void main() {}"), "fake-output"));
 }
