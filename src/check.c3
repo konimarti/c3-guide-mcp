@@ -1,6 +1,6 @@
 module c3guide::check;
 import mcp, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
-import c3guide::util, std::os::posix, std::time;
+import c3guide::util, std::time;
 
 // Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
 // fresh temp dir and compiled with a FIXED command line:
@@ -152,8 +152,8 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	Path? tmp = path::temp_directory(tmem);
 	if (catch tmp) return "no temp directory available";
 	sweep_stale(tmp);
-	// pid + clock: two servers (or two calls in one millisecond) never share a directory
-	Path? dir = tmp.tappend(string::tformat("c3guide-%d-%d", (int)posix::getpid(), (int)(clock::now() % 1000000000)));
+	// nanosecond clock: two servers (or two calls) never share a directory
+	Path? dir = tmp.tappend(string::tformat("c3guide-%d", (long)clock::now()));
 	if (catch dir) return "cannot create a temp path";
 	if (catch path::mkdir(dir)) return "cannot create a temp directory";
 	defer (void)path::rmtree(dir);
