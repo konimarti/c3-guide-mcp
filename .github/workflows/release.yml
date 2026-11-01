@@ -2,6 +2,7 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:     # dry run: builds and packages, uploads the files as artifacts, publishes nothing
 env:
   C3C_VERSION: v0.8.5            # the snapshot in data/corpus.rs and the tests belong to exactly this compiler
   MCP_REF: cd4278f19624b6cb213b2cb04bf35dc48f5c13f3   # konimarti/mcp.c3l, pinned
@@ -24,6 +25,17 @@ jobs:
         run: |
           git clone https://github.com/konimarti/mcp.c3l deps/mcp.c3l
           git -C deps/mcp.c3l checkout "$MCP_REF"
+      - name: Windows: mcp.c3l's manifest lists no windows-x64 yet (CI-only patch; drop once the SDK has it)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          p = "deps/mcp.c3l/manifest.json"
+          m = json.load(open(p))
+          m["targets"]["windows-x64"] = {"dependencies": [], "linked-libraries": []}
+          json.dump(m, open(p, "w"), indent=2)
+          PY
       - name: c3c ${{ env.C3C_VERSION }}
         shell: bash
         run: |
@@ -68,6 +80,7 @@ jobs:
           path: c3-guide-mcp-*.${{ matrix.ext }}
   publish:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -81,6 +94,7 @@ jobs:
           cd dist
           sha256sum c3-guide-mcp-* > SHA256SUMS
           cat SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" c3-guide-mcp-* SHA256SUMS --repo "$GITHUB_REPOSITORY" \
+          pre=""; case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" c3-guide-mcp-* SHA256SUMS --repo "$GITHUB_REPOSITORY" $pre \
             --title "$GITHUB_REF_NAME (c3c 0.8.5)" \
             --notes "Prebuilt c3-guide-mcp for c3c 0.8.5 (Linux x64, macOS arm64, Windows x64). Unpack, point your MCP client at the binary, set C3C to your c3c if it is not on PATH (only c3_check needs it). Verify with SHA256SUMS."
