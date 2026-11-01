@@ -5,7 +5,7 @@ on:
   pull_request:
 env:
   C3C_VERSION: v0.8.5            # the snapshot in data/corpus.dat and the tests belong to exactly this compiler
-  C3L_REF: 7f623c6224a17e127a5e4b005729ac58e21efd92   # konimarti/c3l (a shell script), pinned
+  C3L_REF: 380b4582ff13ba8f44695945122ecd782ea55e1c   # konimarti/c3l (a shell script), pinned
 permissions:
   contents: read
 jobs:
