@@ -45,6 +45,8 @@ CASES = [
     ("c3_search", "read_line", "readline"),
     ("c3_search", "sort struct array by field", "Recipe: sort structs"),
     ("c3_search", "list files matching *.txt", "Recipe: list a directory, only"),
+    ("c3_search", "weekday of a date", "Recipe: calendar date"),
+    ("c3_search", "DateTime day of week", "Recipe: calendar date"),
     ("c3_search", "read lines from stdin", "Recipe: read lines from standard input"),
     # compiler-known aliases that docgen does not list
     ("c3_symbol", "tmem", "alias tmem = current_temp"),
