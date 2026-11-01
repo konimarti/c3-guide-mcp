@@ -97,3 +97,12 @@ fn void syntax_lists_and_word_search() @test
 	assert(tools::c3_syntax("@noreturn").contains("@noreturn"));
 	assert(tools::c3_syntax("zzzqqqxx").contains("no such list"));
 }
+
+fn void examples_show_working_code() @test
+{
+	String t = tools::c3_examples("HashMap");
+	assert(t.contains("HashMap{String, int}") && t.len <= 3200 + 64, "%s", t);
+	assert(tools::c3_examples("String.split").contains("split"), "qualified name uses its last segment");
+	assert(tools::c3_examples("qzxvwqjk").contains("no recipe or manual example"));
+	assert(!tools::c3_examples("readline").contains("readline_all"), "whole identifiers only");
+}

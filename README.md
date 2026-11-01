@@ -16,30 +16,44 @@ model:  c3_symbol("read line")    ->  std::io::readline: macro String? readline(
 
 | Tool | Answers |
 |---|---|
+| `c3_check(code or path)` | the compiler's diagnostics for a snippet, or for a real project directory / `.c3` file on disk, plus **hints**: for an error that names a guessed stdlib function or an old 0.7 property, the right signature or the 0.8 form |
+| `c3_fix(code)` | rewrites the mechanical 0.7 -> 0.8 changes (`int.sizeof` -> `int::size`, `$sizeof(T)`, `isz` -> `sz`, `$vacount`, `$vasplat`), then compiles the result and shows what is left |
 | `c3_search(query)` | the language manual and the [recipes](recipes/) (small programs that compile and run: read a file line by line, HashMap, sort, mkdir, threads, generics...), best first |
 | `c3_symbol(name or description)` | exact signature, doc and file:line of a stdlib function, macro, method or type; says so when it does not exist and suggests close names. Given words instead of a name (`read line`, `get environment variable`) it ranks symbols by the words in their name and doc comment |
+| `c3_examples(symbol)` | working code that uses a stdlib function or type: the verified recipes and the manual's examples, with the lines around each use |
 | `c3_changes(topic)` | the release-note lines about a topic, newest first |
 | `c3_syntax(topic)` | the compiler's lists: attributes, builtins, keywords, type properties, operators |
-| `c3_check(code)` | the compiler's diagnostics for a snippet (type-check only, nothing is linked or run) |
+| `c3_test(path, filter)` | **opt-in** (see below): builds a project or file in a scratch directory, runs its `@test` functions, returns pass/fail with the failing assertion and file:line, without the runtime's stack frames |
+| `c3_run(code or path)` | **opt-in**: builds in a scratch directory and runs a program (stdin empty), returns its output or the compile errors with hints |
 
-Replies of the four docs tools are capped at 3.2 KB, `c3_check` at 4 KB. A server that dumps pages into the context makes the model worse.
+Replies of the docs tools are capped at 3.2 KB, `c3_check` at 4 KB plus at most 1.5 KB of hints, `c3_test`/`c3_run` at 6 KB. A server that dumps pages into the context makes the model worse.
+
+### Why `c3_test` and `c3_run` are off by default
+
+`c3_check` never runs anything: `--no-obj` for snippets, a build into a scratch directory for projects, `--trust=none` throughout. `c3_test` and `c3_run` execute the program they build, which is a different trust level, so the operator opts in by starting the server with `C3_GUIDE_ALLOW_RUN=1`. Without it the two tools are not listed and the server's instructions do not mention them. They keep every guard of `c3_check` (`--trust=none`, 60 s deadline, capped output, build artifacts in a temp directory that is removed afterwards, snippets with `$embed`/`$include`/`$exec` refused), but the server is still not a sandbox: a program you run can read and write whatever your user can. Turn it on for code you or your model wrote on your own machine, not for untrusted input.
+
+### Paths
+
+`c3_check`, `c3_test` and `c3_run` take `path`: a directory containing `project.json` (the project is built with its dependencies and `--path`; `target` picks the build target) or one `.c3` file. Diagnostics show paths relative to the project. Nothing is written into the project. Files given by `path` are your own code, so the `$embed` filter that protects snippets does not apply to them.
 
 ## Use it
 
-Models call the tools more reliably when told to. One line in your `CLAUDE.md`, `AGENTS.md` or system prompt is enough: *"Look up every C3 standard library call with `c3_symbol` and run all code through `c3_check` before showing it."*
+Models call the tools more reliably when told to. The server sends its own instructions (it tells the model to use `c3_check` instead of running `c3c` by hand); in addition, one line in your `CLAUDE.md`, `AGENTS.md` or system prompt helps: [integrations/claude-code/CLAUDE.md](integrations/claude-code/CLAUDE.md).
+
+Instructions are advice. To make Claude Code actually use the tools, add the hook from [integrations/claude-code](integrations/claude-code) (`settings.json` + `redirect-c3c.sh`): it blocks `c3c test`, `c3c compile-run`, `c3c compile-only` and `c3c run` typed into Bash and tells the model which tool to call. `c3c build` and `c3c compile` stay allowed, for producing a binary.
 
 In our small comparisons (4 runs per round with and without the tools, same prompt) the runs with the tools compiled on the first or second try. Without them the models guessed `File.open` and `File.read_line`, which do not exist, and one run did not get clean in 12 compiler runs. That is a handful of runs on a small model, not a benchmark, but it is the failure the server is built for.
 
 ## Install
 
-Download the archive for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, Windows x64), check it against `SHA256SUMS`, unpack it. The binary is built for **c3c 0.8.5** (its docs snapshot is embedded). Only `c3_check` needs `c3c`: put it on `PATH` or set `C3C`. Without it the four docs tools still work.
+Download the archive for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, Windows x64), check it against `SHA256SUMS`, unpack it. The binary is built for **c3c 0.8.5** (its docs snapshot is embedded). Only `c3_check`, `c3_fix`, `c3_test` and `c3_run` need `c3c`: put it on `PATH` or set `C3C`. Without it the docs tools (`c3_search`, `c3_symbol`, `c3_examples`, `c3_changes`, `c3_syntax`) still work.
 
 macOS blocks unsigned downloads: `xattr -d com.apple.quarantine ./c3-guide-mcp`. Other platforms (Intel Mac, Linux arm64): build from source, below.
 
 Register it as a stdio server in your MCP client:
 
 ```
-claude mcp add c3-guide -e C3C=/path/to/c3c -- /path/to/c3-guide-mcp     # Claude Code
+claude mcp add c3-guide -e C3C=/path/to/c3c -e C3_GUIDE_ALLOW_RUN=1 -- /path/to/c3-guide-mcp     # Claude Code (drop the second -e to keep c3_test / c3_run off)
 hermes mcp add c3-guide --command /path/to/c3-guide-mcp                    # Hermes
 ```
 
@@ -71,7 +85,7 @@ curl -o all.md https://c3-lang.org/all.md      # optional: adds the sections the
 python3 scripts/gen_corpus.py /path/to/c3 all.md && c3c build c3-guide-mcp -O3
 ```
 
-`c3_check` runs `c3c --trust=none --no-obj` on the snippet in a fresh temp directory, killed after 10 s by a watchdog thread, output capped at 4 KB. `$exec` does not run (tested, with a positive control). `--trust=none` still allows `$embed`, which with `$echo` can print any file the server can read, so snippets containing `$embed`, `$include` or `$exec` are rejected before they reach the compiler. The server is not a sandbox: run it as a user without secrets.
+`c3_check` runs `c3c --trust=none --no-obj` on a snippet in a fresh temp directory, killed after 10 s by a watchdog thread, output capped at 4 KB. `$exec` does not run (tested, with a positive control). `--trust=none` still allows `$embed`, which with `$echo` can print any file the server can read, so snippets containing `$embed`, `$include` or `$exec` are rejected before they reach the compiler. The server is not a sandbox: run it as a user without secrets.
 
 ## Recipes
 
