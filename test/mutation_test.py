@@ -6,10 +6,14 @@ MUT = [
     ("remove --trust=none", "src/check.c3", '"--trust=none", ', ''),
     ("remove --no-obj", "src/check.c3", '"--no-obj", ', ''),
     ("remove $embed guard", "src/check.c3", '{ "$embed", "$include", "$exec" }', '{ "$zzz" }'),
-    ("remove stopwords", "src/search.c3", '{ "how", "to", "a", "an", "the", "of", "in", "is", "do", "does", "i", "with", "for", "what", "use", "using", "can" }', '{ "zzzz" }'),
+    ("remove stopwords", "src/search.c3", '{ "how", "to", "a", "an", "the", "of", "in", "is", "do", "does", "i", "with", "for", "what", "use", "using", "can", "from", "and", "into" }', '{ "zzzz" }'),
     ("invert version sort", "src/tools.c3", 'version_key(corpus::entries[b.idx].title) - version_key(corpus::entries[a.idx].title)', 'version_key(corpus::entries[a.idx].title) - version_key(corpus::entries[b.idx].title)'),
     ("no utf8 boundary", "src/util.c3", 'while (n > 0 && (s[n] & 0xC0) == 0x80) n--;', ''),
     ("exit code ignored", "src/check.c3", 'return status == 0 ? "OK: no errors" : string::tformat("c3c failed (exit code %d) without a message", status);', 'return "OK: no errors";'),
+    ("symbol words not split", "src/search.c3", "(c == '_' && !split_us)", "(c == '_')"),
+    ("no joined word pairs", "src/search.c3", "if (symbols && terms.len >= 2) terms = with_joined_pairs(terms);", ""),
+    ("no abbreviations", "src/search.c3", "if (abbrev) foreach", "if (false) foreach"),
+    ("name hit not boosted", "src/search.c3", "3.0f * short_bonus[i] * (tt > 0 ? 1.0f : 0.0f)", "0.0f"),
     ("deadline disabled", "src/check.c3", 'const ulong DEADLINE_MS = 10000;', 'const ulong DEADLINE_MS = 100000000;'),
 ]
 only = sys.argv[1:]

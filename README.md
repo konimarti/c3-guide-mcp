@@ -5,7 +5,8 @@ An MCP server that teaches an LLM the C3 of today. It answers from the manual, t
 Most models learned C3 0.6/0.7. In 0.8 type properties became `int::size`, `if` with `else` needs braces, and more. Models write the old forms with confidence. This server gives them something better to look at than their memory.
 
 ```
-model:  c3_symbol("file::open")  ->  fn File? open(String filename, String mode)
+model:  c3_symbol("read line")    ->  std::io::readline: macro String? readline(Allocator allocator, stream = io::stdin(), ...)
+        c3_symbol("file::open")  ->  fn File? open(String filename, String mode)
         c3_check(<its code>)     ->  <code>/snippet.c3:1:44: error: if-statements with an 'else'
                                      must use '{ }' even around a single statement.
         (fixes it, checks again) ->  OK: no errors
@@ -16,7 +17,7 @@ model:  c3_symbol("file::open")  ->  fn File? open(String filename, String mode)
 | Tool | Answers |
 |---|---|
 | `c3_search(query)` | the language manual, best sections first |
-| `c3_symbol(name)` | exact signature, doc and file:line of a stdlib function, macro, method or type; says so when it does not exist and suggests close names |
+| `c3_symbol(name or description)` | exact signature, doc and file:line of a stdlib function, macro, method or type; says so when it does not exist and suggests close names. Given words instead of a name (`read line`, `get environment variable`) it ranks symbols by the words in their name and doc comment |
 | `c3_changes(topic)` | the release-note lines about a topic, newest first |
 | `c3_syntax(topic)` | the compiler's lists: attributes, builtins, keywords, type properties, operators |
 | `c3_check(code)` | the compiler's diagnostics for a snippet (type-check only, nothing is linked or run) |
@@ -69,15 +70,15 @@ python3 scripts/gen_corpus.py /path/to/c3 all.md && c3c build c3-guide-mcp -O3
 ```
 C3C=/path/to/c3c python3 test/stdio_test.py   # every tool over stdio, protocol errors, $exec guard
 python3 test/limits_test.py                   # hanging and flooding compilers
-python3 test/quality_test.py                  # 22 questions, expected answer in the top 3
+python3 test/quality_test.py                  # 34 questions, expected answer in the reply (top 3 hits for search)
 python3 test/growth_test.py                   # memory over 4,000 calls
-python3 test/mutation_test.py                 # breaks the code 8 ways; every break must fail a test (slow)
+python3 test/mutation_test.py                 # breaks the code 12 ways; every break must fail a test (slow)
 ```
 
 ## Limits
 
 - The docs and the compiler do not always agree (the manual says `excuse`, other pages `faultdef`; the compiler accepts both). When they differ, `c3_check` is right.
-- Search is keyword based: it finds "Macro vaargs" for "vararg", but not a paraphrase with different words.
+- Search is keyword based: it finds "Macro vaargs" for "vararg", but not a paraphrase with different words. This is sharper for symbols: `read line` finds `readline`, but `create directory` does not find `mkdir`, and many stdlib functions have no doc comment, so only their name can match.
 - A killed server leaves its temp directory behind; the next `c3_check` removes `c3guide-*` directories older than an hour.
 - CI builds and runs a smoke test on Linux x64, macOS arm64 and Windows x64; the full suite runs on Linux and macOS. Only Linux x64 was also tested by hand.
 - Used from Hermes (`hermes mcp test` and real sessions). The Claude Code, Claude Desktop and Cursor lines above follow their documented formats but were not tried.

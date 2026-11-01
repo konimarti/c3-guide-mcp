@@ -141,13 +141,36 @@ fn bool is_symbol(String kind)
 	return false;
 }
 
-fn String c3_symbol(String name @Desc("stdlib symbol, e.g. 'printfn', 'io::printfn', 'String.split', 'talloc_array'"))
-	@Desc("Exact signature, docs and source location of a C3 standard library function, macro, method or type. Never guess a signature, look it up.")
+// Signature line plus the first sentence of the doc: enough to choose, short enough for five hits.
+fn String brief(Entry* e)
+{
+	String[] lines = e.body.tsplit("\n", 2);
+	String doc = lines.len > 1 ? lines[1] : "";
+	sz cut = doc.index_of(" @param") ?? doc.len;
+	cut = (doc.index_of(" @return") ?? doc.len) < cut ? (doc.index_of(" @return") ?? doc.len) : cut;
+	String loc = e.loc.len > 0 ? string::tformat("  (%s)", e.loc) : "";
+	return string::tformat("%s%s\n  %s\n  %s\n", e.title, loc, util::clip(lines[0], 200), util::clip(doc[:cut].trim(" "), 220));
+}
+
+// Words instead of a name: rank symbols by their name and doc comment.
+fn String describe(String query)
+{
+	Hit[] hits = search::search(query, SYMBOL_KINDS[..], 5, true);
+	if (hits.len == 0) return string::tformat("no symbol matches '%s'; try other words", query);
+	DString out = dstring::temp();
+	out.appendf("Symbols matching '%s' (c3c %s):\n", query, corpus::snapshot_version);
+	foreach (h : hits) out.append(brief(&corpus::entries[h.idx]));
+	return util::clip(out.str_view(), MAX_REPLY);
+}
+
+fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 'String.split', 'talloc_array') or, when you do not know the name, what it does ('read a line from a file', 'trim whitespace')"))
+	@Desc("Exact signature, docs and source location of a C3 standard library function, macro, method or type; or, given a description, the functions that do it. Never guess a signature, look it up.")
 	@ReadOnly
 {
 	String n = name.trim(" \t\n");
 	if (n.len == 0) return "give a symbol name, e.g. printfn or String.split";
 	DString out = dstring::temp();
+	if (n.contains(" ")) return describe(n);   // several words: a description, not a name
 	int found = 0;
 	foreach (&e : corpus::entries)
 	{
@@ -173,12 +196,9 @@ fn String c3_symbol(String name @Desc("stdlib symbol, e.g. 'printfn', 'io::print
 			out.appendf("  %s\n", e.title);
 		}
 	}
-	if (shown == 0)
-	{
-		Hit[] hits = search::search(n, SYMBOL_KINDS[..], 5);
-		if (hits.len > 0) out.append("Related symbols:\n");
-		foreach (h : hits) out.appendf("  %s\n", corpus::entries[h.idx].title);
-	}
+	// a wrong name usually has the right words in it (`File.read_line`, `tnew_array`)
+	String words = describe(n);
+	if (!words.starts_with("no symbol")) out.append(words);
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
