@@ -6,6 +6,7 @@ For people who change or release the server. Users: see the [README](../README.m
 
 - The docs are a snapshot embedded in the binary (`$embed` of `data/corpus.dat`, 1.8 MB), built by `scripts/gen_corpus.py` from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`, plus the example programs in `recipes/`. It belongs to one c3c version, printed in its header.
 - A search scans every entry (BM25 over words, title hits weighted higher, recipes boosted) in a few milliseconds, so there is no index to build or keep in sync. Symbol lookups also use `data/synonyms.txt`.
+- When the installed c3c is not the snapshot's version, `src/live.c3` replaces the snapshot's standard library symbols with ones read from that compiler (`c3c docgen <lib/std> --json`, about 0.2 s and a short memory peak at startup; `malloc_trim` gives it back on Linux). It is a port of `symbols()` in `scripts/gen_corpus.py`, and `test/live_test.c3` checks both give identical text for every symbol of the pinned compiler (run with `C3_DIR`). Change one, change the other. The `alias` variables (`mem`, `tmem`), the manual and the release notes always come from the snapshot. Any failure keeps the snapshot.
 - `c3_outline` and `c3_fix` read source with the vendored tree-sitter C3 grammar (`vendor/`). The docs tools do not use it.
 
 ## Updating for a new c3c release

@@ -103,6 +103,23 @@ fn void missing_compiler_gives_a_clear_message() @test
 	assert(has(check::c3_check("fn void f() {}"), "could not start c3c"));
 }
 
+fn void the_exit_code_is_right_even_when_the_pipe_outlives_the_compiler() @test
+{
+	// the compiler exits with 3 at once, a background process keeps the output pipe open for half a second:
+	// the exit is seen before the output is complete, and the code must still be 3 (every time, not mostly)
+	Path dir = support::make_temp_dir("c3fake");
+	defer (void)path::rmtree(dir);
+	defer support::restore_c3c();
+	support::set_c3c(support::write_fake(dir, "exit3.sh", "sleep 0.5 &\nexit 3"));
+	for (int i = 0; i < 3; i++)
+	{
+		String t = check::c3_check("fn void f() {}");
+		assert(!has(t, "OK") && has(t, "exit code 3"), "round %d: %s", i, t);
+	}
+	support::set_c3c(support::write_fake(dir, "exit0.sh", "sleep 0.5 &\nexit 0"));
+	assert(has(check::c3_check("fn void f() {}"), "OK"), "a success with a held pipe is still a success");
+}
+
 fn void exit_code_without_output_is_not_ok() @test
 {
 	Path dir = support::make_temp_dir("c3fake");

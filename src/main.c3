@@ -1,6 +1,6 @@
 module c3guide;
 import mcp, std::core::string;
-import c3guide::corpus, c3guide::tools, c3guide::check, c3guide::outline;
+import c3guide::corpus, c3guide::tools, c3guide::check, c3guide::outline, c3guide::live;
 
 // Sent to the model in `initialize`: this is what makes a model use the tools without being told.
 const String INSTRUCTIONS = `Your memory of C3 is probably outdated (most training data is C3 0.6/0.7; the language changed a lot in 0.8).
@@ -19,6 +19,7 @@ const String RUN_INSTRUCTIONS = `
 fn void main()
 {
 	corpus::load();
+	live::overlay();   // the standard library as the installed c3c has it, when that is not the release of the snapshot
 	mcp::Server server = mcp::new_server("c3-guide-mcp", "0.5.0");
 	server.instructions = check::run_allowed() ? string::format(mem, "%s%s", INSTRUCTIONS, RUN_INSTRUCTIONS) : INSTRUCTIONS;
 	defer server.free();

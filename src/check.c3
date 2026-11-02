@@ -1,5 +1,5 @@
 module c3guide::check;
-import mcp, libc, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
+import mcp, libc, std::os::posix, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
 import c3guide::util, c3guide::hints, c3guide::corpus, std::time;
 
 // Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
@@ -92,6 +92,23 @@ fn String version_of(String binary)
 	return "";
 }
 
+// The directory the compiler is installed in ("Installed directory:" of `c3c --version`), "" when unknown.
+fn String install_dir(String binary)
+{
+	String[] argv = { binary, "--version" };
+	int status = 0;
+	bool timed_out = false;
+	String? out = run_capped(argv, &status, &timed_out);
+	if (catch out) return "";
+	foreach (line : out.tsplit("\n"))
+	{
+		if (!line.contains("Installed directory:")) continue;
+		sz colon = line.index_of(":") ?? 0;
+		return line[colon..].trim(" :\t\r");
+	}
+	return "";
+}
+
 // The version of the compiler the tools run, asked once. Kept in a fixed buffer: temp memory is reset between calls.
 char[64] version_buf;
 String installed_version;
@@ -139,10 +156,17 @@ fn String version_note(bool relevant = false)
 {
 	String have = compiler_version();
 	if (have.len == 0 || (version_noted && !relevant)) return "";
-	if (have != corpus::snapshot_version)
+	if (corpus::symbols_live)
+	{
+		// the signatures were read from this compiler: only the manual and the release notes come from the snapshot
+		if (version_noted) return "";
+		version_noted = true;
+		return string::tformat("\nnote: standard library signatures are read from your c3c %s. The manual and release notes describe c3c %s.\n", have, corpus::snapshot_version);
+	}
+	if (have != corpus::symbols_version)
 	{
 		version_noted = true;
-		return string::tformat("\nnote: these docs describe c3c %s, but the tools run c3c %s. A signature that fails to compile may have changed: trust the compiler, and c3_changes lists renames.\n", corpus::snapshot_version, have);
+		return string::tformat("\nnote: these docs describe c3c %s, but the tools run c3c %s. A signature that fails to compile may have changed: trust the compiler, and c3_changes lists renames.\n", corpus::symbols_version, have);
 	}
 	String other = path_c3c_version();
 	if (other.len > 0 && other != have && !version_noted)
@@ -223,6 +247,27 @@ fn void kill_matching(String dir)
 const ulong DRAIN_MS = 1000;     // c3c has exited but the pipe is still open: wait this long for the output, then move on
 const ulong REAP_MS = 2000;      // after a kill: wait this long for the reader to see the pipe close
 
+// Has the child exited? If so, *status is its exit code. Process.is_running() cannot be used for this: it reaps the
+// child and then calls join(), which has no status left to read, so the code it keeps is garbage.
+fn bool child_exited(Process* p, int* status)
+{
+	$if env::WIN32:
+		bool? alive = p.is_running();
+		if (catch alive) return false;
+		if (alive) return false;
+		CInt? code = p.join();   // the exit code is read from the handle, which stays valid after the process ended
+		*status = code ?? 0;
+		return true;
+	$else
+		CInt raw = 0;
+		CInt reaped = posix::waitpid(p.child, &raw, posix::WNOHANG);
+		if (reaped == 0) return false;
+		*status = (reaped < 0 || !posix::wIFEXITED(raw)) ? 1 : posix::wEXITSTATUS(raw);
+		p.child = 0;   // reaped: nothing left to wait for or to signal
+		return true;
+	$endif
+}
+
 fn long ms_since(Clock t) => (long)(t.to_now() / 1_000_000);
 
 // Run argv (no shell), capture stdout+stderr up to max_output, kill the child past that or past the deadline.
@@ -254,6 +299,7 @@ fn String? run_capped(String[] cmd, int* code, bool* timed_out, ulong deadline_m
 	Clock start = clock::now();
 	bool fired = false;
 	bool exited = false;
+	int exit_status = 0;
 	long exited_at = 0;
 	(void)c.mutex.lock();
 	while (!c.finished)
@@ -262,8 +308,7 @@ fn String? run_capped(String[] cmd, int* code, bool* timed_out, ulong deadline_m
 		if (now >= (long)deadline_ms) { fired = true; break; }
 		if (!exited)
 		{
-			bool? alive = proc.is_running();
-			if (try alive) { if (!alive) { exited = true; exited_at = now; } }
+			if (child_exited(proc, &exit_status)) { exited = true; exited_at = now; }
 		}
 		else if (now - exited_at > (long)DRAIN_MS)
 		{
@@ -289,13 +334,8 @@ fn String? run_capped(String[] cmd, int* code, bool* timed_out, ulong deadline_m
 	c.mutex.unlock();
 
 	int status = 0;
-	$if env::WIN32:
-		CInt? j = proc.join();   // the exit code is read from the handle, which stays valid after the process ended
-		status = j ?? 0;
-	$else
-		if (exited) { status = proc.return_status; }   // is_running() already reaped it: join() would have no status to give
-		else { CInt? j = proc.join(); status = j ?? 0; }
-	$endif
+	if (exited) { status = exit_status; }
+	else { CInt? j = proc.join(); status = j ?? 0; }
 	*timed_out = fired;
 	*code = (fired || capped) ? 0 : status;
 

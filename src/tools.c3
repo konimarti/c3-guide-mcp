@@ -209,7 +209,7 @@ fn String describe(String query)
 	Hit[] hits = search::search(query, SYMBOL_KINDS[..], 5, true);
 	if (hits.len == 0) return string::tformat("no symbol matches '%s'; try other words", query);
 	DString out = dstring::temp();
-	out.appendf("Symbols matching '%s' (c3c %s):\n", query, corpus::snapshot_version);
+	out.appendf("Symbols matching '%s' (c3c %s):\n", query, corpus::symbols_version);
 	foreach (h : hits) out.append(brief(&corpus::entries[h.idx]));
 	return util::clip(out.str_view(), MAX_REPLY);
 }
@@ -286,7 +286,7 @@ fn String symbol_reply(String name)
 	}
 	// not found: say so (a model must not assume a guessed API exists), then offer close names
 	out.append(legacy_note(n));
-	out.appendf("'%s' does not exist in the standard library of c3c %s.\n", n, corpus::snapshot_version);
+	out.appendf("'%s' does not exist in the standard library of c3c %s.\n", n, corpus::symbols_version);
 	// `allocator::free` is asked for by its old module: the same name in another module is the likely answer
 	String q = last_segment(n).to_lower_tcopy();
 	String module_hint = "";

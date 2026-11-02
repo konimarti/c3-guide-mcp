@@ -78,7 +78,7 @@ Two more tools are off until you enable them (below): `c3_test` runs your `@test
 ## Install
 
 1. Download the binary for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases): Linux x64, macOS arm64 or Windows x64. Unpack it. On macOS, allow it once: `xattr -d com.apple.quarantine ./c3-guide-mcp`.
-2. Install [c3c](https://github.com/c3lang/c3c/releases) **0.8.5**. The built-in documentation matches that release.
+2. Install [c3c](https://github.com/c3lang/c3c/releases). Built and tested with **0.8.5**. If you run another version (a newer release or the pre-release), the server reads the standard library signatures from your own `c3c` at startup (about 0.2 s), so `c3_symbol` always matches the compiler you build with. The manual and release notes stay at 0.8.5.
 
 The server finds `c3c` on your `PATH` and in the usual install folders. If your editor uses a short `PATH`, set `C3C=/path/to/c3c`. The search tools work without it.
 
@@ -123,7 +123,7 @@ A run is stopped after the time limit you set (up to 120 s). This is not a sandb
 
 ## Good to know
 
-- If the docs and `c3c` disagree, trust `c3c`.
+- Signatures come from your `c3c`. If anything still disagrees with the compiler, trust the compiler.
 - Search matches words, not meaning. For a standard library function, ask by name.
 - Tested by hand on Linux x64. CI builds and smoke-tests Linux, macOS and Windows.
 
