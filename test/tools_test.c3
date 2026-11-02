@@ -119,7 +119,7 @@ fn bool contains_fault(String t) @local => support::contains_ci(t, "fault");
 
 fn void changes_newest_version_first() @test
 {
-	String t = tools::c3_changes("type properties", 3);
+	String t = tools::c3_changes("foreach", 3);
 	int prev = 2147483647;
 	int heads = 0;
 	foreach (line : t.tsplit("\n"))
@@ -189,4 +189,47 @@ fn void a_cut_utf8_tail_is_dropped() @test
 	assert(util::cut_utf8("a\xC3") == 1);
 	assert(util::cut_utf8("a\xC3\xA9") == 3, "a complete character stays");
 	assert(util::cut_utf8("ab\U0001F980") == 6);
+}
+
+fn void examples_refuse_names_with_nothing_in_them() @test
+{
+	String[*] bads = { "io::", "String.", ".", "::", "a" };
+	foreach (bad : bads)
+	{
+		String r = tools::c3_examples(bad);
+		assert(r.starts_with("give a stdlib name"), "%s -> %s", bad, r);
+	}
+	DString big = dstring::temp();
+	for (int i = 0; i < 5000; i++) big.append_char('a');
+	assert(tools::c3_examples(big.str_view()).len <= MAX_TEXT, "the echo of a long name is cut too");
+	assert(tools::last_segment("::x") == "x" && tools::last_segment(".x") == "x" && tools::last_segment("std::io::file::") == "");
+}
+
+fn void similar_names_are_not_everything_that_shares_a_prefix() @test
+{
+	String io = tools::c3_symbol("io::");
+	assert(!io.contains("Similar names") && !io.contains("ReflectedParam"), "an empty name has no neighbours: %s", io);
+	String r = tools::c3_symbol("File.read_line");
+	assert(!r.contains("Socket.read") && !r.contains("zip"), "read and read_line are different words: %s", r);
+}
+
+fn void release_note_lines_need_the_whole_name() @test
+{
+	String[*] words = { "foo", "var", "type", "x", "any" };
+	foreach (word : words)
+	{
+		assert(!tools::c3_symbol(word).contains("Release notes"), "%s", word);
+	}
+	assert(tools::c3_symbol("printfln").contains("Release notes"));
+}
+
+fn void changes_understand_dotted_and_qualified_names() @test
+{
+	assert(!tools::c3_changes("int.sizeof").starts_with("nothing"), "a property written the old way");
+	String f = tools::c3_changes("fault", 5);
+	foreach (line : f.tsplit("\n"))
+	{
+		if (!line.starts_with("-")) continue;
+		assert(tools::has_word(line.to_lower_tcopy(), "fault") || tools::has_word(line.to_lower_tcopy(), "faults"), "'default' is not 'fault': %s", line);
+	}
 }

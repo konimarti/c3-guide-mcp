@@ -52,7 +52,7 @@ fn String matching_lines(String body, String[] terms, bool all)
 		if (!line.starts_with("-") || n >= 6) continue;
 		String low = line.to_lower_tcopy();
 		int hit = 0;
-		foreach (t : terms) if (low.contains(t)) hit++;
+		foreach (t : terms) if (has_word(low, t) || has_word(low, string::tformat("%ss", t))) hit++;
 		if (hit == 0 || (all && hit < terms.len)) continue;
 		out.appendf("%s\n", util::clip(line, 240));
 		n++;
@@ -85,7 +85,7 @@ fn int clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
 
 fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach with index', 'defer catch'"),
 	int limit @Desc("number of results (1..5)") = 3)
-	@Desc("Search the C3 language manual (the installed compiler's version) and the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...). Use this before writing C3 you are not sure about.")
+	@Desc("Search the C3 language manual (the snapshot embedded in this server, see c3_symbol for its version) and the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...). Use this before writing C3 you are not sure about.")
 	@ReadOnly
 {
 	int n = clamp(limit, 1, 5);
@@ -107,11 +107,12 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 
 fn String c3_changes(String topic @Desc("keyword, e.g. 'foreach', 'faultdef', 'type properties'"),
 	int limit @Desc("number of release-note sections (1..5)") = 3)
-	@Desc("Search the release notes (0.3.0 to the installed version) for what changed or broke, newest first. Use it when old C3 syntax from memory fails.")
+	@Desc("Search the release notes (0.3.0 to the snapshot's version) for what changed or broke, newest first. Use it when old C3 syntax from memory fails.")
 	@ReadOnly
 {
-	String[] terms = search::query_terms(topic);
-	Hit[] hits = search::search(topic, { "change" }, 24);
+	String words = search::code_words(topic);   // `int.sizeof`, `String.split`, `0.8.0`: the punctuation is not part of a word
+	String[] terms = search::query_terms(words);
+	Hit[] hits = search::search(words, { "change" }, 24);
 	if (hits.len == 0) return "nothing in the release notes";
 	Hit[] sorted = mem::talloc_array(Hit, hits.len);
 	foreach (i, h : hits) sorted[i] = h;
@@ -172,10 +173,8 @@ fn String c3_syntax(String topic @Desc("one of: attributes, builtins, keywords, 
 // "std::io::printfn" -> "printfn", "std::core::string::String.split" -> "split"
 fn String last_segment(String uid)
 {
-	sz a = uid.rindex_of("::") ?? 0;
-	String s = a == 0 ? uid : uid[a + 2..];
-	sz d = s.rindex_of(".") ?? 0;
-	return d == 0 ? s : s[d + 1..];
+	String s = uid[((uid.rindex_of("::") ?? -2) + 2)..];
+	return s[((s.rindex_of(".") ?? -1) + 1)..];
 }
 
 // Does the symbol uid match the user's name? "printfn", "io::printfn", "String.split" and the full uid all do.
@@ -227,8 +226,8 @@ fn int exact_matches(String name)
 // A name that "does not exist" is most often a name that moved.
 fn String rename_notes(String word)
 {
+	if (word.len < 4) return "";   // `foo`, `x`, `any` appear in a hundred unrelated lines
 	Hit[] hits = search::search(word, { "change" }, 12);
-	String low = word.to_lower_tcopy();
 	int best_key = -1;
 	int second_key = -1;
 	String best = "";
@@ -241,7 +240,7 @@ fn String rename_notes(String word)
 		{
 			if (!line.starts_with("-")) continue;
 			String l = line.to_lower_tcopy();
-			if (!l.contains(low) || !(l.contains("renam") || l.contains("replace") || l.contains("remov") || l.contains("moved"))) continue;
+			if (!has_word(line, word) || !(l.contains("renam") || l.contains("replace") || l.contains("remov") || l.contains("moved"))) continue;
 			int key = version_key(e.title);
 			String text = string::tformat("  %s: %s\n", strip_prefix(e.title, "C3C Release Notes > ").tsplit(" ")[0], util::clip(line, 240));
 			if (key > best_key) { second_key = best_key; second = best; best_key = key; best = text; }
@@ -260,12 +259,20 @@ fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 
 	return string::tformat("%s%s", reply, check::version_note());
 }
 
+// Do the two names start the same and have about the same length? `read` and `read_line` are different words.
+fn bool alike(String a, String b)
+{
+	sz lo = a.len < b.len ? a.len : b.len;
+	sz hi = a.len < b.len ? b.len : a.len;
+	return lo >= 3 && lo * 10 >= hi * 6 && (a.starts_with(b) || b.starts_with(a));
+}
+
 fn String symbol_reply(String name)
 {
 	String n = name.trim(" \t\n");
 	if (n.len == 0) return "give a symbol name, e.g. printfn or String.split";
 	DString out = dstring::temp();
-	if (n.contains(" ")) return describe(n);   // several words: a description, not a name
+	if (n.contains(" ") || n.contains("\n") || n.contains("\t")) return describe(n);   // several words: a description, not a name
 	int found = 0;
 	foreach (&e : corpus::entries)
 	{
@@ -297,13 +304,13 @@ fn String symbol_reply(String name)
 			// pass 2: names that start alike
 			bool near = module_hint.len >= 3 && uid.contains(module_hint[:module_hint.len < 4 ? module_hint.len : 4]);
 			bool plain = !e.title[(e.title.rindex_of("::") ?? 0)..].contains(".");
-			bool take = pass == 0 ? (same && near && module_hint.len > 0) : (pass == 1 ? (same && (plain || module_hint.len == 0) && !(near && module_hint.len > 0)) : (!same && last.len >= 3 && (last.starts_with(q) || q.starts_with(last))));
+			bool take = pass == 0 ? (same && near && module_hint.len > 0) : (pass == 1 ? (same && (plain || module_hint.len == 0) && !(near && module_hint.len > 0)) : (!same && alike(last, q)));
 			if (!take || out.str_view().contains(string::tformat("  %s\n", e.title))) continue;
 			if (shown++ == 0) out.append("Similar names:\n");
 			out.appendf("  %s\n", e.title);
 		}
 	}
-	out.append(rename_notes(q));
+	out.append(rename_notes(last_segment(n)));
 	// a wrong name usually has the right words in it (`File.read_line`, `tnew_array`)
 	String words = describe(n);
 	if (!words.starts_with("no symbol")) out.append(words);
@@ -321,8 +328,8 @@ fn bool has_word(String line, String word, bool variants = false)
 		if (catch at) return false;
 		sz a = from + at;
 		sz b = a + word.len;
-		bool left = a == 0 || !hints::ident_char(line[a - 1]) || (variants && line[a - 1] == 't' && (a == 1 || !hints::ident_char(line[a - 2])));
-		bool right = b >= line.len || !hints::ident_char(line[b]) || (variants && line[b] == '_');
+		bool left = a == 0 || !util::ident_char(line[a - 1]) || (variants && line[a - 1] == 't' && (a == 1 || !util::ident_char(line[a - 2])));
+		bool right = b >= line.len || !util::ident_char(line[b]) || (variants && line[b] == '_');
 		if (left && right) return true;
 		from = a + 1;
 	}
@@ -344,6 +351,7 @@ fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'Hash
 	String n = symbol.trim(" \t\n");
 	if (n.len == 0) return "give a stdlib name, e.g. HashMap or readline";
 	String word = last_segment(n);
+	if (word.len < 2) return "give a stdlib name with at least two letters, e.g. HashMap or readline";
 	int max = clamp(limit, 1, 5);
 	DString out = dstring::temp();
 	int shown = 0;
@@ -356,6 +364,7 @@ fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'Hash
 			String[] lines = e.body.tsplit("\n");
 			foreach (i, line : lines)
 			{
+				if (line.trim(" \t").starts_with("//")) continue;   // a comment that mentions the word is not a use of it
 				if (!(e.kind == "recipe" ? has_word(line, word, true) : looks_like_use(line, word))) continue;
 				// a few lines before and after the first use; a recipe is short, so show it all when it is
 				sz from = e.kind == "recipe" && lines.len <= 24 ? 0 : (i > 3 ? i - 3 : 0);
@@ -367,7 +376,7 @@ fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'Hash
 			}
 		}
 	}
-	if (shown == 0) return string::tformat("no recipe or manual example uses '%s'. c3_symbol '%s' gives the signature.", word, n);
+	if (shown == 0) return string::tformat("no recipe or manual example uses '%s'. c3_symbol '%s' gives the signature.", util::clip(word, 80), util::clip(n, 80));
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 

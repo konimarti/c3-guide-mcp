@@ -1,9 +1,9 @@
-convert parse to
+convert parse
 int integer
 current now
 time clock
-remove delete erase unlink
-create make new
+remove delete erase unlink rmdir
+create make new mkdir
 directory dir folder
 list ls enumerate entries
 write save store

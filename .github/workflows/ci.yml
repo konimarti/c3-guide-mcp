@@ -34,6 +34,13 @@ jobs:
           esac
           if [ "$RUNNER_OS" = Windows ]; then echo "$(cygpath -w "$PWD/c3c-install/c3")" >> "$GITHUB_PATH"; else echo "$PWD/c3c-install/c3" >> "$GITHUB_PATH"; fi
           echo "C3_DIR=$PWD/c3c-install/c3" >> "$GITHUB_ENV"
+      - name: C compiler for the vendored tree-sitter sources (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # c3c compiles project.json "c-sources" with `cc`, which windows-latest does not have; clang is preinstalled
+          clang --version
+          echo "C3C_CC=clang" >> "$GITHUB_ENV"
       - name: c3c version
         shell: bash
         run: c3c --version

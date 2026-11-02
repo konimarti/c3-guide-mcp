@@ -3,6 +3,8 @@ import mcp, std::core::string, std::io, std::io::file, std::io::path, std::colle
 import c3guide::ts, c3guide::util;
 
 const sz MAX_OUTLINE = 6 * 1024;
+const sz MAX_SOURCE = 1024 * 1024;   // a bigger .c3 file is generated or hostile: parsing it costs memory in proportion
+const sz MAX_FILES = 400;
 
 // A top-level declaration the outline lists, by tree-sitter-c3 node type.
 const String[*] DECLARATIONS = {
@@ -16,8 +18,6 @@ fn bool is_declaration(String type)
 	foreach (d : DECLARATIONS) if (d == type) return true;
 	return false;
 }
-
-fn String node_type(TSNode n) => ts::ts_node_type(n).str_view();
 
 // The first line of a doc comment, without its `<*` / `*>` markers.
 fn String doc_line(String text)
@@ -46,7 +46,7 @@ fn String outline_source(String source)
 	for (uint i = 0; i < count; i++)
 	{
 		TSNode d = ts::ts_node_named_child(root, i);
-		String type = node_type(d);
+		String type = ts::type_of(d);
 		if (!is_declaration(type)) continue;
 		uint start = ts::ts_node_start_byte(d);
 		uint row = ts::ts_node_start_point(d).row + 1;
@@ -54,9 +54,9 @@ fn String outline_source(String source)
 		if (ts::ts_node_named_child_count(d) > 0)
 		{
 			TSNode first = ts::ts_node_named_child(d, 0);
-			if (node_type(first) == "doc_comment")
+			if (ts::type_of(first) == "doc_comment")
 			{
-				doc = doc_line(source[ts::ts_node_start_byte(first):ts::ts_node_end_byte(first) - ts::ts_node_start_byte(first)]);
+				doc = util::sanitize_utf8(doc_line(ts::node_text(source, first)));
 				start = ts::ts_node_end_byte(first);
 				if (ts::ts_node_named_child_count(d) > 1) row = ts::ts_node_start_point(ts::ts_node_named_child(d, 1)).row + 1;
 			}
@@ -75,7 +75,7 @@ fn String outline_source(String source)
 			space = false;
 			line.append_char(c);
 		}
-		String shown = line.str_view();
+		String shown = util::sanitize_utf8(line.str_view());
 		// a constant's value is rarely what you are looking for, and can be a page long
 		if (type == "const_declaration" || type == "global_declaration") shown = shown[:shown.index_of(" = ") ?? shown.len];
 		if (shown.len > 160) shown = string::tformat("%s...", shown[:util::utf8_boundary(shown, 160)]);
@@ -101,6 +101,8 @@ fn void collect(Path dir, List{String}* files, int depth)
 		String name = e.basename();
 		Path? full = dir.tappend(name);
 		if (catch full) continue;
+		if (files.len() >= MAX_FILES) return;
+		if (path::is_link(full)) continue;   // a link can point back up the tree: the walk would never end
 		if (path::is_dir(full))
 		{
 			if (!skipped_dir(name)) collect(full, files, depth + 1);
@@ -137,24 +139,25 @@ fn String c3_outline(String path @Desc("a project directory (its src/ is read, o
 	if (files.len() == 0) return "no .c3 files found (looked in src/, skipping build, deps, lib, vendor)";
 	String[] sorted = files.array_view();
 	sort::quicksort(sorted, fn int(String a, String b) => a.compare_to(b));
-	int total = 0;
-	int listed = 0;
-	foreach (f : sorted)
+	int unread = 0;
+	foreach (i, f : sorted)
 	{
+		if (out.len() >= MAX_OUTLINE) { unread = (int)(sorted.len - i); break; }   // parse only what can be shown
 		String shown = f.starts_with(root) && f.len > root.len + 1 ? f[root.len + 1..] : f;
 		String part = c3_outline_file(f, shown);
-		if (part.len == 0) continue;
-		total++;
-		if (out.len() + part.len > MAX_OUTLINE) continue;
+		if (out.len() + part.len > MAX_OUTLINE) { unread = (int)(sorted.len - i); break; }
 		out.append(part);
-		listed++;
 	}
-	if (listed < total) out.appendf("[%d more files with declarations; give a subdirectory or a file to see them]\n", total - listed);
+	if (unread > 0) out.appendf("[%d more files not shown; give a subdirectory or a file to see them]\n", unread);
+	if (files.len() >= MAX_FILES) out.appendf("[stopped at %d files]\n", (int)MAX_FILES);
 	return out.len() == 0 ? "no declarations found" : out.str_view();
 }
 
 fn String c3_outline_file(String file_path, String shown)
 {
+	long? size = file::get_size(file_path);
+	if (catch size) return "";
+	if (size > (long)MAX_SOURCE) return string::tformat("%s\n  (skipped: %d KB is more than the %d KB limit)\n", shown, (int)(size / 1024), (int)(MAX_SOURCE / 1024));
 	char[]? data = file::load_temp(file_path);
 	if (catch data) return "";
 	String body = outline_source((String)data);

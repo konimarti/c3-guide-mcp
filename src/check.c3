@@ -17,6 +17,7 @@ const sz MAX_CODE = 32 * 1024;
 const sz MAX_FIX = 12 * 1024;
 const sz MAX_OUTPUT = 4 * 1024;
 const ulong DEADLINE_MS = 10000;
+const ulong PROJECT_CHECK_MS = 25000;   // c3_check of a project: under the tool's 30 s limit, so our own message is what the caller sees
 const ulong RUN_DEADLINE_MS = 120000;   // c3_test / c3_run: the program has to build and run (the most a caller may ask for)
 
 // timeout_s: 0 = the default, else 1..120 seconds
@@ -50,9 +51,9 @@ fn String? find_c3c()
 	if (try p) { String? f = which(EXE, p); if (try f) return f; }
 	String home = env::tget_var("HOME") ?? env::tget_var("USERPROFILE") ?? "";
 	String local = env::tget_var("LOCALAPPDATA") ?? "";
-	String[*] common = { "/usr/local/bin", "/opt/homebrew/bin", "/opt/c3", "/usr/bin", "/snap/bin", "C:/c3" };
+	String[*] common = { "/usr/local/bin", "/opt/homebrew/bin", "/opt/c3" };
 	foreach (d : common) { String? f = which(EXE, d); if (try f) return f; }
-	String[*] under_home = { ".local/bin", "bin", "c3", "c3c" };
+	String[*] under_home = { ".local/bin", "bin", "c3" };
 	if (home.len > 0) foreach (d : under_home) { String? f = which(EXE, string::tformat("%s/%s", home, d)); if (try f) return f; }
 	if (local.len > 0) { String? f = which(EXE, string::tformat("%s/c3", local)); if (try f) return f; }
 	return NOT_FOUND~;
@@ -94,10 +95,12 @@ fn String version_of(String binary)
 // The version of the compiler the tools run, asked once. Kept in a fixed buffer: temp memory is reset between calls.
 char[64] version_buf;
 String installed_version;
+bool version_asked;
 
 fn String compiler_version()
 {
-	if (installed_version.len > 0) return installed_version;
+	if (installed_version.len > 0 || version_asked) return installed_version;
+	version_asked = true;   // a c3c that cannot run is asked once, not on every reply
 	String v = version_of(c3c_binary());
 	if (v.len == 0 || v.len >= version_buf.len) return "";
 	version_buf[:v.len] = v[..];
@@ -531,7 +534,7 @@ fn String check_path(String target_path, String target)
 		Args m;
 		m.add("build");
 		if (target.len > 0) m.add(target);
-		return run_c3c(m.list(), base, "", scratch, true, where, "OK: no errors");
+		return run_c3c(m.list(), base, "", scratch, true, where, "OK: no errors", PROJECT_CHECK_MS);
 	}
 	String shown = compile_only(where, base, "");
 	return shown.contains("No module named") ? string::tformat("%s%s", shown, project_note(where)) : shown;
@@ -603,6 +606,7 @@ fn String c3_test(String path @Desc("a project directory (with project.json) or 
 	@Desc("USE THIS INSTEAD OF running `c3c test` yourself. Builds the project or file in a scratch directory, runs its @test functions and returns pass/fail with the failing assertion and file:line; compile errors come with hints. Nothing is written to your tree. 120 s limit.")
 	@Timeout(150000)
 {
+	if (filter.len > 0 && filter[0] == '-') return "filter must be a test name, not an option";
 	bool is_dir;
 	String? where = resolve_target(path, &is_dir);
 	if (catch where) return BAD_TARGET_TEXT;

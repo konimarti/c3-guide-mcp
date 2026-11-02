@@ -40,7 +40,7 @@ const Case[*] CASES = {
 	{ "stop the process after an error", "exit|abort" },
 };
 
-const int MIN_FOUND = 19;
+const int MIN_FOUND = 20;
 
 fn bool found(String reply, String want)
 {

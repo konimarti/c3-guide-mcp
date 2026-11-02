@@ -1,5 +1,6 @@
 module c3guide::test::outline;
-import c3guide::outline, c3guide::test::support;
+import c3guide::outline, c3guide::check, c3guide::util, c3guide::test::support;
+import std::core::string, std::io, std::io::file, std::io::path, std::time::clock;
 
 const String SAMPLE = `module demo::shapes;
 import std::io;
@@ -35,7 +36,6 @@ fn void outlines_a_project_and_a_file() @test
 {
 	String own = outline::c3_outline("src");
 	assert(own.contains("check.c3") && own.contains("fn String c3_check("), "%s", own);
-	assert(own.contains("more files") || own.contains("tools.c3"), "the cap is announced, not silent: %s", own);
 	assert(!own.contains("vendor"), "%s", own);
 	String one = outline::c3_outline("src/outline.c3");
 	assert(one.contains("fn String c3_outline("), "%s", one);
@@ -43,4 +43,54 @@ fn void outlines_a_project_and_a_file() @test
 	assert(small.contains("fn String clip("), "%s", small);
 	assert(outline::c3_outline("nope.txt").contains("must be"));
 	assert(outline::c3_outline("src").len <= 6 * 1024 + 128, "capped");
+}
+
+fn Path project_dir() @local => check::scratch_dir()!!;
+
+fn void a_long_project_is_cut_and_says_so() @test
+{
+	Path dir = project_dir();
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	support::sh(string::tformat("mkdir -p '%s/src'; for i in $(seq 1 60); do for j in $(seq 1 12); do echo \"fn int f${i}_${j}(int value) => value;\"; done > \"%s/src/m$i.c3\"; done", root, root));
+	String o = outline::c3_outline(root);
+	assert(o.contains("more files not shown") && o.len <= 6 * 1024 + 128, "%d bytes: %s", (int)o.len, util::clip(o, 300));
+}
+
+fn void links_and_big_files_cannot_exhaust_the_outline() @test
+{
+	Path dir = project_dir();
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	support::sh(string::tformat("mkdir -p '%s/src/a' && echo 'fn void ok() {}' > '%s/src/a/ok.c3' && ln -s .. '%s/src/a/loop' && ln -s . '%s/src/self' && head -c 1200000 /dev/zero | tr '\\\\0' 'a' > '%s/src/big.c3'", root, root, root, root, root));
+	Clock t = clock::now();
+	String o = outline::c3_outline(root);
+	long ms = (long)t.to_now() / 1_000_000;
+	assert(ms < 3000 && !o.contains("loop") && !o.contains("self/"), "%d ms: %s", (int)ms, o);
+	assert(o.contains("fn void ok()") && o.contains("big.c3") && o.contains("skipped"), "%s", o);
+}
+
+fn void a_file_that_is_not_utf8_gives_a_valid_reply() @test
+{
+	Path dir = project_dir();
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	support::sh(string::tformat("printf 'fn void h\\377\\376() {}\\n<* doc \\342\\202 *>\\nfn void k() {}\\n' > '%s/bad.c3'", root));
+	String o = outline::c3_outline(string::tformat("%s/bad.c3", root));
+	assert(support::valid_utf8(o) && o.contains("fn void k()"), "%s", o);
+	assert(util::sanitize_utf8("a\xFFb\xE2\x82") == "a?b??", "a lone lead and a truncated sequence");
+	assert(util::sanitize_utf8("h\xC3\xA9llo \U0001F980") == "h\xC3\xA9llo \U0001F980", "valid text is untouched");
+	assert(util::sanitize_utf8("\xC0\x80") == "??" && util::sanitize_utf8("\xED\xA0\x80") == "???", "overlong and surrogate forms");
+}
+
+fn void a_very_deep_expression_does_not_crash_c3_fix() @test
+{
+	DString code = dstring::temp();
+	code.append("fn void main() { x = ");
+	for (int i = 0; i < 11000; i++) code.append_char('!');
+	code.append("a; }");
+	String r = check::c3_fix(code.str_view());
+	assert(r.len > 0, "survived");
+	String n = check::c3_fix("usz n = $sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof(int))))))))))))))))));");
+	assert(n.len > 0, "survived deep nesting of the old form");
 }

@@ -378,7 +378,7 @@ fn void stale_sweep_does_not_follow_symlinks() @test
 	String tmp = (String)path::temp_directory(tmem)!!;
 	String link = string::tformat("%s/c3guide-symlink-test", tmp);
 	// the target is older than the one-hour limit, so a followed link would be swept
-	support::sh(string::tformat("echo keep > '%s/keep.txt'; touch -d '3 hours ago' '%s' '%s/keep.txt'; ln -sfn '%s' '%s'", v, v, v, v, link));
+	support::sh(string::tformat("echo keep > '%s/keep.txt'; touch -t 202001010000 '%s' '%s/keep.txt'; ln -sfn '%s' '%s'", v, v, v, v, link));
 	defer support::sh(string::tformat("rm -f '%s'", link));
 	assert(has(check::c3_check("fn void main() {}"), "OK"));   // every call sweeps the temp dir first
 	assert(file::exists(string::tformat("%s/keep.txt", v)), "the sweep followed a symlink and emptied its target");
@@ -488,4 +488,10 @@ fn void a_file_of_a_project_points_to_the_project() @test
 	file::save(f, "module a;\nimport encoding::pem;\nfn void main() {}\n")!!;
 	String r = check::c3_check("", f);
 	assert(r.contains("compiled alone") && r.contains(root), "%s", r);
+}
+
+fn void a_test_filter_cannot_be_an_option() @test
+{
+	assert(check::c3_test("src", "--trust=full").starts_with("filter must be"));
+	assert(check::c3_test("src", "-x").starts_with("filter must be"));
 }

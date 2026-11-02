@@ -74,7 +74,9 @@ fn String hint_for(String msg, String output)
 		foreach (p : OLD_PROPERTIES)
 		{
 			if (name != p) continue;
-			return string::tformat("  Type properties are written with `::` since 0.8 (`int::size`, `Foo::name`, `int::max`), not `.%s`. `c3_fix` rewrites this; c3_syntax type-properties lists them.\n", p);
+			bool fixable = false;
+			foreach (pair : PROPERTY_RENAMES) if (pair[0] == p) fixable = true;
+			return string::tformat("  Type properties are written with `::` since 0.8 (`int::size`, `Foo::name`, `int::max`), not `.%s`.%s c3_syntax type-properties lists them.\n", p, fixable ? " `c3_fix` rewrites this." : "");
 		}
 	}
 	// 'x' could not be found / has no member 'x': the name is often a guessed stdlib function
@@ -85,7 +87,7 @@ fn String hint_for(String msg, String output)
 	foreach (t : BUILTIN_TYPES) if (t == name) return "";
 	// `free`, `init`, `len`: dozens of methods of that name say nothing about the one that was meant
 	if (!name.contains("::") && tools::exact_matches(name) > 3) return "";
-	String s = tools::c3_symbol(name);
+	String s = tools::symbol_reply(name);   // the reply itself, without the notes c3_symbol adds for the user
 	// a name that is not in the stdlib and has no close name is the user's own: say nothing
 	if (s.contains("does not exist") && !s.contains("Similar names") && !s.contains("Symbols matching")) return "";
 	return string::tformat("  c3_symbol '%s':\n%s\n", name, util::clip(s, 700));
@@ -120,8 +122,6 @@ fn String diagnostics(String compiler_output)
 const String[*] BUILTIN_TYPES = { "bool", "char", "ichar", "short", "ushort", "int", "uint", "long", "ulong", "int128", "uint128", "sz", "usz", "iptr", "uptr", "float", "double", "float16", "bfloat16", "typeid", "String" };
 const String[2][*] PROPERTY_RENAMES = { { "sizeof", "size" }, { "alignof", "alignment" }, { "nameof", "name" }, { "max", "max" }, { "min", "min" } };
 
-fn bool ident_char(char c) @inline => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
-
 struct Rewrite
 {
 	String code;
@@ -144,23 +144,18 @@ struct Edit
 	String text;
 }
 
-fn String node_text(String src, TSNode n)
-{
-	uint a = ts::ts_node_start_byte(n);
-	return src[a:ts::ts_node_end_byte(n) - a];
-}
-
-fn String type_of(TSNode n) => ts::ts_node_type(n).str_view();
-
-fn TSNode field_of(TSNode n, String name) => ts::ts_node_child_by_field_name(n, name.ptr, (uint)name.len);
-
 // Walk the syntax tree and note every 0.7 spelling worth an edit. A node that is edited is not entered again.
 // Strings and comments are never identifiers in the tree, and `x.max` (a value) is told from `int.max` (a type)
 // by what the grammar made of the left side.
-fn void collect(String src, TSNode n, String parent, List{Edit}* edits, DString* notes, int* count)
+const int MAX_TREE_DEPTH = 200;   // a chain of 12,000 `!` is a tree 12,000 deep; recursing that far overflows a thread stack
+const int MAX_REWRITE_NESTING = 16;
+int rewrite_nesting;
+
+fn void collect(String src, TSNode n, String parent, List{Edit}* edits, DString* notes, int* count, int depth = 0)
 {
-	String type = type_of(n);
-	String text = node_text(src, n);
+	if (depth > MAX_TREE_DEPTH) return;
+	String type = ts::type_of(n);
+	String text = ts::node_text(src, n);
 	uint start = ts::ts_node_start_byte(n);
 	uint end = ts::ts_node_end_byte(n);
 	if (type == "ident" && text == "isz" && parent != "access_ident")
@@ -179,17 +174,17 @@ fn void collect(String src, TSNode n, String parent, List{Edit}* edits, DString*
 	}
 	if (type == "call_expr")
 	{
-		TSNode fn_node = field_of(n, "function");
-		TSNode args = field_of(n, "arguments");
-		String name = ts::ts_node_is_null(fn_node) ? "" : node_text(src, fn_node);
+		TSNode fn_node = ts::field_of(n, "function");
+		TSNode args = ts::field_of(n, "arguments");
+		String name = ts::ts_node_is_null(fn_node) ? "" : ts::node_text(src, fn_node);
 		if ((name == "$sizeof" || name == "$alignof") && !ts::ts_node_is_null(args) && ts::ts_node_named_child_count(args) == 1)
 		{
 			TSNode arg = ts::ts_node_named_child(args, 0);
 			TSNode inner = ts::ts_node_named_child_count(arg) > 0 ? ts::ts_node_named_child(arg, 0) : arg;
-			Rewrite nested = rewrite(node_text(src, inner).trim());   // `$sizeof(Foo[$sizeof(int)])`
+			Rewrite nested = rewrite(ts::node_text(src, inner).trim());   // `$sizeof(Foo[$sizeof(int)])`
 			String prop = name == "$sizeof" ? "size" : "alignment";
 			// `$sizeof(x)` took a type or an expression; `T::size` needs a type
-			bool is_type = type_of(inner) == "type";
+			bool is_type = ts::type_of(inner) == "type";
 			edits.push({ start, end, is_type ? string::tformat("%s::%s", nested.code, prop) : string::tformat("$Typeof(%s)::%s", nested.code, prop) });
 			note(notes, string::tformat("%s(T) -> T::%s", name, prop));
 			*count += 1 + nested.count;
@@ -198,15 +193,15 @@ fn void collect(String src, TSNode n, String parent, List{Edit}* edits, DString*
 	}
 	if (type == "field_expr")
 	{
-		TSNode left = field_of(n, "argument");
-		TSNode right = field_of(n, "field");
-		if (!ts::ts_node_is_null(left) && !ts::ts_node_is_null(right) && type_of(left) == "type")
+		TSNode left = ts::field_of(n, "argument");
+		TSNode right = ts::field_of(n, "field");
+		if (!ts::ts_node_is_null(left) && !ts::ts_node_is_null(right) && ts::type_of(left) == "type")
 		{
-			String prop = node_text(src, right);
+			String prop = ts::node_text(src, right);
 			foreach (pair : PROPERTY_RENAMES)
 			{
 				if (pair[0] != prop) continue;
-				edits.push({ start, end, string::tformat("%s::%s", rewrite(node_text(src, left)).code, pair[1]) });
+				edits.push({ start, end, string::tformat("%s::%s", rewrite(ts::node_text(src, left)).code, pair[1]) });
 				note(notes, string::tformat(".%s -> ::%s", pair[0], pair[1]));
 				*count += 1;
 				return;
@@ -214,7 +209,7 @@ fn void collect(String src, TSNode n, String parent, List{Edit}* edits, DString*
 		}
 	}
 	uint kids = ts::ts_node_named_child_count(n);
-	for (uint i = 0; i < kids; i++) collect(src, ts::ts_node_named_child(n, i), type, edits, notes, count);
+	for (uint i = 0; i < kids; i++) collect(src, ts::ts_node_named_child(n, i), type, edits, notes, count, depth + 1);
 }
 
 fn Rewrite rewrite_once(String code, DString* notes)
@@ -249,6 +244,9 @@ fn Rewrite rewrite_once(String code, DString* notes)
 *>
 fn Rewrite rewrite(String code)
 {
+	if (rewrite_nesting >= MAX_REWRITE_NESTING) return { code, 0, "" };   // `$sizeof($sizeof($sizeof(...` re-enters this function
+	rewrite_nesting++;
+	defer rewrite_nesting--;
 	DString notes = dstring::temp();
 	int total = 0;
 	for (int pass = 0; pass < 3; pass++)

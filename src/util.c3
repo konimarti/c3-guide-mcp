@@ -42,3 +42,36 @@ fn sz cut_utf8(String s)
 	sz need = lead >= 0xF0 ? 4 : (lead >= 0xE0 ? 3 : (lead >= 0xC0 ? 2 : 1));
 	return s.len - (j - 1) < need ? j - 1 : s.len;
 }
+
+fn bool ident_char(char c) @inline => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+
+// `s` with every byte that is not part of well-formed UTF-8 replaced by '?'. Source files can hold anything, and
+// a reply with an invalid byte makes the whole JSON-RPC line unreadable for the client.
+fn String sanitize_utf8(String s)
+{
+	DString out = dstring::temp();
+	sz i = 0;
+	while (i < s.len)
+	{
+		char c = s[i];
+		sz need = c < 0x80 ? 0 : (c >= 0xC2 && c <= 0xDF ? 1 : (c >= 0xE0 && c <= 0xEF ? 2 : (c >= 0xF0 && c <= 0xF4 ? 3 : -1)));
+		bool ok = need >= 0 && i + need < s.len;   // the whole sequence is inside the string
+		if (need > 0 && ok)
+		{
+			for (sz k = 1; k <= need; k++) if ((s[i + k] & 0xC0) != 0x80) ok = false;
+			if (ok && c == 0xE0 && s[i + 1] < 0xA0) ok = false;    // overlong
+			if (ok && c == 0xED && s[i + 1] >= 0xA0) ok = false;   // surrogate
+			if (ok && c == 0xF0 && s[i + 1] < 0x90) ok = false;    // overlong
+			if (ok && c == 0xF4 && s[i + 1] >= 0x90) ok = false;   // beyond U+10FFFF
+		}
+		if (need < 0 || !ok)
+		{
+			out.append_char('?');
+			i++;
+			continue;
+		}
+		out.append(s[i:need + 1]);
+		i += need + 1;
+	}
+	return out.str_view();
+}

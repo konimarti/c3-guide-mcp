@@ -24,5 +24,12 @@ extern fn uint ts_node_start_byte(TSNode node);
 extern fn uint ts_node_end_byte(TSNode node);
 extern fn TSPoint ts_node_start_point(TSNode node);
 extern fn bool ts_node_is_null(TSNode node);
-extern fn bool ts_node_has_error(TSNode node);
-extern fn ZString ts_node_string(TSNode node);
+
+// Small helpers every user of the tree needs.
+fn String type_of(TSNode n) => ts_node_type(n).str_view();
+fn String node_text(String src, TSNode n)
+{
+	uint a = ts_node_start_byte(n);
+	return src[a:ts_node_end_byte(n) - a];
+}
+fn TSNode field_of(TSNode n, String name) => ts_node_child_by_field_name(n, name.ptr, (uint)name.len);

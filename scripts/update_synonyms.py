@@ -14,7 +14,7 @@ for rec in open(os.path.join(root, "data", "corpus.dat"), encoding="utf-8").read
     f = rec.split("\x1f")
     if len(f) >= 3 and f[0] in ("fn", "macro", "method", "mmethod", "type", "var"):
         words.update(w.lower() for w in re.findall(r"[A-Za-z0-9]+", f[1].rsplit("::", 1)[-1].replace("_", " ") + " " + f[2]))
-used = lambda w: w in words or w + "s" in words or w.rstrip("s") in words
+used = lambda w: w in words or w + "s" in words or (w.endswith("s") and w[:-1] in words)
 out, dropped = [], []
 for line in open(os.path.join(here, "synonyms_seed.txt"), encoding="utf-8"):
     line = line.split("#")[0].strip()
