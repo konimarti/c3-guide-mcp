@@ -145,6 +145,23 @@ fn String path_c3c_version()
 
 // The docs are a snapshot of one c3c release. When the installed compiler is another one, say so: a signature
 // may have changed, and the compiler is right.
+// Said on every failing compile: the code may behave differently under the compiler a developer types as `c3c`.
+// "" when the tools run that same compiler (or the other one cannot be found).
+fn String path_mismatch_note()
+{
+	String have = compiler_version();
+	String other = path_c3c_version();
+	if (have.len == 0 || other.len == 0 || other == have) return "";
+	return string::tformat("\nnote: the tools run c3c %s (%s), but `c3c` on your PATH is %s. The same code can compile differently there (a stricter or looser check): set C3C to the compiler you build with.\n", have, c3c_binary(), other);
+}
+
+// The hints and, when the compile failed and the compilers differ, the note above.
+fn String after_compile(String shown)
+{
+	String note = shown.contains("error:") ? path_mismatch_note() : "";
+	return string::tformat("%s%s", hints::diagnostics(shown), note);
+}
+
 bool version_noted;
 
 // Said once per session, and again when a name was not found (that is when a version difference matters).
@@ -570,7 +587,7 @@ fn String compile_only(String file, String hide, String replacement)
 	String? out = run_capped(argv, &status, &timed_out);
 	if (catch out) return NO_C3C;
 	String shown = report(out, status, timed_out, hide, replacement, "OK: no errors", DEADLINE_MS);
-	return string::tformat("%s%s", shown, hints::diagnostics(shown));
+	return string::tformat("%s%s", shown, after_compile(shown));
 }
 
 fn String check_path(String target_path, String target)
@@ -651,7 +668,7 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	if (catch out) return NO_C3C;
 	String shown = drop_runtime_frames(report(out, status, timed_out, hide, replacement, ok, deadline_ms));
 	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
-	return string::tformat("%s%s", shown, hints::diagnostics(shown));
+	return string::tformat("%s%s", shown, after_compile(shown));
 }
 
 fn String c3_test(String path @Desc("a project directory (with project.json) or a .c3 file with @test functions"),

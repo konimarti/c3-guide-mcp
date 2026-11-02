@@ -551,3 +551,9 @@ fn void the_version_note_is_said_once() @test
 	(void)check::version_note();
 	assert(check::version_note() == "", "a second reply stays quiet");
 }
+
+fn void a_library_manifest_without_targets_is_explained() @test
+{
+	String d = hints::diagnostics(err("import foo;", "Library 'foo' cannot be used with arch/os 'linux-x64'."));
+	assert(has(d, "targets") && has(d, "manifest.json") && has(d, "0.8.6"), "%s", d);
+}

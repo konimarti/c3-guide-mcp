@@ -38,6 +38,7 @@ const Case[*] CASES = {
 	{ "break a string into parts", "split" },
 	{ "how many items are in the list", "List.len|len" },
 	{ "stop the process after an error", "exit|abort" },
+	{ "checksum of some bytes", "crc32|adler32|hash" },
 };
 
 const int MIN_FOUND = 20;

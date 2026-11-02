@@ -19,6 +19,7 @@ struct StaticHint
 }
 
 const StaticHint[*] STATIC_HINTS = {
+	{ "cannot be used with arch/os", "", "A library lists the platforms it supports in a `targets` map of its manifest.json: add this platform, e.g. `\"targets\": { \"linux-x64\": {} }`. c3c 0.8.5 requires the map; 0.8.6 does not, so the same library can pass with one compiler and fail with the other." },
 	{ "must use '{ }'", "", "C3 0.8: an `if` with an `else` needs braces on both branches: `if (c) { a(); } else { b(); }`." },
 	{ "This doesn't seem to be a valid literal", "", "C3 0.8 removed the `i64`/`u8` style literal suffixes: use `5L`, `5UL` or a cast, `(long)5`." },
 	{ "Expected a type here", "isz", "`isz` is `sz` since 0.8 (`usz` is unchanged). `c3_fix` applies this." },

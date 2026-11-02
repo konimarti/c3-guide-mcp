@@ -1,4 +1,5 @@
 convert parse
+checksum crc digest hash
 int integer
 current now
 time clock

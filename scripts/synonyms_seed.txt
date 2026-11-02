@@ -3,6 +3,7 @@
 # never one entry per question. scripts/update_synonyms.py filters this against the stdlib of the committed
 # snapshot (a word that no symbol name or doc comment uses is dropped) and writes data/synonyms.txt.
 convert parse
+checksum crc digest hash
 int integer
 current now
 time clock
