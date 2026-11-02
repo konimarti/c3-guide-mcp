@@ -1,4 +1,4 @@
-metac3c0.8.5_1records=7313docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
+metac3c0.8.5_1records=7320docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
 
 
 
@@ -17855,7 +17855,30 @@ valueslistoperators&
  9. And        | && &&&
 10. Or         | || |||
 11. Ternary    | ? ???
-12. Assign     | = *= /= %= -= += |= &= ^= <<= >>= +++=recipeRecipe: command line arguments (main with String[] args)// Also: argv, argc, main arguments, command line parameters, program name
+12. Assign     | = *= /= %= -= += |= &= ^= <<= >>= +++=recipeRecipe: append a line to a file (file::open with mode "a"), then read the file back// Also: append, add to file, log file, write lines, open for append, file::open, File.write
+import std::io;
+import std::io::file;
+
+fn void? run(String path)
+{
+	File f = file::open(path, "a")!;
+	defer (void)f.close();
+	f.write("first\n")!;
+	f.write("second\n")!;
+}
+
+fn void main()
+{
+	String path = "recipe_append.txt";
+	defer (void)file::delete(path);
+	if (catch run(path))
+	{
+		io::printn("write failed");
+		return;
+	}
+	String text = (String)file::load_temp(path)!!;
+	io::printfn("lines: %d", text.trim().tsplit("\n").len);
+}recipes/append_file.c3recipeRecipe: command line arguments (main with String[] args)// Also: argv, argc, main arguments, command line parameters, program name
 import std::io;
 
 fn void main(String[] args)
@@ -17863,7 +17886,55 @@ fn void main(String[] args)
 	// args[0] is the program name
 	io::printfn("args: %d", args.len - 1);
 	foreach (i, a : args[1..]) io::printfn("%d: %s", i, a);
-}recipes/args.c3recipeRecipe: calendar date: build a DateTime, weekday name, format a date, parts (year, month, day)// Also: std::time, datetime, day of week, calendar, Date, strftime, timestamp, now, TzDateTime
+}recipes/args.c3recipeRecipe: an atomic counter (Atomic{int}: add, store, load) that threads can share without a mutex// Also: atomics, atomic add, fetch_add, lock free, counter, thread safe
+import std::io;
+import std::atomic;
+
+fn void main()
+{
+	Atomic{int} counter;
+	counter.store(5);
+	counter.add(2);
+	io::printfn("total=%d", counter.load());
+}recipes/atomic_counter.c3recipeRecipe: bitstruct (named bit fields packed in an integer) and union (one storage, several views)// Also: flags, bit flags, bit field, bitmask, union, reinterpret
+import std::io;
+
+bitstruct Perm : char
+{
+	bool read : 0;
+	bool write : 1;
+	bool exec : 2;
+}
+
+union Number
+{
+	int as_int;
+	float as_float;
+}
+
+fn void main()
+{
+	Perm p = { .read = true, .exec = true };
+	io::printfn("read=%s write=%s", p.read, p.write);
+	io::printfn("raw=%d", (char)p);
+	Number n;
+	n.as_int = 1;
+	io::printfn("sizes: %d %d", Perm::size, Number::size);
+}recipes/bitstruct_union.c3recipeRecipe: wall clock and stopwatch (time::now for the date, clock::now for measuring how long something takes)// Also: current time, timestamp, unix time, milliseconds, elapsed, stopwatch, benchmark, duration
+import std::io;
+import std::time;
+import std::time::clock;
+import std::thread;
+
+fn void main()
+{
+	Time t = time::now();                           // wall clock, for dates
+	io::printfn("after 2000: %s", t.to_seconds() > 946684800);
+	Clock c = clock::now();                         // monotonic, for durations
+	thread::sleep_ms(20);
+	long ms = (long)c.to_now() / 1_000_000;         // nanoseconds to milliseconds
+	io::printfn("elapsed ok: %s", ms >= 20);
+}recipes/clock_time.c3recipeRecipe: calendar date: build a DateTime, weekday name, format a date, parts (year, month, day)// Also: std::time, datetime, day of week, calendar, Date, strftime, timestamp, now, TzDateTime
 import std::io;
 import std::time;
 import std::time::datetime;
@@ -18017,7 +18088,39 @@ fn void main()
 	io::printfn("distinct: %d", counts.len());
 
 	counts.@each(; String key, int value) { /* visit every pair; order is not defined */ };
-}recipes/hashmap.c3recipeRecipe: List (dynamic array): push, index, foreach, pop, remove, free// Also: List{int}, dynamic array, vector, ArrayList, push_back, append, remove
+}recipes/hashmap.c3recipeRecipe: HashSet (add, contains, remove, len): unique values, membership test// Also: set, unique, duplicates, dedupe, membership, contains, HashSet{int}
+import std::io;
+import std::collections::set;
+
+fn void main()
+{
+	HashSet{int} seen;
+	seen.init(mem);
+	defer seen.free();
+	foreach (v : (int[]){ 1, 2, 2, 3, 1 }) seen.add(v);
+	io::printfn("distinct: %d", seen.len());
+	io::printfn("has 2: %s", seen.contains(2));
+	io::printfn("has 9: %s", seen.contains(9));
+}recipes/hashset.c3recipeRecipe: parse JSON text into a tree and read values from it (std::encoding::json); reading a missing key gives an error// Also: json, parse json, JSON object, get_int, get_string, dynamic tree, decode
+import std::io;
+import std::encoding::json;
+import std::collections::object;
+
+fn void main()
+{
+	Object*? doc = json::parse(tmem, `{"name": "Ada", "age": 36}`);
+	if (catch doc)
+	{
+		io::printn("bad json");
+		return;
+	}
+	String? name = doc.get_string("name");
+	if (try n = name) io::printfn("name=%s", n);
+	int? age = doc.get_int("age");
+	if (try a = age) io::printfn("age=%d", a);
+	int? nope = doc.get_int("nope");
+	if (catch nope) io::printn("no such key");
+}recipes/json_parse.c3recipeRecipe: List (dynamic array): push, index, foreach, pop, remove, free// Also: List{int}, dynamic array, vector, ArrayList, push_back, append, remove
 import std::io;
 import std::collections::list;
 
@@ -18086,7 +18189,7 @@ fn void main()
 	foreach (i, e : entries) names[i] = e.basename();
 	sort::quicksort(names, &by_text);
 	foreach (n : names) io::printn(n);
-}recipes/ls_mask.c3recipeRecipe: macros: @macro name, #expr (unevaluated expression), $stringify, $typeof, generic parameter, compile-time $ifimport std::io;
+}recipes/ls_mask.c3recipeRecipe: macros: @macro name, #expr (unevaluated expression), $stringify, $Typeof (a type from an expression), generic parameter, compile-time $ifimport std::io;
 
 macro @print_expr(#expr)
 {
@@ -18279,7 +18382,21 @@ fn void main()
 
 	Describe d = &r;                       // interface value from a pointer
 	io::printn(d.describe());
-}recipes/struct_method.c3recipeRecipe: threads: Thread.create, join, Mutex lock/unlock// Also: pthread, concurrency, parallel, mutex lock, race, join, spawn, Thread.create
+}recipes/struct_method.c3recipeRecipe: a unit test (@test function with assert; run with c3_test / `c3c test`, not part of the program)// Also: testing, unit test, assert, @test, test function, expect
+import std::io;
+
+fn int add(int a, int b) => a + b;
+
+fn void add_works() @test
+{
+	assert(add(2, 2) == 4, "2 + 2 should be 4");
+	assert(add(-1, 1) == 0);
+}
+
+fn void main()
+{
+	io::printfn("add(2, 2)=%d", add(2, 2));
+}recipes/test_function.c3recipeRecipe: threads: Thread.create, join, Mutex lock/unlock// Also: pthread, concurrency, parallel, mutex lock, race, join, spawn, Thread.create
 import std::io;
 import std::thread;
 
