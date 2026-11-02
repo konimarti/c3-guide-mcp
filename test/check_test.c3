@@ -396,3 +396,17 @@ fn void run_takes_an_optimization_level() @test
 	assert(check::valid_opt("") && check::valid_opt("O3") && check::valid_opt("Os"));
 	assert(!check::valid_opt("O9") && !check::valid_opt("--run-dir") && !check::valid_opt("-O3"));
 }
+
+fn void c3c_is_found_in_path_and_the_version_is_read() @test
+{
+	Path dir = check::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String fake = string::tformat("%s/%s", (String)dir, check::EXE);
+	file::save(fake, "x")!!;
+	String list = string::tformat("/nonexistent%s%s", check::PATH_SEP, (String)dir);
+	String? hit = check::which(check::EXE, list);
+	if (catch hit) assert(false, "not found in PATH");
+	assert(hit == fake, "path lookup: %s", hit);
+	assert(@catch(check::which(check::EXE, "/nonexistent")) == check::NOT_FOUND);
+	assert(check::compiler_version().len > 0, "c3c --version is readable");
+}

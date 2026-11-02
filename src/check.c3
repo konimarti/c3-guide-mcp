@@ -1,6 +1,6 @@
 module c3guide::check;
 import mcp, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
-import c3guide::util, c3guide::hints, std::time;
+import c3guide::util, c3guide::hints, c3guide::corpus, std::time;
 
 // Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
 // fresh temp dir and compiled with a FIXED command line:
@@ -22,15 +22,87 @@ const sz MAX_RUN_OUTPUT = 6 * 1024;
 const sz MAX_RUN_CAPTURE = 64 * 1024;
 const String[*] FORBIDDEN = { "$embed", "$include", "$exec" };
 
+faultdef NOT_FOUND;
+
+const String EXE = env::WIN32 ? "c3c.exe" : "c3c";   // CreateProcess finds a program on PATH only with its extension
+const String PATH_SEP = env::WIN32 ? ";" : ":";
+
+// The first `name` found in the directories of `path_var`.
+fn String? which(String name, String path_var)
+{
+	foreach (dir : path_var.tsplit(PATH_SEP))
+	{
+		if (dir.len == 0) continue;
+		String p = string::tformat("%s/%s", dir, name);
+		if (file::is_file(p)) return p;
+	}
+	return NOT_FOUND~;
+}
+
+// Editors start the server with a thin environment (a GUI launcher on macOS has no /opt/homebrew/bin in PATH),
+// so after $C3C and PATH, look where c3c is usually installed.
+fn String? find_c3c()
+{
+	String? p = env::tget_var("PATH");
+	if (try p) { String? f = which(EXE, p); if (try f) return f; }
+	String home = env::tget_var("HOME") ?? env::tget_var("USERPROFILE") ?? "";
+	String local = env::tget_var("LOCALAPPDATA") ?? "";
+	String[*] common = { "/usr/local/bin", "/opt/homebrew/bin", "/opt/c3", "/usr/bin", "/snap/bin", "C:/c3" };
+	foreach (d : common) { String? f = which(EXE, d); if (try f) return f; }
+	String[*] under_home = { ".local/bin", "bin", "c3", "c3c" };
+	if (home.len > 0) foreach (d : under_home) { String? f = which(EXE, string::tformat("%s/%s", home, d)); if (try f) return f; }
+	if (local.len > 0) { String? f = which(EXE, string::tformat("%s/c3", local)); if (try f) return f; }
+	return NOT_FOUND~;
+}
+
+char[1024] c3c_buf;   // the cached answer lives here: temp memory is reset between calls
+String found_c3c;
+
 fn String c3c_binary()
 {
 	String? v = env::tget_var("C3C");
 	if (try v) { if (v.len > 0) return v; }
-	$if env::WIN32:
-		return "c3c.exe";   // CreateProcess finds a program on PATH only with its extension
-	$else
-		return "c3c";
-	$endif
+	if (found_c3c.len > 0) return found_c3c;
+	String? f = find_c3c();
+	if (catch f) return EXE;   // not found: let the spawn fail with the usual message (and look again next time)
+	if (f.len >= c3c_buf.len) return f;
+	c3c_buf[:f.len] = f[..];
+	found_c3c = (String)c3c_buf[:f.len];
+	return found_c3c;
+}
+
+// The version the installed compiler reports ("0.8.5_1"), "" when it cannot be run. Asked once.
+char[64] version_buf;
+String installed_version;
+
+fn String compiler_version()
+{
+	if (installed_version.len > 0) return installed_version;
+	String[] argv = { c3c_binary(), "--version" };
+	int status = 0;
+	bool timed_out = false;
+	String? out = run_capped(argv, &status, &timed_out);
+	if (catch out) return "";
+	foreach (line : out.tsplit("\n"))
+	{
+		if (!line.contains("Compiler Version:")) continue;
+		sz colon = line.index_of(":") ?? 0;
+		String v = line[colon..].trim(" :\t\r");
+		if (v.len >= version_buf.len) return "";
+		version_buf[:v.len] = v[..];
+		installed_version = (String)version_buf[:v.len];
+		break;
+	}
+	return installed_version;
+}
+
+// The docs are a snapshot of one c3c release. When the installed compiler is another one, say so: a signature
+// may have changed, and the compiler is right.
+fn String version_note()
+{
+	String have = compiler_version();
+	if (have.len == 0 || have == corpus::snapshot_version) return "";
+	return string::tformat("\nnote: these docs are for c3c %s but %s is installed; if a signature fails, trust the compiler.\n", corpus::snapshot_version, have);
 }
 
 // Kills the child when the deadline passes. The mutex makes "check done, then kill" atomic against the

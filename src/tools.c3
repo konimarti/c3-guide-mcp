@@ -1,6 +1,6 @@
 module c3guide::tools;
 import mcp, std::core::string;
-import c3guide::corpus, c3guide::search, c3guide::util, c3guide::hints;
+import c3guide::corpus, c3guide::search, c3guide::util, c3guide::hints, c3guide::check;
 import std::sort;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
@@ -218,6 +218,12 @@ fn String describe(String query)
 fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 'String.split', 'talloc_array') or, when you do not know the name, what it does ('read a line from a file', 'trim whitespace')"))
 	@Desc("Exact signature, docs and source location of a C3 standard library function, macro, method or type; or, given a description, the functions that do it. Never guess a signature, look it up.")
 	@ReadOnly
+{
+	String reply = symbol_reply(name);
+	return string::tformat("%s%s", reply, check::version_note());
+}
+
+fn String symbol_reply(String name)
 {
 	String n = name.trim(" \t\n");
 	if (n.len == 0) return "give a symbol name, e.g. printfn or String.split";

@@ -46,7 +46,7 @@ In our small comparisons (4 runs per round with and without the tools, same prom
 
 ## Install
 
-Download the archive for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, Windows x64), check it against `SHA256SUMS`, unpack it. The binary is built for **c3c 0.8.5** (its docs snapshot is embedded). Only `c3_check`, `c3_fix`, `c3_test` and `c3_run` need `c3c`: put it on `PATH` or set `C3C`. Without it the docs tools (`c3_search`, `c3_symbol`, `c3_examples`, `c3_changes`, `c3_syntax`) still work.
+Download the archive for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, Windows x64), check it against `SHA256SUMS`, unpack it. The binary is built for **c3c 0.8.5** (its docs snapshot is embedded). Only `c3_check`, `c3_fix`, `c3_test` and `c3_run` need `c3c`: put it on `PATH` or set `C3C`. Editors often start the server with a thin `PATH`, so it also looks in the usual install places (`/usr/local/bin`, `/opt/homebrew/bin`, `/opt/c3`, `~/.local/bin`, `~/bin`, `~/c3`, `%LOCALAPPDATA%\c3`). If the installed compiler is not the release the docs snapshot belongs to, `c3_symbol` says so. Without it the docs tools (`c3_search`, `c3_symbol`, `c3_examples`, `c3_changes`, `c3_syntax`) still work.
 
 macOS blocks unsigned downloads: `xattr -d com.apple.quarantine ./c3-guide-mcp`. Other platforms (Intel Mac, Linux arm64): build from source, below.
 
