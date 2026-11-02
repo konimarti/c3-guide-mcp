@@ -1,0 +1,29 @@
+convert parse to
+int integer
+current now
+time clock
+remove delete erase unlink
+create make new
+directory dir folder
+list ls enumerate entries
+write save store
+read load fetch
+upper uppercase
+lower lowercase
+position index offset
+find search locate
+terminate exit quit abort
+pause sleep wait delay
+random rand
+size length len count
+begin start prefix
+text string str
+copy duplicate clone
+compare cmp equal
+concat join append
+split tokenize separate
+trim strip
+replace substitute
+print output show
+sort order
+swap exchange

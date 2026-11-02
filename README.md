@@ -30,7 +30,7 @@ Replies of the docs tools are capped at 3.2 KB, `c3_check` at 4 KB plus at most 
 
 ### Why `c3_test` and `c3_run` are off by default
 
-`c3_check` never runs anything: `--no-obj` for snippets, a build into a scratch directory for projects, `--trust=none` throughout. `c3_test` and `c3_run` execute the program they build, which is a different trust level, so the operator opts in by starting the server with `C3_GUIDE_ALLOW_RUN=1`. Without it the two tools are not listed and the server's instructions do not mention them. They keep every guard of `c3_check` (`--trust=none`, 60 s deadline, capped output, build artifacts in a temp directory that is removed afterwards, snippets with `$embed`/`$include`/`$exec` refused), but the server is still not a sandbox: a program you run can read and write whatever your user can. Turn it on for code you or your model wrote on your own machine, not for untrusted input.
+`c3_check` never runs anything: `--no-obj` for snippets, a build into a scratch directory for projects, `--trust=none` throughout. `c3_test` and `c3_run` execute the program they build, which is a different trust level, so the operator opts in by starting the server with `C3_GUIDE_ALLOW_RUN=1`. Without it the two tools are not listed and the server's instructions do not mention them. They keep every guard of `c3_check` (`--trust=none`, 120 s deadline, capped output, build artifacts in a temp directory that is removed afterwards, snippets with `$embed`/`$include`/`$exec` refused), but the server is still not a sandbox: a program you run can read and write whatever your user can. Turn it on for code you or your model wrote on your own machine, not for untrusted input.
 
 ### Paths
 
@@ -106,7 +106,7 @@ python3 test/corpus_test.py /path/to/c3  # the snapshot matches the installed c3
 ## Limits
 
 - The docs and the compiler do not always agree (the manual says `excuse`, other pages `faultdef`; the compiler accepts both). When they differ, `c3_check` is right.
-- Search is keyword based: it finds "Macro vaargs" for "vararg", but not a paraphrase with different words. This is sharper for symbols: `read line` finds `readline`, but `create directory` does not find `mkdir`, and many stdlib functions have no doc comment, so only their name can match. `temp allocator` lists `TempAllocator` before the alias `tmem`; ask for `tmem` by name.
+- Search is keyword based, helped by a small table of synonyms for symbol lookups (`data/synonyms.txt`, built from `scripts/synonyms_seed.txt` by `scripts/update_synonyms.py`; rerun it after a new c3c snapshot): it finds "Macro vaargs" for "vararg", but not a paraphrase with different words. This is sharper for symbols: `read line` finds `readline`, but `create directory` does not find `mkdir`, and many stdlib functions have no doc comment, so only their name can match. `temp allocator` lists `TempAllocator` before the alias `tmem`; ask for `tmem` by name.
 - A killed server leaves its temp directory behind; the next `c3_check` removes `c3guide-*` directories older than an hour.
 - CI builds and runs a smoke test on Linux x64, macOS arm64 and Windows x64; the full suite runs on Linux and macOS. Only Linux x64 was also tested by hand.
 - Used from Hermes (`hermes mcp test` and real sessions). The Claude Code, Claude Desktop and Cursor lines above follow their documented formats but were not tried.

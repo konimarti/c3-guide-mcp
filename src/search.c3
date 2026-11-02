@@ -10,6 +10,8 @@ import std::sort, std::math;
 const float RECIPE_BOOST = 1.4f;
 const sz MAX_QUERY_BYTES = 256;
 const sz MAX_TERMS = 16;
+const float SYNONYM_WEIGHT = 0.5f;   // a word the person did not type counts for less than one they did
+const sz MAX_SYNONYMS = 24;
 
 struct Hit
 {
@@ -98,6 +100,29 @@ fn String[] query_terms(String query)
 	return out.array_view();
 }
 
+// Add the other words of every synonym group that holds one of the query's own terms.
+fn String[] with_synonyms(String[] terms)
+{
+	List{String} out;
+	out.init(tmem);
+	foreach (t : terms) out.push(t);
+	foreach (line : corpus::synonym_text().tsplit("\n"))
+	{
+		String[] group = line.tsplit(" ");
+		bool hit = false;
+		foreach (t : terms) foreach (w : group) if (t == w) hit = true;
+		if (!hit) continue;
+		foreach (w : group)
+		{
+			if (w.len == 0 || out.len() - terms.len >= MAX_SYNONYMS) continue;
+			bool have = false;
+			foreach (o : out) if (o == w) have = true;
+			if (!have) out.push(w);
+		}
+	}
+	return out.array_view();
+}
+
 // "read line" also finds `readline`: add each pair of neighbouring words, glued together, as a term.
 fn String[] with_joined_pairs(String[] terms)
 {
@@ -136,6 +161,8 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 	String[] terms = query_terms(symbols ? words_only(query) : query);
 	if (terms.len == 0) return {};
 	if (symbols && terms.len >= 2) terms = with_joined_pairs(terms);
+	int typed = (int)terms.len;
+	if (symbols) terms = with_synonyms(terms);   // names are short and say little: widen the net
 	int nterms = (int)terms.len;
 	int[] df = mem::talloc_array(int, nterms);
 	int[] tf = mem::talloc_array(int, nterms);
@@ -197,7 +224,8 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 			if (f + tt == 0) continue;
 			float idf = math::ln(1.0f + ((float)(total - df[k]) + 0.5f) / ((float)df[k] + 0.5f));
 			float norm = f * 2.2f / (f + 1.2f * (0.25f + 0.75f * len_cache[i] / avg));
-			s += idf * (norm + 3.0f * short_bonus[i] * (tt > 0 ? 1.0f : 0.0f));
+			float weight = k < typed ? 1.0f : SYNONYM_WEIGHT;
+				s += weight * idf * (norm + 3.0f * short_bonus[i] * (tt > 0 ? 1.0f : 0.0f));
 		}
 		if (e.kind == "recipe") s *= RECIPE_BOOST;   // a program that was compiled and run beats prose that says the same
 		if (s > 0) hits.push({ s, (int)i });

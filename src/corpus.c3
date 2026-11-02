@@ -5,6 +5,11 @@ import std::core::string;
 // kind, title, body, loc. All strings are slices into the embedded blob: nothing is copied.
 const char[*] BLOB = $embed("../data/corpus.dat");
 
+// Groups of words that mean the same thing, one group per line (scripts/update_synonyms.py).
+const char[*] SYNONYMS = $embed("../data/synonyms.txt");
+
+fn String synonym_text() => (String)SYNONYMS[..];
+
 struct Entry
 {
 	String kind;

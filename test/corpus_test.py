@@ -20,4 +20,5 @@ kind = lambda r: r.split("\x1f")[0]
 stale = {r for r in old[1:] if kind(r) == "recipe"} - {r for r in new[1:] if kind(r) == "recipe"}
 if stale:
     print("stale recipes in the snapshot (run scripts/update_recipes.py):", len(stale))
-sys.exit(0 if ver(new) == ver(old) and not missing and not stale else 1)
+syn = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "update_synonyms.py"), "--check"])
+sys.exit(0 if ver(new) == ver(old) and not missing and not stale and syn.returncode == 0 else 1)

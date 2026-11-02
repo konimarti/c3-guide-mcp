@@ -1,0 +1,33 @@
+# Words that mean the same thing when someone asks for a function and the stdlib names it differently.
+# One group per line, words separated by spaces, all lowercase. Keep it to general programming vocabulary,
+# never one entry per question. scripts/update_synonyms.py filters this against the stdlib of the committed
+# snapshot (a word that no symbol name or doc comment uses is dropped) and writes data/synonyms.txt.
+convert parse to
+int integer
+current now
+time clock
+remove delete erase unlink
+create make new
+directory dir folder
+list ls enumerate entries
+write save store
+read load fetch
+upper uppercase
+lower lowercase
+position index offset
+find search locate
+terminate exit quit abort
+pause sleep wait delay
+random rand
+size length len count
+begin start prefix
+text string str
+copy duplicate clone
+compare cmp equal
+concat join append
+split tokenize separate
+trim strip
+replace substitute
+print output show
+sort order
+swap exchange

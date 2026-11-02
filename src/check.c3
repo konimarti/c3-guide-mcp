@@ -17,7 +17,7 @@ const sz MAX_CODE = 32 * 1024;
 const sz MAX_FIX = 12 * 1024;
 const sz MAX_OUTPUT = 4 * 1024;
 const ulong DEADLINE_MS = 10000;
-const ulong RUN_DEADLINE_MS = 60000;   // c3_test / c3_run: the program has to build and run
+const ulong RUN_DEADLINE_MS = 120000;   // c3_test / c3_run: the program has to build and run
 const sz MAX_RUN_OUTPUT = 6 * 1024;
 const sz MAX_RUN_CAPTURE = 64 * 1024;
 const String[*] FORBIDDEN = { "$embed", "$include", "$exec" };
@@ -392,8 +392,8 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 
 fn String c3_test(String path @Desc("a project directory (with project.json) or a .c3 file with @test functions"),
 	String filter @Desc("run only the tests whose name matches") = "")
-	@Desc("USE THIS INSTEAD OF running `c3c test` yourself. Builds the project or file in a scratch directory, runs its @test functions and returns pass/fail with the failing assertion and file:line; compile errors come with hints. Nothing is written to your tree. 60 s limit.")
-	@Timeout(90000)
+	@Desc("USE THIS INSTEAD OF running `c3c test` yourself. Builds the project or file in a scratch directory, runs its @test functions and returns pass/fail with the failing assertion and file:line; compile errors come with hints. Nothing is written to your tree. 120 s limit.")
+	@Timeout(150000)
 {
 	bool is_dir;
 	String? where = resolve_target(path, &is_dir);
@@ -417,8 +417,8 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	String path @Desc("instead of code: a project directory or a .c3 file") = "",
 	String target @Desc("with a project path: the target to run") = "",
 	String opt @Desc("optimization level: O0 O1 O2 O3 O4 O5 Os Oz; default is the compiler's (use it to compare speed)") = "")
-	@Desc("USE THIS INSTEAD OF running `c3c compile-run` or `c3c run` yourself. Builds in a scratch directory and runs the program (stdin empty, 60 s limit), returning its output or the compile errors with hints.")
-	@Timeout(90000)
+	@Desc("USE THIS INSTEAD OF running `c3c compile-run` or `c3c run` yourself. Builds in a scratch directory and runs the program (stdin empty, 120 s limit), returning its output or the compile errors with hints.")
+	@Timeout(150000)
 {
 	String bad = exclusive_args(code, path);
 	if (bad.len > 0) return bad;
