@@ -14,7 +14,7 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { os: ubuntu-latest,  target: linux-x64,    ext: tar.gz }
+          - { os: ubuntu-22.04,    target: linux-x64,    ext: tar.gz }   # the oldest glibc we still support: a newer runner makes a binary that does not start on Ubuntu 22.04 or Debian 12
           - { os: macos-latest,   target: macos-arm64,  ext: tar.gz }
           - { os: windows-latest, target: windows-x64,  ext: zip }
     runs-on: ${{ matrix.os }}
@@ -61,6 +61,13 @@ jobs:
       - name: Build (-O3)
         shell: bash
         run: c3c build c3-guide-mcp -O3
+      - name: Linux binary needs glibc 2.35 or older
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          need=$(objdump -T build/c3-guide-mcp | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -V | tail -1)
+          echo "the binary needs glibc $need"
+          [ "$(printf '%s\n' "$need" 2.35 | sort -V | tail -1)" = 2.35 ] || { echo "newer than 2.35: it would not start on Ubuntu 22.04"; exit 1; }
       - name: Smoke test
         shell: bash
         run: |
