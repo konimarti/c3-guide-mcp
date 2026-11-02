@@ -1,6 +1,6 @@
 module c3guide::test::outline;
 import c3guide::outline, c3guide::check, c3guide::util, c3guide::test::support;
-import std::core::string, std::io, std::io::file, std::io::path, std::time::clock;
+import std::core::string, std::os::env, std::io, std::io::file, std::io::path, std::time::clock;
 
 const String SAMPLE = `module demo::shapes;
 import std::io;
@@ -93,4 +93,21 @@ fn void a_very_deep_expression_does_not_crash_c3_fix() @test
 	assert(r.len > 0, "survived");
 	String n = check::c3_fix("usz n = $sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof($sizeof(int))))))))))))))))));");
 	assert(n.len > 0, "survived deep nesting of the old form");
+}
+
+fn void the_grammar_parses_the_stdlib_of_the_c3c_it_targets() @test
+{
+	// Run with C3_DIR=<the c3c install> (CI sets it). Skipped without it: there is no stdlib to read.
+	String? dir = env::tget_var("C3_DIR");
+	if (catch dir) return;
+	DString names = dstring::temp();
+	int bad = outline::unparsed_files(string::tformat("%s/lib/std", dir), &names);
+	assert(bad == 0, "%d stdlib files do not parse with the vendored grammar: it has not caught up with this c3c. Keep the old grammar (git checkout vendor/) until it does, or see scripts/update_treesitter.py.\n%s", bad, names.str_view());
+}
+
+fn void a_file_the_grammar_rejects_is_marked_incomplete() @test
+{
+	String o = outline::outline_source("fn void ok() {}\nfn void broken( {{{ ;;; @@@\nfn void after() {}\n");
+	assert(o.contains("may be incomplete") && o.contains("fn void ok()"), "%s", o);
+	assert(!outline::outline_source("fn void ok() {}\n").contains("incomplete"));
 }

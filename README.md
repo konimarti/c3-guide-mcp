@@ -86,6 +86,18 @@ curl -o all.md https://c3-lang.org/all.md      # optional: adds the sections the
 python3 scripts/gen_corpus.py /path/to/c3 all.md && c3c build c3-guide-mcp -O3
 ```
 
+### Updating for a new c3c release
+
+Three pieces move at different speeds, and each is updated on its own:
+
+| Piece | Where | Update |
+|---|---|---|
+| docs snapshot, synonyms | `data/` | `python3 scripts/gen_corpus.py /path/to/c3 [all.md]`, then `python3 scripts/update_synonyms.py` |
+| C3 grammar | `vendor/tree-sitter-c3` | `python3 scripts/update_treesitter.py grammar [TAG]` |
+| tree-sitter runtime | `vendor/tree-sitter` | `python3 scripts/update_treesitter.py runtime [TAG]` (rarely; the script checks that the grammar's parser version still fits) |
+
+The grammar usually follows a c3c release by some days or weeks. Only `c3_outline` and `c3_fix` use it, and the docs tools do not, so a new snapshot never has to wait for it. To see whether the vendored grammar understands a compiler, run `C3_DIR=/path/to/c3 c3c test c3-guide-mcp`: one test parses every file of that c3c's standard library and fails, naming the files, if any does not parse. If it fails, ship the new snapshot with the old grammar (`git checkout vendor/`); until the grammar catches up, `c3_outline` marks a file it could not fully read as incomplete and `c3_fix` rewrites less, never more. CI runs the same test against the pinned c3c, so a mismatch cannot be merged unnoticed.
+
 `c3_check` runs `c3c --trust=none --no-obj` on a snippet in a fresh temp directory, killed after 10 s (25 s for a project) and with everything it started, output capped at 4 KB (6 KB for a project). `$exec` does not run (tested, with a positive control). `--trust=none` still allows `$embed`, which with `$echo` can print any file the server can read, so snippets containing `$embed`, `$include` or `$exec` are rejected before they reach the compiler. The server is not a sandbox: run it as a user without secrets.
 
 ## Recipes

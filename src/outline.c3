@@ -42,6 +42,8 @@ fn String outline_source(String source)
 	defer ts::ts_tree_delete(tree);
 	TSNode root = ts::ts_tree_root_node(tree);
 	DString out = dstring::temp();
+	// the grammar is not always as new as the compiler: say so, instead of listing less without a word
+	bool partial = ts::ts_node_has_error(root);
 	uint count = ts::ts_node_named_child_count(root);
 	for (uint i = 0; i < count; i++)
 	{
@@ -83,7 +85,33 @@ fn String outline_source(String source)
 		if (doc.len > 0) out.appendf("  -- %s", doc);
 		out.append("\n");
 	}
+	if (partial) out.append("  (the parser did not accept all of this file: the list may be incomplete)\n");
 	return out.str_view();
+}
+
+// How many .c3 files under `dir` the vendored grammar does not parse cleanly (and the first few names).
+// This is what tells you whether the grammar has caught up with a c3c release.
+fn int unparsed_files(String dir, DString* names)
+{
+	List{String} files;
+	files.init(tmem);
+	Path? p = path::new(tmem, dir);
+	if (catch p) return -1;
+	collect(p, &files, 0);
+	TSParser* parser = ts::ts_parser_new();
+	defer ts::ts_parser_delete(parser);
+	ts::ts_parser_set_language(parser, ts::tree_sitter_c3());
+	int bad = 0;
+	foreach (f : files)
+	{
+		char[]? data = file::load_temp(f);
+		if (catch data) continue;
+		TSTree* tree = ts::ts_parser_parse_string(parser, null, data.ptr, (uint)data.len);
+		defer ts::ts_tree_delete(tree);
+		if (!ts::ts_node_has_error(ts::ts_tree_root_node(tree))) continue;
+		if (bad++ < 5) names.appendf("  %s\n", f);
+	}
+	return bad;
 }
 
 fn bool is_c3_file(String name) => name.ends_with(".c3") || name.ends_with(".c3i");
