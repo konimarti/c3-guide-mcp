@@ -1,125 +1,98 @@
 # c3-guide-mcp
 
-An MCP server that teaches an LLM the C3 of today. It answers from the manual, the release notes and the standard library of the installed `c3c`, and checks code with the real compiler.
+An MCP server that gives an AI assistant accurate knowledge of the C3 language. It answers from the C3 manual, the release notes and the standard library, and checks code with the real `c3c` compiler.
 
-Most models learned C3 0.6/0.7. In 0.8 type properties became `int::size`, `if` with `else` needs braces, and more. Models write the old forms with confidence. This server gives them something better to look at than their memory.
+Most models learned C3 0.6/0.7, and C3 0.8 changed a lot (`int::size`, `faultdef`, braces around `if`/`else`, ...). They write the old forms with confidence, and guess standard library functions that do not exist. This server lets them look things up and check their code instead.
 
 ```
-model:  c3_symbol("read line")    ->  std::io::readline: macro String? readline(Allocator allocator, stream = io::stdin(), ...)
-        c3_symbol("file::open")  ->  fn File? open(String filename, String mode)
-        c3_check(<its code>)     ->  <code>/snippet.c3:1:44: error: if-statements with an 'else'
-                                     must use '{ }' even around a single statement.
-        (fixes it, checks again) ->  OK: no errors
+model:  c3_symbol("read line")  ->  std::io::readline: macro String? readline(Allocator allocator, ...)
+        c3_check(<its code>)    ->  <code>/snippet.c3:1:44: error: if-statements with an 'else' must use '{ }' ...
+        (fixes it, checks again) -> OK: no errors
 ```
 
-## Tools
+## What it can do
 
-| Tool | Answers |
+| Tool | Use |
 |---|---|
-| `c3_check(code or path)` | the compiler's diagnostics for a snippet, or for a real project directory / `.c3` file on disk, plus **hints**: for an error that names a guessed stdlib function or an old 0.7 property, the right signature or the 0.8 form |
-| `c3_fix(code)` | rewrites the mechanical 0.7 -> 0.8 changes (`int.sizeof` -> `int::size`, `$sizeof(T)`, `isz` -> `sz`, `$vacount`, `$vasplat`), then compiles the result and shows what is left |
-| `c3_search(query)` | the language manual and the [recipes](recipes/) (small programs that compile and run: read a file line by line, HashMap, sort, mkdir, threads, generics...), best first |
-| `c3_symbol(name or description)` | exact signature, doc and file:line of a stdlib function, macro, method or type; says so when it does not exist and suggests close names: the same name in another module (`allocator::free` finds `alloc::free`) and the release-note lines that say it was renamed. Given words instead of a name (`read line`, `get environment variable`) it ranks symbols by the words in their name and doc comment |
-| `c3_examples(symbol)` | working code that uses a stdlib function or type: the verified recipes and the manual's examples, with the lines around each use |
-| `c3_outline(path)` | what a project contains: one line per top-level declaration (functions and methods with signatures, structs, enums, macros, faults, constants) with file and line, plus the first line of each doc comment. Parsed with the C3 tree-sitter grammar, so nothing is compiled; capped at 6 KB; files over 1 MB are skipped, at most 400 files are read, symlinks are not followed |
-| `c3_changes(topic)` | the release-note lines about a topic, newest first |
-| `c3_syntax(topic)` | the compiler's lists: attributes, builtins, keywords, type properties, operators, precedence |
-| `c3_test(path, filter, timeout_s)` | **opt-in** (see below): builds a project or file in a scratch directory, runs its `@test` functions, returns pass/fail with the failing assertion and file:line, without the runtime's stack frames |
-| `c3_run(code or path, target, opt, timeout_s)` | **opt-in**: builds in a scratch directory and runs a program (stdin empty) at an optimization level `O0`..`O5`, `Os`, `Oz`, returns its output or the compile errors with hints. A program that outlives `timeout_s` (default and maximum 120) is killed together with anything it started (on Windows only the program itself: whatever it spawned keeps running) |
+| `c3_check` | Compile a snippet, a `.c3` file or a whole project and get the compiler's errors, with hints that name the right standard library function or the 0.8 spelling |
+| `c3_symbol` | Exact signature and source location of a standard library function, macro or type. Also takes a description (`get environment variable`). Says so when a name does not exist, and suggests the module it moved to or the release that renamed it |
+| `c3_search` | Search the manual and a set of tested example programs (files, HashMap, sorting, threads, generics, ...) |
+| `c3_examples` | Working code that uses a given standard library function or type |
+| `c3_changes` | What changed or was renamed between C3 releases (release notes, newest first) |
+| `c3_syntax` | The compiler's own lists of attributes, builtins, keywords, type properties, operators |
+| `c3_fix` | Rewrite C3 0.7 syntax to 0.8 where it is mechanical (`int.sizeof` to `int::size`, `isz` to `sz`, ...) and compile the result |
+| `c3_outline` | List what a project contains: every top-level function, type, macro and constant with file and line |
+| `c3_test` | *Optional.* Run a project's `@test` functions and get the failures without the noise |
+| `c3_run` | *Optional.* Build and run a program, at any optimization level `O0`..`O5`, `Os`, `Oz`, with a time limit |
 
-Replies of the docs tools are capped at 3.2 KB, `c3_check` of a snippet at 4 KB, of a project at 6 KB, both plus at most 2.4 KB of hints, `c3_test`/`c3_run` at 6 KB, `c3_outline` at 6 KB. A server that dumps pages into the context makes the model worse.
+`c3_check` and `c3_run` take code or a `path`; `c3_test` and `c3_outline` take a `path`: a project directory containing `project.json`, or one `.c3` file. Nothing is written into your project.
 
-### Why `c3_test` and `c3_run` are off by default
-
-`c3_check` never runs anything: `--no-obj` for snippets, a build into a scratch directory for projects, `--trust=none` throughout. `c3_test` and `c3_run` execute the program they build, which is a different trust level, so the operator opts in by starting the server with `C3_GUIDE_ALLOW_RUN=1`. Without it the two tools are not listed and the server's instructions do not mention them. They keep every guard of `c3_check` (`--trust=none`, 120 s deadline, capped output, build artifacts in a temp directory that is removed afterwards, snippets with `$embed`/`$include`/`$exec` refused), but the server is still not a sandbox: a program you run can read and write whatever your user can. Turn it on for code you or your model wrote on your own machine, not for untrusted input.
-
-### Paths
-
-`c3_check`, `c3_test` and `c3_run` take `path`: a directory containing `project.json` (the project is built with its dependencies and `--path`; `target` picks the build target) or one `.c3` file. Diagnostics show paths relative to the project. Nothing is written into the project. Files given by `path` are your own code, so the `$embed` filter that protects snippets does not apply to them.
-
-## Use it
-
-Models call the tools more reliably when told to. The server sends its own instructions (it tells the model to use `c3_check` instead of running `c3c` by hand); in addition, one line in your `CLAUDE.md`, `AGENTS.md` or system prompt helps: [integrations/claude-code/CLAUDE.md](integrations/claude-code/CLAUDE.md).
-
-Instructions are advice. To make Claude Code actually use the tools, add the hook from [integrations/claude-code](integrations/claude-code) (`settings.json` + `redirect-c3c.sh`): it blocks `c3c test`, `c3c compile-run`, `c3c compile-only`, `c3c compile-test` and `c3c run` typed into Bash and tells the model which tool to call. `c3c build` and `c3c compile` stay allowed, for producing a binary. The hook reads only the command (needs `jq` or `python3`), so `git commit -m "fix c3c test"` passes. To run c3c deliberately, prefix it: `C3_GUIDE_ALLOW=1 c3c test`. `sh test/hook_test.sh` checks the matching rules.
-
-In our small comparisons (4 runs per round with and without the tools, same prompt) the runs with the tools compiled on the first or second try. Without them the models guessed `File.open` and `File.read_line`, which do not exist, and one run did not get clean in 12 compiler runs. That is a handful of runs on a small model, not a benchmark, but it is the failure the server is built for.
+Replies are kept short on purpose: a few KB each, so they do not flood the model's context.
 
 ## Install
 
-Download the archive for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, Windows x64), check it against `SHA256SUMS`, unpack it. The binary is built for **c3c 0.8.5** (its docs snapshot is embedded). Only `c3_check`, `c3_fix`, `c3_test` and `c3_run` need `c3c`: put it on `PATH` or set `C3C`. Editors often start the server with a thin `PATH`, so it also looks in the usual install places (`/usr/local/bin`, `/opt/homebrew/bin`, `/opt/c3`, `~/.local/bin`, `~/bin`, `~/c3`, `%LOCALAPPDATA%\c3`). If the installed compiler is not the release the docs snapshot belongs to, `c3_symbol` says so. Without it the docs tools (`c3_search`, `c3_symbol`, `c3_examples`, `c3_changes`, `c3_syntax`) still work.
+1. Download the archive for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, Windows x64), check it against `SHA256SUMS`, and unpack it. On macOS, allow the unsigned binary once: `xattr -d com.apple.quarantine ./c3-guide-mcp`. For other platforms see [Build from source](#build-from-source).
+2. Install [c3c](https://github.com/c3lang/c3c/releases) **0.8.5**. The documentation inside the server belongs to that release. It is needed for `c3_check`, `c3_fix`, `c3_test` and `c3_run`; the search tools work without it.
 
-macOS blocks unsigned downloads: `xattr -d com.apple.quarantine ./c3-guide-mcp`. Other platforms (Intel Mac, Linux arm64): build from source, below.
+The server finds `c3c` on your `PATH`, then in the usual places (`/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, `~/bin`, `~/c3`, `%LOCALAPPDATA%\c3`). Editors often start tools with a short `PATH`; if it is not found, set `C3C=/path/to/c3c` in the server's environment. If your `c3c` is a different release than the documentation, `c3_symbol` says so.
 
-Register it as a stdio server in your MCP client:
+## Use it in your editor
+
+The server speaks MCP over stdio. Register the binary in your client:
+
+**Claude Code**
 
 ```
-claude mcp add c3-guide -e C3C=/path/to/c3c -e C3_GUIDE_ALLOW_RUN=1 -- /path/to/c3-guide-mcp     # Claude Code (drop the second -e to keep c3_test / c3_run off)
-hermes mcp add c3-guide --command /path/to/c3-guide-mcp                    # Hermes
+claude mcp add c3-guide -e C3C=/path/to/c3c -- /path/to/c3-guide-mcp
 ```
 
-Claude Desktop (`claude_desktop_config.json`) and Cursor (`~/.cursor/mcp.json`) take the same JSON:
+**Claude Desktop** (`claude_desktop_config.json`) and **Cursor** (`~/.cursor/mcp.json`)
 
 ```json
 { "mcpServers": { "c3-guide": { "command": "/path/to/c3-guide-mcp", "env": { "C3C": "/path/to/c3c" } } } }
 ```
 
-## Build from source
+**VS Code** (`.vscode/mcp.json`)
 
-Needs c3c 0.8.5 and [c3l](https://github.com/konimarti/c3l). The dependency ([mcp.c3l](https://github.com/konimarti/mcp.c3l)) is pinned to an exact commit with a checksum in `c3l.lock`:
+```json
+{ "servers": { "c3-guide": { "type": "stdio", "command": "/path/to/c3-guide-mcp", "env": { "C3C": "/path/to/c3c" } } } }
+```
+
+Any other MCP client works the same way: command = the binary, optional environment `C3C`. Claude Code and Hermes have been used in real sessions; the other entries follow each client's documented format.
+
+### Make Claude Code use it
+
+The server tells the model to use its tools, and models mostly do. Two things make it reliable:
+
+- **Add a line to your `CLAUDE.md`** (or `AGENTS.md`): [integrations/claude-code/CLAUDE.md](integrations/claude-code/CLAUDE.md).
+- **Add the hook** from [integrations/claude-code](integrations/claude-code) to your Claude Code `settings.json` (point it at `redirect-c3c.sh`; it needs `jq` or `python3`). When the model types `c3c test`, `c3c run`, `c3c compile-run` or `c3c compile-only` into the shell, the hook stops it and says which tool to call instead. `c3c build` and `c3c compile` still work. To run c3c yourself, put `C3_GUIDE_ALLOW=1` in front of it.
+
+### Turn on `c3_test` and `c3_run`
+
+These two *run* the code they build, so they are off by default. Start the server with `C3_GUIDE_ALLOW_RUN=1` to enable them:
 
 ```
-c3l sync --frozen                   # installs deps/mcp.c3l exactly as locked
+claude mcp add c3-guide -e C3C=/path/to/c3c -e C3_GUIDE_ALLOW_RUN=1 -- /path/to/c3-guide-mcp
+```
+
+(or add `"C3_GUIDE_ALLOW_RUN": "1"` to `env` in the JSON above). A program that runs too long is stopped; the limit is set per call (`timeout_s`, at most 120 s). This is not a sandbox: a program you run can read and write whatever your user can, so enable it for your own code, not for untrusted input. `c3_check` never runs anything.
+
+## Good to know
+
+- When the documentation and the compiler disagree, the compiler is right. The tools say so.
+- Search matches words, not meaning. It finds "vararg" for "vaargs", but a paraphrase with different words may miss. For a standard library function, asking by name (`c3_symbol readline`) is the most reliable.
+- Only Linux x64 has been tested by hand. CI builds and smoke-tests Linux, macOS and Windows.
+
+## Build from source
+
+Needs [c3c](https://github.com/c3lang/c3c) 0.8.5, [c3l](https://github.com/konimarti/c3l), and a C compiler (the C3 grammar parser is C code).
+
+```
+c3l sync --frozen                   # fetches the pinned dependency
 c3c build c3-guide-mcp -O3          # -> build/c3-guide-mcp
 ```
 
-`c3l verify` checks the installed files against the lock; `c3l update` moves it to a newer mcp.c3l.
+## More
 
-## How it works
-
-The docs are a snapshot embedded in the binary (`$embed`, 1.8 MB). `scripts/gen_corpus.py` builds it from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`. Startup takes about 10 ms. A search scans every entry in about 10 ms (BM25), so there is no index to build or keep in sync.
-
-The snapshot belongs to one `c3c` version (printed in its header). After a compiler update:
-
-```
-curl -o all.md https://c3-lang.org/all.md      # optional: adds the sections the manual lacks (22 in 0.8.5)
-python3 scripts/gen_corpus.py /path/to/c3 all.md && c3c build c3-guide-mcp -O3
-```
-
-### Updating for a new c3c release
-
-Three pieces move at different speeds, and each is updated on its own:
-
-| Piece | Where | Update |
-|---|---|---|
-| docs snapshot, synonyms | `data/` | `python3 scripts/gen_corpus.py /path/to/c3 [all.md]`, then `python3 scripts/update_synonyms.py` |
-| C3 grammar | `vendor/tree-sitter-c3` | `python3 scripts/update_treesitter.py grammar [TAG]` |
-| tree-sitter runtime | `vendor/tree-sitter` | `python3 scripts/update_treesitter.py runtime [TAG]` (rarely; the script checks that the grammar's parser version still fits) |
-
-The grammar usually follows a c3c release by some days or weeks. Only `c3_outline` and `c3_fix` use it, and the docs tools do not, so a new snapshot never has to wait for it. To see whether the vendored grammar understands a compiler, run `C3_DIR=/path/to/c3 c3c test c3-guide-mcp`: one test parses every file of that c3c's standard library and fails, naming the files, if any does not parse. If it fails, ship the new snapshot with the old grammar (`git checkout vendor/`); until the grammar catches up, `c3_outline` marks a file it could not fully read as incomplete and `c3_fix` rewrites less, never more. CI runs the same test against the pinned c3c, so a mismatch cannot be merged unnoticed.
-
-`c3_check` runs `c3c --trust=none --no-obj` on a snippet in a fresh temp directory, killed after 10 s (25 s for a project) and with everything it started, output capped at 4 KB (6 KB for a project). `$exec` does not run (tested, with a positive control). `--trust=none` still allows `$embed`, which with `$echo` can print any file the server can read, so snippets containing `$embed`, `$include` or `$exec` are rejected before they reach the compiler. The server is not a sandbox: run it as a user without secrets.
-
-## Recipes
-
-`recipes/*.c3` are small complete programs for the things models get wrong most: files, directories, HashMap, List, strings, sorting, faults, enums, macros, generics, threads, processes. The first line is the title, `// expect:` lines are the output. `test/recipes_test.c3` compiles and runs each one, so a recipe the server shows has worked on the pinned compiler. To add one, write the file, run `c3c test c3-guide-mcp`, and refresh the recipe records with `python3 scripts/update_recipes.py /path/to/c3` (it keeps every other record, so the snapshot built with `all.md` stays as it is; `test/corpus_test.py` fails on stale recipes). Recipes also feed `c3_search` ranking: keep their titles to what they show, or a word like "fault" in an unrelated title can push the right recipe down (`test/quality_test.c3` catches it).
-
-## Tests
-
-```
-C3C=/path/to/c3c c3c test c3-guide-mcp   # the C3 test runner: tools, search quality, c3_check and its limits, every recipe
-python3 test/stdio_test.py               # JSON-RPC over the built binary
-python3 test/smoke.py                    # the same binary, one call per tool
-python3 test/growth_test.py              # memory over 4,000 calls
-python3 test/corpus_test.py /path/to/c3  # the snapshot matches the installed c3c
-```
-
-`c3c test` needs `sh` and takes about 40 s: two tests wait out the 10 s compiler deadline, and the recipes test compiles all recipes. The tests are `@test` functions in `test/*.c3` and call the tool functions directly, so no binary has to be built first.
-
-## Limits
-
-- The docs and the compiler do not always agree (the manual says `excuse`, other pages `faultdef`; the compiler accepts both). When they differ, `c3_check` is right.
-- Search is keyword based, helped by a small table of synonyms for symbol lookups (`data/synonyms.txt`, built from `scripts/synonyms_seed.txt` by `scripts/update_synonyms.py`; rerun it after a new c3c snapshot): it finds "Macro vaargs" for "vararg", but not a paraphrase with different words. This is sharper for symbols: `read line` finds `readline`, but `create directory` does not find `mkdir`, and many stdlib functions have no doc comment, so only their name can match. `temp allocator` lists `TempAllocator` before the alias `tmem`; ask for `tmem` by name.
-- A killed server leaves its temp directory behind; the next `c3_check` removes `c3guide-*` directories older than an hour.
-- CI builds and runs a smoke test on Linux x64, macOS arm64 and Windows x64; the full suite runs on Linux and macOS. Only Linux x64 was also tested by hand.
-- Used from Hermes (`hermes mcp test` and real sessions). The Claude Code, Claude Desktop and Cursor lines above follow their documented formats but were not tried.
+- Updating for a new C3 release, running the tests, adding example programs: [docs/MAINTAINING.md](docs/MAINTAINING.md)
+- License: [LICENSE](LICENSE). Third-party material: [NOTICE](NOTICE).
