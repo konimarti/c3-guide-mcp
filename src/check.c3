@@ -284,8 +284,13 @@ fn String? run_capped(String[] cmd, int* code, bool* timed_out, ulong deadline_m
 	c.mutex.unlock();
 
 	int status = 0;
-	if (exited) { status = proc.return_status; }
-	else { CInt? j = proc.join(); status = j ?? 0; }
+	$if env::WIN32:
+		CInt? j = proc.join();   // the exit code is read from the handle, which stays valid after the process ended
+		status = j ?? 0;
+	$else
+		if (exited) { status = proc.return_status; }   // is_running() already reaped it: join() would have no status to give
+		else { CInt? j = proc.join(); status = j ?? 0; }
+	$endif
 	*timed_out = fired;
 	*code = (fired || capped) ? 0 : status;
 
