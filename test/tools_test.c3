@@ -153,3 +153,14 @@ fn void examples_show_working_code() @test
 	assert(tools::c3_examples("qzxvwqjk").contains("no recipe or manual example"));
 	assert(!tools::c3_examples("readline").contains("readline_all"), "whole identifiers only");
 }
+
+fn void syntax_without_a_topic_lists_the_topics() @test
+{
+	assert(tools::c3_syntax("").contains("type-properties"));
+}
+
+fn void enum_count_is_found() @test
+{
+	String t = tools::c3_search("number of enum values count", 2);
+	assert(t.contains("Status::len"), "%s", t);
+}

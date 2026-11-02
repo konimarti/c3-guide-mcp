@@ -390,3 +390,9 @@ fn void run_tool_kills_a_hanging_compiler_after_its_deadline_flag() @test
 	support::set_c3c(support::write_fake(dir, "ok.sh", "echo fake-output"));
 	assert(has(check::c3_run("fn void main() {}"), "fake-output"));
 }
+
+fn void run_takes_an_optimization_level() @test
+{
+	assert(check::valid_opt("") && check::valid_opt("O3") && check::valid_opt("Os"));
+	assert(!check::valid_opt("O9") && !check::valid_opt("--run-dir") && !check::valid_opt("-O3"));
+}

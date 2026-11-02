@@ -255,6 +255,16 @@ fn bool valid_target(String t)
 	return true;
 }
 
+const String BAD_OPT = "opt must be one of O0 O1 O2 O3 O4 O5 Os Oz (or empty for the default)";
+
+fn bool valid_opt(String o)
+{
+	if (o.len == 0) return true;
+	String[*] levels = { "O0", "O1", "O2", "O3", "O4", "O5", "Os", "Oz" };
+	foreach (ok : levels) if (o == ok) return true;
+	return false;
+}
+
 const String BAD_TARGET_NAME = "target must be a build target name (letters, digits, _ . -), not an option";
 
 // Exactly one of code / path. Returns "" when the arguments are fine, else the message to show.
@@ -404,13 +414,15 @@ fn String c3_test(String path @Desc("a project directory (with project.json) or 
 
 fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	String path @Desc("instead of code: a project directory or a .c3 file") = "",
-	String target @Desc("with a project path: the target to run") = "")
+	String target @Desc("with a project path: the target to run") = "",
+	String opt @Desc("optimization level: O0 O1 O2 O3 O4 O5 Os Oz; default is the compiler's (use it to compare speed)") = "")
 	@Desc("USE THIS INSTEAD OF running `c3c compile-run` or `c3c run` yourself. Builds in a scratch directory and runs the program (stdin empty, 60 s limit), returning its output or the compile errors with hints.")
 	@Timeout(90000)
 {
 	String bad = exclusive_args(code, path);
 	if (bad.len > 0) return bad;
 	if (!valid_target(target)) return BAD_TARGET_NAME;
+	if (!valid_opt(opt)) return BAD_OPT;
 	Path? scratch = scratch_dir();
 	if (catch scratch) return "cannot create a temp directory";
 	defer (void)path::rmtree(scratch);
@@ -418,14 +430,20 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	{
 		String file = string::tformat("%s/snippet.c3", (String)scratch);
 		if (catch file::save(file, code)) return "cannot write the snippet";
-		String[] mode = { "--run-dir", (String)scratch, "compile-run", file };
-		return run_c3c(mode, (String)scratch, "<code>", scratch, false, "", "(no output)");
+		Args c;
+		if (opt.len > 0) c.add(string::tformat("-%s", opt));
+		c.add("--run-dir");
+		c.add((String)scratch);
+		c.add("compile-run");
+		c.add(file);
+		return run_c3c(c.list(), (String)scratch, "<code>", scratch, false, "", "(no output)");
 	}
 	bool is_dir;
 	String? where = resolve_target(path, &is_dir);
 	if (catch where) return BAD_TARGET_TEXT;
 	String base = is_dir ? string::tformat("%s/", where) : string::tformat("%s", where[:(where.rindex_of("/") ?? 0) + 1]);
 	Args m;
+	if (opt.len > 0) m.add(string::tformat("-%s", opt));
 	if (is_dir)
 	{
 		m.add("run");

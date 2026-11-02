@@ -143,10 +143,13 @@ fn String c3_changes(String topic @Desc("keyword, e.g. 'foreach', 'faultdef', 't
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
-fn String c3_syntax(String topic @Desc("one of: attributes, builtins, keywords, type-properties, operators, precedence; or a word to find in them"))
+const String SYNTAX_TOPICS = "lists: attributes, builtins, keywords, type-properties, operators, precedence; or give a word to find in them";
+
+fn String c3_syntax(String topic @Desc("one of: attributes, builtins, keywords, type-properties, operators, precedence; or a word to find in them") = "")
 	@Desc("Exact lists from the compiler: attributes, builtins, keywords, type properties, operators, precedence.")
 	@ReadOnly
 {
+	if (topic.trim(" \t\n").len == 0) return SYNTAX_TOPICS;
 	DString out = dstring::temp();
 	foreach (&e : corpus::entries)
 	{

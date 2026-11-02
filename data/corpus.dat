@@ -1,4 +1,4 @@
-metac3c0.8.5_1records=7320docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
+metac3c0.8.5_1records=7321docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
 
 
 
@@ -17966,7 +17966,20 @@ fn void main()
 	String s = build();
 	defer s.free(mem);
 	io::printfn("built: %s", s);
-}recipes/defer_pool.c3recipeRecipe: enum with a method, enum with associated values, switch on an enumimport std::io;
+}recipes/defer_pool.c3recipeRecipe: number of enum values: Status::len, enum element count, size an array by enum, loop over all enum values, enum names// Also: enum length, count of constants, from_ordinal, Enum::names, EnumMap
+import std::io;
+
+enum Status { IDLE, ACTIVE, DONE }
+
+fn void main()
+{
+	io::printfn("count=%d", Status::len);          // type properties use ::, not . (Status.len does not exist)
+	int[Status::len] per_status;                   // a compile-time constant: usable as an array size
+	per_status[Status.ACTIVE.ordinal] += 1;
+	io::printfn("%d %d", per_status.len, per_status[1]);
+	io::printn(Status::from_ordinal(1));           // back from the ordinal
+	foreach (name : Status::names) io::printn(name);
+}recipes/enum_count.c3recipeRecipe: enum with a method, enum with associated values, switch on an enumimport std::io;
 
 enum Status { IDLE, ACTIVE, DONE }
 
