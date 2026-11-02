@@ -235,3 +235,9 @@ fn void changes_understand_dotted_and_qualified_names() @test
 		assert(tools::has_word(line.to_lower_tcopy(), "fault") || tools::has_word(line.to_lower_tcopy(), "faults"), "'default' is not 'fault': %s", line);
 	}
 }
+
+fn void a_name_in_another_spelling_is_found() @test
+{
+	String[2][*] cases = { { "readLine", "std::io::readline" }, { "toInt", "String.to_int" }, { "getVar", "get_var" }, { "isEmpty", "is_empty" }, { "read_line", "std::io::readline" } };
+	foreach (c : cases) assert(tools::c3_symbol(c[0]).contains(c[1]), "%s: %s", c[0], tools::c3_symbol(c[0]));
+}

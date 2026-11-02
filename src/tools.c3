@@ -261,6 +261,14 @@ fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 
 	return string::tformat("%s%s", reply, check::version_note(reply.contains("does not exist")));
 }
 
+// A name without its underscores, in lowercase: `readLine`, `read_line` and `readline` are one key.
+fn String name_key(String lowercase)
+{
+	DString out = dstring::temp();
+	foreach (c : lowercase) if (c != '_') out.append_char(c);
+	return out.str_view();
+}
+
 // Do the two names share most of their beginning? `printfln` and `printfn` do, `read` and `read_line` do not.
 fn bool alike(String a, String b)
 {
@@ -297,7 +305,8 @@ fn String symbol_reply(String name)
 	if (n.contains("::")) { String m = n[:n.rindex_of("::") ?? 0].to_lower_tcopy(); module_hint = m[(m.rindex_of("::") ?? -2) + 2..]; }
 	int shown = 0;
 	bool qualified = module_hint.len > 0;
-	for (int pass = 0; pass < 4; pass++)
+	String qkey = name_key(q);
+	for (int pass = 0; pass < 5; pass++)
 	{
 		foreach (&e : corpus::entries)
 		{
@@ -313,6 +322,7 @@ fn String symbol_reply(String name)
 				case 0: take = same && plain && near;          // the same function in a module that resembles the asked one
 				case 1: take = same && plain;                  // the same function anywhere
 				case 2: take = same && !plain && !qualified;   // methods of that name, when no module was named
+				case 3: take = !same && name_key(last) == qkey;   // the same name in another spelling: `toInt` for `to_int`
 				default: take = !same && alike(last, q);       // names that start alike
 			}
 			if (!take || out.str_view().contains(string::tformat("  %s\n", e.title))) continue;
