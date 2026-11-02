@@ -215,6 +215,43 @@ fn String describe(String query)
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
+// How many stdlib symbols this name stands for (`free` is a dozen of them: too many to be a useful hint).
+fn int exact_matches(String name)
+{
+	int n = 0;
+	foreach (&e : corpus::entries) if (is_symbol(e.kind) && uid_matches(e.title, name)) n++;
+	return n;
+}
+
+// Release-note lines that say `word` was renamed, replaced or removed, newest release first (at most two).
+// A name that "does not exist" is most often a name that moved.
+fn String rename_notes(String word)
+{
+	Hit[] hits = search::search(word, { "change" }, 12);
+	String low = word.to_lower_tcopy();
+	int best_key = -1;
+	int second_key = -1;
+	String best = "";
+	String second = "";
+	foreach (h : hits)
+	{
+		Entry* e = &corpus::entries[h.idx];
+		if (e.title.contains("> Fixes")) continue;
+		foreach (line : e.body.tsplit("\n"))
+		{
+			if (!line.starts_with("-")) continue;
+			String l = line.to_lower_tcopy();
+			if (!l.contains(low) || !(l.contains("renam") || l.contains("replace") || l.contains("remov") || l.contains("moved"))) continue;
+			int key = version_key(e.title);
+			String text = string::tformat("  %s: %s\n", strip_prefix(e.title, "C3C Release Notes > ").tsplit(" ")[0], util::clip(line, 240));
+			if (key > best_key) { second_key = best_key; second = best; best_key = key; best = text; }
+			else if (key > second_key) { second_key = key; second = text; }
+		}
+	}
+	if (best.len == 0) return "";
+	return string::tformat("Release notes:\n%s%s", best, second);
+}
+
 fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 'String.split', 'talloc_array') or, when you do not know the name, what it does ('read a line from a file', 'trim whitespace')"))
 	@Desc("Exact signature, docs and source location of a C3 standard library function, macro, method or type; or, given a description, the functions that do it. Never guess a signature, look it up.")
 	@ReadOnly
@@ -243,18 +280,30 @@ fn String symbol_reply(String name)
 	// not found: say so (a model must not assume a guessed API exists), then offer close names
 	out.append(legacy_note(n));
 	out.appendf("'%s' does not exist in the standard library of c3c %s.\n", n, corpus::snapshot_version);
-	String lower = n.to_lower_tcopy();
+	// `allocator::free` is asked for by its old module: the same name in another module is the likely answer
+	String q = last_segment(n).to_lower_tcopy();
+	String module_hint = "";
+	if (n.contains("::")) { String m = n[:n.rindex_of("::") ?? 0].to_lower_tcopy(); module_hint = m[(m.rindex_of("::") ?? -2) + 2..]; }
 	int shown = 0;
-	foreach (&e : corpus::entries)
+	for (int pass = 0; pass < 3; pass++)
 	{
-		if (!is_symbol(e.kind)) continue;
-		String last = last_segment(e.title).to_lower_tcopy();
-		if (last.len >= 3 && (last.starts_with(lower) || lower.starts_with(last)) && shown < 8)
+		foreach (&e : corpus::entries)
 		{
+			if (!is_symbol(e.kind) || shown >= 8) continue;
+			String uid = e.title.to_lower_tcopy();
+			String last = last_segment(e.title).to_lower_tcopy();
+			bool same = last == q;
+			// pass 0: same name, module resembles the one asked for; pass 1: same name, a plain function;
+			// pass 2: names that start alike
+			bool near = module_hint.len >= 3 && uid.contains(module_hint[:module_hint.len < 4 ? module_hint.len : 4]);
+			bool plain = !e.title[(e.title.rindex_of("::") ?? 0)..].contains(".");
+			bool take = pass == 0 ? (same && near && module_hint.len > 0) : (pass == 1 ? (same && (plain || module_hint.len == 0) && !(near && module_hint.len > 0)) : (!same && last.len >= 3 && (last.starts_with(q) || q.starts_with(last))));
+			if (!take || out.str_view().contains(string::tformat("  %s\n", e.title))) continue;
 			if (shown++ == 0) out.append("Similar names:\n");
 			out.appendf("  %s\n", e.title);
 		}
 	}
+	out.append(rename_notes(q));
 	// a wrong name usually has the right words in it (`File.read_line`, `tnew_array`)
 	String words = describe(n);
 	if (!words.starts_with("no symbol")) out.append(words);

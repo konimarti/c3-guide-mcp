@@ -1,4 +1,4 @@
-metac3c0.8.5_1records=7321docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
+metac3c0.8.5_1records=7322docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
 
 
 
@@ -18114,7 +18114,42 @@ fn void main()
 	io::printfn("distinct: %d", seen.len());
 	io::printfn("has 2: %s", seen.contains(2));
 	io::printfn("has 9: %s", seen.contains(9));
-}recipes/hashset.c3recipeRecipe: parse JSON text into a tree and read values from it (std::encoding::json); reading a missing key gives an error// Also: json, parse json, JSON object, get_int, get_string, dynamic tree, decode
+}recipes/hashset.c3recipeRecipe: optional interface method: @optional, test that an implementor has the method before calling it (if (&r.close)), calling a missing one panics// Also: interface, @dynamic, dynamic dispatch, not implemented, may not be implemented, method exists check
+import std::io;
+
+interface Reader
+{
+	fn String name();
+	fn void close() @optional;       // an implementor may leave this out
+}
+
+struct File (Reader) { int fd; }
+struct Memory (Reader) { int n; }
+
+fn String File.name(&self) @dynamic => "file";
+fn void File.close(&self) @dynamic { io::printn("file closed"); }
+fn String Memory.name(&self) @dynamic => "memory";      // no close()
+
+fn void finish(Reader r)
+{
+	io::printfn("finishing %s", r.name());
+	if (&r.close)                    // test that the optional method exists; calling a missing one panics
+	{
+		r.close();
+	}
+	else
+	{
+		io::printn("(no close)");
+	}
+}
+
+fn void main()
+{
+	File f = { 3 };
+	Memory m = { 1 };
+	finish(&f);
+	finish(&m);
+}recipes/interface_optional.c3recipeRecipe: parse JSON text into a tree and read values from it (std::encoding::json); reading a missing key gives an error// Also: json, parse json, JSON object, get_int, get_string, dynamic tree, decode
 import std::io;
 import std::encoding::json;
 import std::collections::object;

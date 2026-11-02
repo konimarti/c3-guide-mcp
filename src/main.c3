@@ -7,7 +7,7 @@ const String INSTRUCTIONS = `Your memory of C3 is probably outdated (most traini
 Do not write C3 from memory, and do not run the c3c compiler by hand to check code: these tools run the real compiler and add what its messages lack.
 - c3_symbol before using any stdlib function, macro or method: exact signature or "does not exist". Do not know the name? Describe it ("read line from stdin") and it lists the matching functions.
 - c3_examples for working code that calls a stdlib function or type.
-- c3_search for language rules (the manual); c3_changes when old syntax fails (release notes, newest first); c3_fix rewrites 0.7 syntax to 0.8.
+- c3_search for language rules (the manual); c3_changes when old syntax or an old stdlib name fails (renames and removals, release notes newest first); c3_fix rewrites 0.7 syntax to 0.8.
 - c3_check instead of "c3c compile" or "c3c build": give code for a snippet, or path for a project or file on disk. Run it on every snippet before you show it.
 - c3_syntax for the exact list of attributes, keywords, builtins and type properties.
 Trust the compiler over this documentation when they disagree.`;

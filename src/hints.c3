@@ -82,6 +82,8 @@ fn String hint_for(String msg, String output)
 		return "";
 	}
 	foreach (t : BUILTIN_TYPES) if (t == name) return "";
+	// `free`, `init`, `len`: dozens of methods of that name say nothing about the one that was meant
+	if (!name.contains("::") && tools::exact_matches(name) > 3) return "";
 	String s = tools::c3_symbol(name);
 	// a name that is not in the stdlib and has no close name is the user's own: say nothing
 	if (s.contains("does not exist") && !s.contains("Similar names") && !s.contains("Symbols matching")) return "";
