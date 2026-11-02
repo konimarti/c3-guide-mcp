@@ -40,7 +40,7 @@ Replies of the docs tools are capped at 3.2 KB, `c3_check` at 4 KB plus at most 
 
 Models call the tools more reliably when told to. The server sends its own instructions (it tells the model to use `c3_check` instead of running `c3c` by hand); in addition, one line in your `CLAUDE.md`, `AGENTS.md` or system prompt helps: [integrations/claude-code/CLAUDE.md](integrations/claude-code/CLAUDE.md).
 
-Instructions are advice. To make Claude Code actually use the tools, add the hook from [integrations/claude-code](integrations/claude-code) (`settings.json` + `redirect-c3c.sh`): it blocks `c3c test`, `c3c compile-run`, `c3c compile-only` and `c3c run` typed into Bash and tells the model which tool to call. `c3c build` and `c3c compile` stay allowed, for producing a binary.
+Instructions are advice. To make Claude Code actually use the tools, add the hook from [integrations/claude-code](integrations/claude-code) (`settings.json` + `redirect-c3c.sh`): it blocks `c3c test`, `c3c compile-run`, `c3c compile-only` and `c3c run` typed into Bash and tells the model which tool to call. `c3c build` and `c3c compile` stay allowed, for producing a binary. The hook reads only the command (needs `jq` or `python3`), so `git commit -m "fix c3c test"` passes. To run c3c deliberately, prefix it: `C3_GUIDE_ALLOW=1 c3c test`. `sh test/hook_test.sh` checks the matching rules.
 
 In our small comparisons (4 runs per round with and without the tools, same prompt) the runs with the tools compiled on the first or second try. Without them the models guessed `File.open` and `File.read_line`, which do not exist, and one run did not get clean in 12 compiler runs. That is a handful of runs on a small model, not a benchmark, but it is the failure the server is built for.
 
@@ -76,7 +76,7 @@ c3c build c3-guide-mcp -O3          # -> build/c3-guide-mcp
 
 ## How it works
 
-The docs are a snapshot embedded in the binary (`$embed`, 1.8 MB, 7,313 entries). `scripts/gen_corpus.py` builds it from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`. Startup takes about 10 ms. A search scans every entry in about 10 ms (BM25), so there is no index to build or keep in sync.
+The docs are a snapshot embedded in the binary (`$embed`, 1.8 MB, 7,320 entries). `scripts/gen_corpus.py` builds it from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`. Startup takes about 10 ms. A search scans every entry in about 10 ms (BM25), so there is no index to build or keep in sync.
 
 The snapshot belongs to one `c3c` version (printed in its header). After a compiler update:
 
@@ -89,7 +89,7 @@ python3 scripts/gen_corpus.py /path/to/c3 all.md && c3c build c3-guide-mcp -O3
 
 ## Recipes
 
-`recipes/*.c3` are small complete programs for the things models get wrong most: files, directories, HashMap, List, strings, sorting, faults, enums, macros, generics, threads, processes. The first line is the title, `// expect:` lines are the output. `test/recipes_test.c3` compiles and runs each one, so a recipe the server shows has worked on the pinned compiler. To add one, write the file, run `c3c test c3-guide-mcp`, and regenerate the snapshot (`scripts/gen_corpus.py`).
+`recipes/*.c3` are small complete programs for the things models get wrong most: files, directories, HashMap, List, strings, sorting, faults, enums, macros, generics, threads, processes. The first line is the title, `// expect:` lines are the output. `test/recipes_test.c3` compiles and runs each one, so a recipe the server shows has worked on the pinned compiler. To add one, write the file, run `c3c test c3-guide-mcp`, and refresh the recipe records with `python3 scripts/update_recipes.py /path/to/c3` (it keeps every other record, so the snapshot built with `all.md` stays as it is; `test/corpus_test.py` fails on stale recipes). Recipes also feed `c3_search` ranking: keep their titles to what they show, or a word like "fault" in an unrelated title can push the right recipe down (`test/quality_test.c3` catches it).
 
 ## Tests
 

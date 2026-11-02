@@ -1,4 +1,4 @@
-// Recipe: macros: @macro name, #expr (unevaluated expression), $stringify, $typeof, generic parameter, compile-time $if
+// Recipe: macros: @macro name, #expr (unevaluated expression), $stringify, $Typeof (a type from an expression), generic parameter, compile-time $if
 // expect: 1 + 2 = 3
 // expect: 5
 import std::io;

@@ -1,5 +1,5 @@
 module c3guide::search;
-import c3guide::corpus;
+import c3guide::corpus, c3guide::util;
 import std::core::ascii;
 import std::collections::list;
 import std::sort, std::math;
@@ -8,6 +8,8 @@ import std::sort, std::math;
 // title hits weighted x3). Costs a few ms per query and keeps startup at zero.
 
 const float RECIPE_BOOST = 1.4f;
+const sz MAX_QUERY_BYTES = 256;
+const sz MAX_TERMS = 16;
 
 struct Hit
 {
@@ -80,8 +82,11 @@ fn String[] query_terms(String query)
 {
 	List{String} out;
 	out.init(tmem);
+	// the scan costs terms x entries: a 20,000-word query blocked the server for over a minute
+	query = query[:util::utf8_boundary(query, MAX_QUERY_BYTES)];
 	foreach (w : query.tsplit(" "))
 	{
+		if (out.len() >= MAX_TERMS) break;
 		String t = w.trim(" \t\n,.?!");
 		bool marked = t.starts_with("@") || t.starts_with("$");   // `$for`, `@require`: a name, not filler
 		String bare = t.trim("@$");
@@ -91,6 +96,50 @@ fn String[] query_terms(String query)
 		bool stop = false;
 		if (!marked) foreach (sw : STOPWORDS) if (sw == low) stop = true;
 		if (!stop) out.push(low);
+	}
+	return out.array_view();
+}
+
+// People describe a function by words that are not in its name: `to_int` is what "parse a string to int"
+// asks for. Every rule needs all its trigger words in the query; `names` are the stdlib names to show first.
+struct Alias
+{
+	String[3] when;
+	String names;
+}
+
+const Alias[*] ALIASES = {
+	{ { "parse", "int", "" }, "to_int to_integer" },
+	{ { "parse", "integer", "" }, "to_int to_integer" },
+	{ { "atoi", "", "" }, "to_int to_integer" },
+	{ { "string", "integer", "" }, "to_int to_integer" },
+	{ { "time", "milliseconds", "" }, "time::now clock::now" },
+	{ { "current", "time", "" }, "time::now clock::now" },
+	{ { "timestamp", "", "" }, "time::now clock::now" },
+	{ { "read", "file", "" }, "file::load file::load_temp" },
+};
+
+fn String[] alias_names(String[] terms)
+{
+	List{String} out;
+	out.init(tmem);
+	foreach (a : ALIASES)
+	{
+		bool all = true;
+		foreach (w : a.when)
+		{
+			if (w.len == 0) continue;
+			bool present = false;
+			foreach (t : terms) if (t == w) present = true;
+			if (!present) all = false;
+		}
+		if (!all) continue;
+		foreach (n : a.names.tsplit(" "))
+		{
+			bool dup = false;
+			foreach (o : out) if (o == n) dup = true;
+			if (!dup) out.push(n);
+		}
 	}
 	return out.array_view();
 }
