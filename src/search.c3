@@ -231,6 +231,6 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 		if (s > 0) hits.push({ s, (int)i });
 	}
 	Hit[] sorted = hits.array_view();
-	sort::quicksort(sorted, fn int(Hit a, Hit b) => a.score < b.score ? 1 : (a.score > b.score ? -1 : 0));
+	sort::quicksort(sorted, fn int(Hit a, Hit b) => a.score < b.score ? 1 : (a.score > b.score ? -1 : a.idx - b.idx));   // equal scores: the entry that comes first, so a ranking never depends on the sort
 	return sorted[:(sz)(sorted.len < limit ? sorted.len : limit)];
 }

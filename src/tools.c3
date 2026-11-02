@@ -1,6 +1,6 @@
 module c3guide::tools;
 import mcp, std::core::string;
-import c3guide::corpus, c3guide::search, c3guide::util, c3guide::hints, c3guide::check;
+import c3guide::corpus, c3guide::search, c3guide::util, c3guide::hints, c3guide::check, c3guide::live;
 import std::sort;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
@@ -94,6 +94,7 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 	if (hits.len == 0) hits = search::search(search::code_words(query), { "recipe", "doc" }, n);
 	if (hits.len > 0) return format_hits(hits, MAX_SNIPPET);
 	// `sort::quicksort`, `read_line`: a name, not a topic; the manual has no section, the standard library has
+	live::ensure();
 	Hit[] syms = search::search(query, { "fn", "macro", "method", "mmethod", "type", "var" }, 3, true);
 	if (syms.len > 0)
 	{
@@ -217,6 +218,7 @@ fn String describe(String query)
 // How many stdlib symbols this name stands for (`free` is a dozen of them: too many to be a useful hint).
 fn int exact_matches(String name)
 {
+	live::ensure();
 	int n = 0;
 	foreach (&e : corpus::entries) if (is_symbol(e.kind) && uid_matches(e.title, name)) n++;
 	return n;
@@ -240,7 +242,7 @@ fn String rename_notes(String word)
 		{
 			if (!line.starts_with("-")) continue;
 			String l = line.to_lower_tcopy();
-			if (!has_word(line, word) || !(l.contains("renam") || l.contains("replace") || l.contains("remov") || l.contains("moved"))) continue;
+			if (!line.contains(string::tformat("`%s`", word)) || !(l.contains("renam") || l.contains("replace") || l.contains("remov") || l.contains("moved"))) continue;
 			int key = version_key(e.title);
 			String text = string::tformat("  %s: %s\n", strip_prefix(e.title, "C3C Release Notes > ").tsplit(" ")[0], util::clip(line, 240));
 			if (key > best_key) { second_key = best_key; second = best; best_key = key; best = text; }
@@ -259,16 +261,18 @@ fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 
 	return string::tformat("%s%s", reply, check::version_note(reply.contains("does not exist")));
 }
 
-// Do the two names start the same and have about the same length? `read` and `read_line` are different words.
+// Do the two names share most of their beginning? `printfln` and `printfn` do, `read` and `read_line` do not.
 fn bool alike(String a, String b)
 {
-	sz lo = a.len < b.len ? a.len : b.len;
-	sz hi = a.len < b.len ? b.len : a.len;
-	return lo >= 3 && lo * 10 >= hi * 6 && (a.starts_with(b) || b.starts_with(a));
+	sz common = 0;
+	while (common < a.len && common < b.len && a[common] == b[common]) common++;
+	sz longer = a.len > b.len ? a.len : b.len;
+	return common >= 3 && common * 10 >= longer * 7;
 }
 
 fn String symbol_reply(String name)
 {
+	live::ensure();
 	String n = name.trim(" \t\n");
 	if (n.len == 0) return "give a symbol name, e.g. printfn or String.split";
 	DString out = dstring::temp();

@@ -6,7 +6,7 @@ For people who change or release the server. Users: see the [README](../README.m
 
 - The docs are a snapshot embedded in the binary (`$embed` of `data/corpus.dat`, 1.8 MB), built by `scripts/gen_corpus.py` from a `c3c` install: `MANUAL.md`, `releasenotes.md`, `c3c --list-*` and `c3c docgen lib/std --json`, plus the example programs in `recipes/`. It belongs to one c3c version, printed in its header.
 - A search scans every entry (BM25 over words, title hits weighted higher, recipes boosted) in a few milliseconds, so there is no index to build or keep in sync. Symbol lookups also use `data/synonyms.txt`.
-- When the installed c3c is not the snapshot's version, `src/live.c3` replaces the snapshot's standard library symbols with ones read from that compiler (`c3c docgen <lib/std> --json`, about 0.2 s and a short memory peak at startup; `malloc_trim` gives it back on Linux). It is a port of `symbols()` in `scripts/gen_corpus.py`, and `test/live_test.c3` checks both give identical text for every symbol of the pinned compiler (run with `C3_DIR`). Change one, change the other. The `alias` variables (`mem`, `tmem`), the manual and the release notes always come from the snapshot. Any failure keeps the snapshot.
+- When the installed c3c is not the snapshot's release, `src/live.c3` replaces the snapshot's standard library symbols with ones read from that compiler (`c3c --trust=none docgen <lib/std> --json`). It runs once, on the first lookup that reads symbols (`live::ensure`, enabled by `main`; the tests leave it off), takes about 0.2 s and a 73 MB memory peak, and `malloc_trim` returns the memory on Linux. Symbols are one block sorted by name, in the snapshot (`gen_corpus.py` sorts) and in the live read, so an unchanged library ranks exactly like the snapshot. It is a port of `symbols()` in `scripts/gen_corpus.py`, and `test/live_test.c3` checks both give identical text for every symbol of the pinned compiler (run with `C3_DIR`). Change one, change the other. The `alias` variables (`mem`, `tmem`), the manual and the release notes always come from the snapshot. Any failure keeps the snapshot.
 - `c3_outline` and `c3_fix` read source with the vendored tree-sitter C3 grammar (`vendor/`). The docs tools do not use it.
 
 ## Updating for a new c3c release
@@ -30,7 +30,7 @@ The grammar usually follows a c3c release by days or weeks, so a new snapshot ne
 ## Tests
 
 ```
-C3_DIR=/path/to/c3 c3c test c3-guide-mcp   # tools, search quality, c3_check and its limits, recipes, grammar gate (about 1 minute; needs sh, pgrep, pkill)
+C3_DIR=/path/to/c3 c3c test c3-guide-mcp   # tools, search quality, c3_check and its limits, recipes, grammar gate, live docs (about 80 s; needs sh, pgrep, pkill)
 python3 test/stdio_test.py                 # JSON-RPC over the built binary
 python3 test/smoke.py [binary]             # one call per tool (also run on Windows in CI)
 python3 test/growth_test.py                # memory over 4,000 calls
@@ -39,7 +39,7 @@ sh test/hook_test.sh                       # the Claude Code hook's matching rul
 sh test/version_check.sh                   # project.json, server and CI pins agree
 ```
 
-The `@test` functions in `test/*.c3` call the tool functions directly, so no binary has to be built first.
+The `@test` functions in `test/*.c3` call the tool functions directly, so no binary has to be built first. Without `C3_DIR` the grammar gate and the live-docs tests print "skipped" and pass; CI sets it. If your Claude Code uses the redirect hook, put `C3_GUIDE_ALLOW=1` in front of `c3c test`.
 
 ## Safety design of the run tools
 

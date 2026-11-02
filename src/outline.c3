@@ -6,6 +6,7 @@ const sz MAX_OUTLINE = 6 * 1024;
 const sz MAX_SOURCE = 1024 * 1024;   // a bigger .c3 file is generated or hostile: parsing it costs memory in proportion
 const sz MAX_FILES = 400;
 const long MAX_ARCHIVE = 32 * 1024 * 1024;
+const long MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;   // all the sources of one archive once inflated: a small .c3l can hold far more
 
 // A top-level declaration the outline lists, by tree-sitter-c3 node type.
 const String[*] DECLARATIONS = {
@@ -87,8 +88,13 @@ fn String outline_source(String source, String match = "")
 		out.appendf("  %-4d %s", row, shown);
 		if (doc.len > 0) out.appendf("  -- %s", doc);
 		out.append("\n");
+		if (out.len() >= MAX_OUTLINE)   // a generated file can have a hundred thousand declarations
+		{
+			out.append("  [more declarations not shown; use match to narrow the list]\n");
+			break;
+		}
 	}
-	if (partial && out.len() > 0) out.append("  (the parser did not accept all of this file: the list may be incomplete)\n");
+	if (partial) out.append("  (the parser did not accept all of this file: the list may be incomplete)\n");
 	return out.str_view();
 }
 
@@ -172,19 +178,31 @@ fn String c3_outline(String path @Desc("a project directory (its src/ is read, o
 	if (files.len() == 0) return "no .c3 files found (looked in src/, skipping build, deps, lib, vendor)";
 	String[] sorted = files.array_view();
 	sort::quicksort(sorted, fn int(String a, String b) => a.compare_to(b));
+	// each file is read and parsed in its own memory pool: a long list of big files must not add up
+	DString acc;
+	acc.init(mem);
+	defer acc.free();
 	int unread = 0;
 	foreach (i, f : sorted)
 	{
-		if (out.len() >= MAX_OUTLINE) { unread = (int)(sorted.len - i); break; }   // parse only what can be shown
+		if (acc.len() >= MAX_OUTLINE) { unread = (int)(sorted.len - i); break; }   // parse only what can be shown
 		String shown = f.starts_with(root) && f.len > root.len + 1 ? f[root.len + 1..] : f;
-		String part = is_archive(f) ? archive_outline(f, shown, match) : c3_outline_file(f, shown, match);
-		if (out.len() + part.len > MAX_OUTLINE) { unread = (int)(sorted.len - i); break; }
-		out.append(part);
+		if (!append_outline(f, shown, match, &acc)) { unread = (int)(sorted.len - i); break; }
 	}
-	if (unread > 0) out.appendf("[%d more files not shown; give a subdirectory or a file to see them]\n", unread);
-	if (files.len() >= MAX_FILES) out.appendf("[stopped at %d files]\n", (int)MAX_FILES);
-	return out.len() == 0 ? "no declarations found" : out.str_view();
+	if (unread > 0) acc.appendf("[%d more files not shown; give a subdirectory or a file to see them]\n", unread);
+	if (files.len() >= MAX_FILES) acc.appendf("[stopped at %d files]\n", (int)MAX_FILES);
+	return acc.len() == 0 ? "no declarations found" : string::tformat("%s", acc.str_view());
 }
+
+// The outline of one file or archive appended to `out` (a heap string), false when it does not fit any more.
+fn bool append_outline(String f, String shown, String match, DString* out) => @pool()
+{
+	String part = is_archive(f) ? archive_outline(f, shown, match) : c3_outline_file(f, shown, match);
+	if (out.len() + part.len > MAX_OUTLINE) return false;
+	out.append(part);
+	return true;
+}
+
 
 fn String c3_outline_file(String file_path, String shown, String match = "")
 {
@@ -207,19 +225,43 @@ fn String archive_outline(String archive, String shown, String match)
 	ZipArchive? z = zip::open(tmem, archive);
 	if (catch z) return "";
 	defer (void)z.close();
-	DString out = dstring::temp();
+	DString acc;
+	acc.init(mem);
+	defer acc.free();
+	List{String} seen;   // an entry name can occur twice in a zip, and reading by name finds the first one every time
+	seen.init(tmem);
+	long used = 0;
+	sz read = 0;
 	sz entries = z.count();
-	for (sz i = 0; i < entries && i < MAX_FILES; i++)
+	for (sz i = 0; i < entries; i++)
 	{
 		ZipEntry? e = z.stat_at(i);
 		if (catch e) continue;
 		if (e.is_directory || e.is_encrypted || !is_c3_file(e.name) || e.uncompressed_size > (long)MAX_SOURCE) continue;
-		char[]? data = z.read_file_all(tmem, e.name);
-		if (catch data) continue;
-		String body = outline_source((String)data, match);
-		if (body.len > 0) out.appendf("%s!/%s\n%s", shown, util::sanitize_utf8(e.name), body);
+		bool dup = false;
+		foreach (name : seen) if (name == e.name) dup = true;
+		if (dup) continue;
+		if (read >= MAX_FILES || acc.len() >= MAX_OUTLINE) { acc.appendf("[%d more entries not read]\n", (int)(entries - i)); break; }
+		if (used + e.uncompressed_size > MAX_ARCHIVE_BYTES)
+		{
+			acc.appendf("[stopped: the sources in this archive are over %d MB]\n", (int)(MAX_ARCHIVE_BYTES / 1024 / 1024));
+			break;
+		}
+		seen.push(e.name);
+		read++;
+		used += outline_entry(&z, &e, shown, match, &acc);
 	}
-	return out.str_view();
+	return string::tformat("%s", acc.str_view());
+}
+
+// One source file of an archive, read and parsed in its own memory pool. Returns the bytes it inflated to.
+fn long outline_entry(ZipArchive* z, ZipEntry* e, String shown, String match, DString* out) => @pool()
+{
+	char[]? data = z.read_file_all(tmem, e.name);
+	if (catch data) return 0;
+	String body = outline_source((String)data, match);
+	if (body.len > 0) out.appendf("%s!/%s\n%s", shown, util::sanitize_utf8(e.name), body);
+	return (long)data.len;
 }
 
 fn void register(mcp::Server* s)

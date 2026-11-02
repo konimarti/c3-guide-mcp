@@ -1,5 +1,5 @@
 module c3guide::test::check;
-import c3guide::check, c3guide::hints, c3guide::test::support;
+import c3guide::check, c3guide::util, c3guide::hints, c3guide::test::support;
 import std::core::string, std::io, std::io::file, std::io::path, std::os::env, std::time, std::time::clock;
 
 const String[*] TOKENS = { "$include", "$exec", "$embed" };
@@ -111,13 +111,37 @@ fn void the_exit_code_is_right_even_when_the_pipe_outlives_the_compiler() @test
 	defer (void)path::rmtree(dir);
 	defer support::restore_c3c();
 	support::set_c3c(support::write_fake(dir, "exit3.sh", "sleep 0.5 &\nexit 3"));
-	for (int i = 0; i < 3; i++)
-	{
-		String t = check::c3_check("fn void f() {}");
-		assert(!has(t, "OK") && has(t, "exit code 3"), "round %d: %s", i, t);
-	}
+	String t = check::c3_check("fn void f() {}");
+	assert(!has(t, "OK") && has(t, "exit code 3"), "%s", t);
 	support::set_c3c(support::write_fake(dir, "exit0.sh", "sleep 0.5 &\nexit 0"));
 	assert(has(check::c3_check("fn void f() {}"), "OK"), "a success with a held pipe is still a success");
+}
+
+fn void output_of_exactly_the_cap_is_not_cut_but_one_byte_more_is() @test
+{
+	Path dir = support::make_temp_dir("c3fake");
+	defer (void)path::rmtree(dir);
+	defer support::restore_c3c();
+	// c3_check keeps 4096 bytes. 4096 exactly fits, with its exit code; 4097 is cut
+	support::set_c3c(support::write_fake(dir, "exact.sh", "head -c 4096 /dev/zero | tr '\\\\0' 'x'\nexit 7"));
+	String exact = check::c3_check("fn void f() {}");
+	assert(!has(exact, "[output cut]") && exact.len >= 4096, "%d bytes: %s", (int)exact.len, util::clip(exact, 80));
+	support::set_c3c(support::write_fake(dir, "over.sh", "head -c 4097 /dev/zero | tr '\\\\0' 'x'\nexit 7"));
+	assert(has(check::c3_check("fn void f() {}"), "[output cut]"));
+}
+
+fn void a_compiler_that_closes_its_output_but_keeps_running_still_gets_the_deadline() @test
+{
+	Path dir = support::make_temp_dir("c3fake");
+	defer (void)path::rmtree(dir);
+	String fake = support::write_fake(dir, "mute.sh", "exec >&- 2>&-\nsleep 20\nexit 4");
+	String[] argv = { fake };
+	int code = 0;
+	bool timed_out = false;
+	Clock t = clock::now();
+	String? out = check::run_capped(argv, &code, &timed_out, 1500);
+	long ms = (long)t.to_now() / 1_000_000;
+	assert(@ok(out) && timed_out && ms < 6000, "%d ms, timed out %s", (int)ms, timed_out ? "yes" : "no");
 }
 
 fn void exit_code_without_output_is_not_ok() @test

@@ -75,39 +75,35 @@ fn String c3c_binary()
 	return found_c3c;
 }
 
-// The version a compiler reports ("0.8.5_1"), "" when it cannot be run. Temp memory: copy it to keep it.
-fn String version_of(String binary)
+const ulong VERSION_MS = 3000;   // `c3c --version` answers at once; one that does not is not worth waiting for
+
+// The text after the colon of the `c3c --version` line holding `label`, "" when absent or c3c cannot run.
+// Temp memory: copy it to keep it.
+fn String version_field(String binary, String label)
 {
 	String[] argv = { binary, "--version" };
 	int status = 0;
 	bool timed_out = false;
-	String? out = run_capped(argv, &status, &timed_out);
+	String? out = run_capped(argv, &status, &timed_out, VERSION_MS);
 	if (catch out) return "";
 	foreach (line : out.tsplit("\n"))
 	{
-		if (!line.contains("Compiler Version:")) continue;
+		if (!line.contains(label)) continue;
 		sz colon = line.index_of(":") ?? 0;
 		return line[colon..].trim(" :\t\r");
 	}
 	return "";
 }
 
-// The directory the compiler is installed in ("Installed directory:" of `c3c --version`), "" when unknown.
-fn String install_dir(String binary)
+// The release a compiler reports: "0.8.5_1", or "0.8.6" for "0.8.6 (Pre-release, Nov  2 2026 15:21:29)".
+fn String version_of(String binary)
 {
-	String[] argv = { binary, "--version" };
-	int status = 0;
-	bool timed_out = false;
-	String? out = run_capped(argv, &status, &timed_out);
-	if (catch out) return "";
-	foreach (line : out.tsplit("\n"))
-	{
-		if (!line.contains("Installed directory:")) continue;
-		sz colon = line.index_of(":") ?? 0;
-		return line[colon..].trim(" :\t\r");
-	}
-	return "";
+	String v = version_field(binary, "Compiler Version:");
+	return v[:v.index_of(" ") ?? v.len];
 }
+
+// The directory the compiler is installed in, "" when unknown.
+fn String install_dir(String binary) => version_field(binary, "Installed directory:");
 
 // The version of the compiler the tools run, asked once. Kept in a fixed buffer: temp memory is reset between calls.
 char[64] version_buf;
@@ -203,14 +199,14 @@ fn int read_pipe(void* arg) @private
 		if (catch n) break;
 		if (n == 0) break;
 		(void)c.mutex.lock();
-		sz room = c.max - c.len;
+		sz room = c.max + 1 - c.len;   // one byte more than the cap: output of exactly `max` bytes is not cut
 		sz take = n > room ? room : n;
 		if (take > 0)
 		{
 			mem::copy(c.buf + c.len, &tmp, take);
 			c.len += take;
 		}
-		bool stop = c.len >= c.max;
+		bool stop = c.len > c.max;
 		if (stop) c.capped = true;
 		c.mutex.unlock();
 		if (stop) break;
@@ -236,7 +232,7 @@ fn void kill_matching(String dir)
 			pattern.append_char(c);
 		}
 		pattern.append("/");
-		String[] argv = { "pkill", "-9", "-f", pattern.str_view() };
+		String[] argv = { "pkill", "-9", "-f", "--", pattern.str_view() };
 		Process? p = process::spawn(argv, process::SpawnOptions.INHERIT_ENV);
 		if (catch p) return;
 		(void)p.join();
@@ -256,7 +252,7 @@ fn bool child_exited(Process* p, int* status)
 		if (catch alive) return false;
 		if (alive) return false;
 		CInt? code = p.join();   // the exit code is read from the handle, which stays valid after the process ended
-		*status = code ?? 0;
+		*status = code ?? 1;
 		return true;
 	$else
 		CInt raw = 0;
@@ -321,21 +317,29 @@ fn String? run_capped(String[] cmd, int* code, bool* timed_out, ulong deadline_m
 	bool stray = !c.finished;
 	c.mutex.unlock();
 
+	// the pipe closed but c3c may still be running (it closed its output and went on): the deadline still applies
+	while (!exited && !fired && !capped && !child_exited(proc, &exit_status))
+	{
+		if (ms_since(start) >= (long)deadline_ms) { fired = true; break; }
+		thread::sleep_ms(10);
+	}
+	if (!fired && !capped) exited = true;
 	if ((fired || capped) && !exited) (void)proc.terminate();
+	bool killed = fired || capped || (sweep.len > 0 && stray);
 	if (sweep.len > 0 && (fired || capped || stray)) kill_matching(sweep);
 
-	// the pipe should close now: let the reader see it
+	// after a kill the pipe should close: let the reader see it
 	Clock reap = clock::now();
 	(void)c.mutex.lock();
-	while (!c.finished && ms_since(reap) < (long)REAP_MS) (void)c.cond.wait_timeout(&c.mutex, 100);
+	while (killed && !c.finished && ms_since(reap) < (long)REAP_MS) (void)c.cond.wait_timeout(&c.mutex, 100);
 	bool finished = c.finished;
 	DString out = dstring::temp();
-	out.append((String)c.buf[:c.len]);
+	out.append((String)c.buf[:(c.len > c.max ? c.max : c.len)]);
 	c.mutex.unlock();
 
 	int status = 0;
 	if (exited) { status = exit_status; }
-	else { CInt? j = proc.join(); status = j ?? 0; }
+	else { CInt? j = proc.join(); status = j ?? 1; }
 	*timed_out = fired;
 	*code = (fired || capped) ? 0 : status;
 

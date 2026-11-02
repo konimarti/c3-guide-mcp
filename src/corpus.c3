@@ -1,5 +1,5 @@
 module c3guide::corpus;
-import std::core::string;
+import std::core::string, std::sort;
 
 // Embedded snapshot built by scripts/gen_corpus.py. Records end with \x1e, fields split by \x1f:
 // kind, title, body, loc. All strings are slices into the embedded blob: nothing is copied.
@@ -22,8 +22,6 @@ Entry[] entries;
 String snapshot_version;      // the c3c release the manual and the release notes belong to
 String symbols_version;       // the c3c release the standard library signatures belong to: the same, unless read live
 bool symbols_live;
-Entry[] snapshot_entries;     // the embedded entries, kept while the symbols are live
-Entry[] live_symbols;         // the heap entries read from the compiler
 
 // Parse the blob once at startup (one allocation: the Entry array).
 fn void load()
@@ -58,37 +56,39 @@ fn bool keeps_in_overlay(Entry* e) => !is_symbol_kind(e.kind) || (e.kind == "var
 fn bool is_symbol_kind(String kind) => kind == "fn" || kind == "macro" || kind == "method" || kind == "mmethod" || kind == "type" || kind == "var";
 
 // Swap the standard library symbols for ones read from the c3c the user runs (see live.c3). The aliases in the
-// snapshot (`mem`, `tmem`...) stay: docgen does not list them. Everything else is untouched.
+// snapshot (`mem`, `tmem`...) stay: docgen does not list them. Everything else is untouched. The snapshot keeps its
+// symbols as one block sorted by name; the live ones are sorted the same way and take the block's place, so a library
+// that did not change ranks exactly as the snapshot does (a search breaks ties by position).
 fn void replace_symbols(Entry[] live, String version)
 {
-	sz keep = 0;
-	foreach (&e : entries) if (keeps_in_overlay(e)) keep++;
-	Entry[] merged = mem::new_array(Entry, keep + live.len);
+	sz others = 0;
+	sz aliases = 0;
+	foreach (&e : entries)
+	{
+		if (!is_symbol_kind(e.kind)) { others++; }
+		else if (keeps_in_overlay(e)) { aliases++; }
+	}
+	Entry[] block = mem::new_array(Entry, live.len + aliases);
 	sz n = 0;
-	foreach (&e : entries) if (keeps_in_overlay(e)) merged[n++] = *e;
-	foreach (&e : live) merged[n++] = *e;
-	if (!symbols_live) snapshot_entries = entries;
+	foreach (&l : live) block[n++] = *l;
+	foreach (&e : entries) if (is_symbol_kind(e.kind) && keeps_in_overlay(e)) block[n++] = *e;
+	sort::quicksort(block, fn int(Entry a, Entry b) {
+		int c = a.title.compare_to(b.title);
+		return c != 0 ? c : a.body.compare_to(b.body);
+	});
+	Entry[] merged = mem::new_array(Entry, others + block.len);
+	n = 0;
+	bool placed = false;
+	foreach (&e : entries)
+	{
+		if (!is_symbol_kind(e.kind)) { merged[n++] = *e; continue; }
+		if (placed) continue;
+		placed = true;
+		foreach (&b : block) merged[n++] = *b;
+	}
+	if (!placed) foreach (&b : block) merged[n++] = *b;
+	free(block);
 	entries = merged;
-	live_symbols = live;
 	symbols_version = version;
 	symbols_live = true;
-}
-
-// Entries whose strings were copied to the heap (see live.c3).
-fn void free_entries(Entry[] list)
-{
-	foreach (&e : list) { free(e.kind); free(e.title); free(e.body); free(e.loc); }
-	free(list);
-}
-
-// Back to the embedded snapshot, releasing what the live read allocated.
-fn void restore_snapshot()
-{
-	if (!symbols_live) return;
-	free(entries);
-	free_entries(live_symbols);
-	entries = snapshot_entries;
-	live_symbols = {};
-	symbols_version = snapshot_version;
-	symbols_live = false;
 }

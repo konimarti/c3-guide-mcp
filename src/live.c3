@@ -11,7 +11,7 @@ import c3guide::corpus, c3guide::check;
 faultdef NO_STDLIB;
 
 const sz MAX_DOCGEN = 24 * 1024 * 1024;
-const ulong DOCGEN_MS = 20000;
+const ulong DOCGEN_MS = 8000;   // `c3c docgen` takes 0.2 s: one that takes much longer is stuck
 
 struct Kind
 {
@@ -49,30 +49,23 @@ fn String scalar(Object* o)
 	return "";
 }
 
-fn String text(Object* o, String key)
-{
-	if (!o.is_map()) return "";   // the contracts of Object.get are off in a release build: a wrong shape must not reach it
-	Object*? v = o.get(key);
-	if (catch v) return "";
-	return scalar(v);
-}
-
-// The object under `key`, or the empty object when there is none (JSON `null` included).
-fn Object* child(Object* o, String key)
-{
-	if (!o.is_map()) return object::new_obj(tmem);
-	Object*? v = o.get(key);
-	if (catch v) return object::new_obj(tmem);
-	return v.is_map() ? v : object::new_obj(tmem);
-}
-
-// The value under `key` of any kind, or the empty object when absent. Only a map has keys.
+// The value under `key` of any kind, or the empty object when absent. Only a map has keys; the contracts of
+// Object.get are off in a release build, so a wrong shape must not reach it.
 fn Object* child_any(Object* o, String key)
 {
 	if (!o.is_map()) return object::new_obj(tmem);
 	Object*? v = o.get(key);
 	if (catch v) return object::new_obj(tmem);
 	return v;
+}
+
+fn String text(Object* o, String key) => scalar(child_any(o, key));
+
+// The object under `key`, or the empty object when there is none (JSON `null` included).
+fn Object* child(Object* o, String key)
+{
+	Object* v = child_any(o, key);
+	return v.is_map() ? v : object::new_obj(tmem);
 }
 
 // "fn String tformat(String fmt, any... args)": the signature line of a function, macro, constant or type.
@@ -115,8 +108,8 @@ fn String signature(Object* it)
 			params.append(one.str_view());
 		}
 	}
-	if (kind == "function" || kind == "method") return collapse_double(string::tformat("fn %s %s%s(%s)", ret, name, gen, params.str_view()));
-	if (kind == "macro" || kind == "macro_method") return collapse_double(string::tformat("macro %s %s%s(%s)", ret, name, gen, params.str_view()));
+	if (kind == "function" || kind == "method") return collapse(string::tformat("fn %s %s%s(%s)", ret, name, gen, params.str_view()));
+	if (kind == "macro" || kind == "macro_method") return collapse(string::tformat("macro %s %s%s(%s)", ret, name, gen, params.str_view()));
 	if (kind == "constant" || kind == "variable")
 	{
 		String v = it.has_key("value") ? string::tformat(" = %s", text(it, "value")) : "";
@@ -124,20 +117,6 @@ fn String signature(Object* it)
 	}
 	String mem = params.str_view();
 	return string::tformat("%s %s%s%s", kind, name, gen, (mem.len > 0 && mem.len < 300) ? string::tformat(" { %s }", mem) : "");
-}
-
-// The generator writes `fn  name` when the return type is empty and then replaces the doubled space.
-fn String collapse_double(String s)
-{
-	DString out = dstring::temp();
-	bool prev_space = false;
-	foreach (c : s)
-	{
-		if (c == ' ' && prev_space) continue;
-		prev_space = c == ' ';
-		out.append_char(c);
-	}
-	return out.str_view();
 }
 
 // The doc comment of a symbol as one line, with its @param and @return parts.
@@ -188,6 +167,7 @@ fn void add_module(Object* mod, String root, String cwd, List{Entry}* out)
 			if (cwd.len > 1) body = check::redact(body, cwd, "<project>");
 			String file = text(it, "file");
 			if (root.len > 0 && file.starts_with(root)) file = file[root.len..];
+			if (file.starts_with("/")) file = file[(file.index_of("lib/std/") ?? 0)..];   // docgen resolved a symlink: keep the path relative
 			out.push(make_entry(k.code, text(it, "uid"), body, file));
 		}
 	}
@@ -218,6 +198,18 @@ fn String stdlib_dir(String install)
 	return file::exists(b) ? b : "";
 }
 
+// The overlay is applied on the first lookup that reads symbols, not at startup: the server answers `initialize` at
+// once, and a user who only searches the manual never pays for it. main() turns it on; the tests leave it off.
+bool enabled;
+bool tried;
+
+fn void ensure()
+{
+	if (!enabled || tried) return;
+	tried = true;
+	overlay();
+}
+
 // Replace the snapshot's standard library symbols with the ones of the c3c in use, when that is another release.
 // Returns true when it did. Any failure leaves the snapshot as it was.
 fn bool overlay()
@@ -227,7 +219,7 @@ fn bool overlay()
 	return overlay_from(check::c3c_binary(), have);
 }
 
-extern fn CInt malloc_trim(usz pad) @if(env::LINUX);   // glibc: give the memory freed after parsing 2.8 MB of JSON back to the system
+extern fn CInt malloc_trim(usz pad) @feat(LINUX);   // glibc: give the memory freed after parsing 2.8 MB of JSON back to the system
 
 fn bool overlay_from(String binary, String version)
 {

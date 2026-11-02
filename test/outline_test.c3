@@ -128,3 +128,44 @@ fn void libraries_and_a_match_filter() @test
 	String src = outline::c3_outline("src/util.c3", "clip");
 	assert(src.contains("fn String clip(") && !src.contains("utf8_boundary"), "%s", src);
 }
+
+const String ARCHIVE_SCRIPT = `
+import sys, zipfile
+root = sys.argv[1]
+body = "fn void f() {}\n" * 60000                       # about 0.9 MB inflated, a few KB deflated
+with zipfile.ZipFile(root + "/big.c3l", "w", zipfile.ZIP_DEFLATED) as z:
+    for i in range(40):
+        z.writestr("m%d.c3" % i, "module m%d;\n" % i + body)
+with zipfile.ZipFile(root + "/dup.c3l", "w") as z:
+    z.writestr("dup.c3", "module first;\nfn void one() {}\n")
+    z.writestr("dup.c3", "module second;\nfn void two() {}\n")
+with zipfile.ZipFile(root + "/many.c3l", "w") as z:
+    for i in range(450):
+        z.writestr("f%d.c3" % i, "fn void g%d() {}\n" % i)
+`;
+
+fn void archives_have_a_budget_and_say_what_they_skip() @test
+{
+	Path dir = project_dir();
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	file::save(string::tformat("%s/make.py", root), ARCHIVE_SCRIPT)!!;
+	support::sh(string::tformat("python3 '%s/make.py' '%s'", root, root));
+	Clock t = clock::now();
+	String big = outline::c3_outline(string::tformat("%s/big.c3l", root), "no_such_declaration");   // nothing matches, so every entry is read
+	long ms = (long)t.to_now() / 1_000_000;
+	assert(big.contains("[stopped: the sources in this archive are over 8 MB]") && ms < 8000, "%d ms: %s", (int)ms, util::clip(big, 200));
+	String dup = outline::c3_outline(string::tformat("%s/dup.c3l", root));
+	assert(dup.contains("fn void one()") && !dup.contains("fn void two()"), "the first of two entries with one name, once: %s", dup);
+	String many = outline::c3_outline(string::tformat("%s/many.c3l", root), "g449");
+	assert(many.contains("more entries not read"), "a cut is announced: %s", many);
+	String shown = outline::c3_outline(string::tformat("%s/big.c3l", root));
+	assert(shown.len <= 6 * 1024 + 128 && shown.contains("m0.c3"), "an archive's output is capped too: %d bytes", (int)shown.len);
+}
+
+fn void a_filter_does_not_hide_that_a_file_was_not_fully_read() @test
+{
+	String o = outline::outline_source("fn void alpha() {}\nfn void broken( {{{ ;;; @@@\n", "no_such_name");
+	assert(o.contains("may be incomplete"), "%s", o);
+	assert(outline::outline_source("fn void alpha() {}\n", "no_such_name") == "", "a clean file with no match is just empty");
+}

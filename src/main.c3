@@ -19,7 +19,7 @@ const String RUN_INSTRUCTIONS = `
 fn void main()
 {
 	corpus::load();
-	live::overlay();   // the standard library as the installed c3c has it, when that is not the release of the snapshot
+	live::enabled = true;   // the standard library as the installed c3c has it, read on the first symbol lookup
 	mcp::Server server = mcp::new_server("c3-guide-mcp", "0.5.0");
 	server.instructions = check::run_allowed() ? string::format(mem, "%s%s", INSTRUCTIONS, RUN_INSTRUCTIONS) : INSTRUCTIONS;
 	defer server.free();

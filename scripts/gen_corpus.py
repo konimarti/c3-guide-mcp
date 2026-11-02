@@ -172,7 +172,9 @@ def main():
     recs += [rec("change", p, b) for p, b in chunk_md(open(os.path.join(c3, "releasenotes.md"), encoding="utf-8").read())]
     recs += lists(c3)
     recs += recipes()
-    syms = symbols(c3) + aliases(c3)
+    # sorted by name: the server reading the same library live (src/live.c3) sorts the same way, so ranking ties
+    # (broken by position) come out the same whichever way the docs were produced
+    syms = sorted(symbols(c3) + aliases(c3), key=lambda r: r.split(US)[1].encode())
     recs += syms
     meta = rec("meta", "c3c", ver, f"records={len(recs)}")
     out = os.environ.get("C3GUIDE_OUT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "corpus.dat")

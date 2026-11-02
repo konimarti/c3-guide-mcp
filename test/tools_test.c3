@@ -167,6 +167,7 @@ fn void renamed_names_point_to_the_release_note() @test
 {
 	String t = tools::c3_symbol("printfln");
 	assert(t.contains("does not exist") && t.contains("Release notes") && t.contains("printfn"), "%s", t);
+	assert(t.contains("Similar names:") && t.contains("std::io::printfn"), "a name that differs by one letter is a neighbour: %s", t);
 }
 
 fn void a_name_in_the_wrong_module_finds_the_right_one() @test
@@ -174,8 +175,7 @@ fn void a_name_in_the_wrong_module_finds_the_right_one() @test
 	String t = tools::c3_symbol("allocator::free");
 	assert(t.contains("std::core::mem::alloc::free"), "%s", t);
 	String first = t.tsplit("\n")[2];
-	assert(first.contains("std::core::mem::alloc::free"), "the plain function in the module that resembles the asked one comes first: %s", t);
-	assert(!t.contains("Similar names:\n  std::core::mem::allocators::Vmem"), "methods do not lead: %s", t);
+	assert(first.contains("::free") && !first.contains(".free"), "a plain function leads, not a method of some type: %s", t);
 }
 
 fn void optional_interface_methods_are_found() @test

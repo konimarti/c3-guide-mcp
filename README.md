@@ -15,11 +15,13 @@ The assistant runs `c3_check` before it shows you code. It gets the compiler's o
 ```
 fn void main() { int n = int.sizeof; }
 
-snippet.c3:1:26: error: 'int' does not have a member or method 'sizeof'.
+error: 'int' does not have a member or method 'sizeof'.
 Hints:
   Type properties are written with `::` since 0.8 (`int::size`, `Foo::name`, `int::max`),
   not `.sizeof`. `c3_fix` rewrites this.
 ```
+
+(Output shortened.)
 
 It checks a snippet, a file or a whole project. Nothing is run. Nothing is written to your tree.
 
@@ -38,10 +40,10 @@ c3_symbol("allocator::free")
 Similar names:
   std::core::mem::alloc::free
   libc::free
-  std::core::mem::free
-Release notes:
-  0.5.0: - Updated malloc/calloc/realloc/free removing old helper functions.
+  ...
 ```
+
+(Output shortened. When a release renamed the name, the release-note line is shown too.)
 
 Do not know the name? Describe it: `c3_symbol("get environment variable")`.
 
@@ -78,7 +80,7 @@ Two more tools are off until you enable them (below): `c3_test` runs your `@test
 ## Install
 
 1. Download the binary for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases): Linux x64, macOS arm64 or Windows x64. Unpack it. On macOS, allow it once: `xattr -d com.apple.quarantine ./c3-guide-mcp`.
-2. Install [c3c](https://github.com/c3lang/c3c/releases). Built and tested with **0.8.5**. If you run another version (a newer release or the pre-release), the server reads the standard library signatures from your own `c3c` at startup (about 0.2 s), so `c3_symbol` always matches the compiler you build with. The manual and release notes stay at 0.8.5.
+2. Install [c3c](https://github.com/c3lang/c3c/releases). Built and tested with **0.8.5**. If you run another version (a newer release or the pre-release), the server reads the standard library signatures from your own `c3c` on the first lookup (about 0.2 s, once), so `c3_symbol` matches the compiler you build with. The manual and release notes stay at 0.8.5.
 
 The server finds `c3c` on your `PATH` and in the usual install folders. If your editor uses a short `PATH`, set `C3C=/path/to/c3c`. The search tools work without it.
 
@@ -109,7 +111,7 @@ Claude Code and Hermes are tested in real sessions. The other entries follow eac
 The server already asks. Two steps make it reliable:
 
 - **Rules.** Paste [these lines](integrations/claude-code/CLAUDE.md) into `CLAUDE.md`, or into `AGENTS.md`, Cursor rules or `.github/copilot-instructions.md`.
-- **Hook (Claude Code).** When the assistant types `c3c test`, `c3c run` or `c3c compile-only`, the hook stops it and names the right tool. `c3c build` still works. Set it up from [integrations/claude-code](integrations/claude-code); it needs `jq` or `python3`.
+- **Hook (Claude Code).** When the assistant types `c3c test`, `c3c run`, `c3c compile-run`, `c3c compile-only` or `c3c compile-test`, the hook stops it and names the right tool. `c3c build` still works. It is a nudge, not a lock: wrappers like `time c3c test` get through. Setup steps: [integrations/claude-code](integrations/claude-code).
 
 ### Switch on `c3_test` and `c3_run`
 
