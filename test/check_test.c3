@@ -286,7 +286,7 @@ fn void run_tool_rejects_embed_in_snippets() @test
 
 fn void run_tools_need_the_environment_switch() @test
 {
-	String saved = env::get_var(mem, "C3_GUIDE_ALLOW_RUN") ?? "";
+	String saved = env::tget_var("C3_GUIDE_ALLOW_RUN") ?? "";
 	defer
 	{
 		if (saved.len > 0)
@@ -304,6 +304,81 @@ fn void run_tools_need_the_environment_switch() @test
 	assert(!check::run_allowed());
 	env::set_var("C3_GUIDE_ALLOW_RUN", "1");
 	assert(check::run_allowed());
+}
+
+// A compiler report as c3_check shows it: the echoed source line, then the error.
+fn String err(String src, String msg) @local => string::tformat(" 1: %s\n<code>/snippet.c3:1:7: error: %s", src, msg);
+
+fn void static_hints_fire_only_with_the_old_syntax_present() @test
+{
+	assert(has(hints::diagnostics(err("fn int! f() { return 1; }", "A type name was expected here.")), "int?"));
+	assert(!has(hints::diagnostics(err("fn Foo f() { }", "A type name was expected here.")), "int?"), "no optional hint without a `!`");
+	assert(has(hints::diagnostics(err("fault E { A, B }", "This looks like a constant variable, did you forget 'const'?")), "faultdef"));
+	assert(has(hints::diagnostics(err("List(<int>) l;", "An expression was expected.")), "List{int}"));
+	assert(!has(hints::diagnostics(err("int x = ;", "An expression was expected.")), "List{int}"));
+	assert(has(hints::diagnostics(err("def Foo = int;", "A type name was expected, but this looks a variable or function name (as it doesn't start with an uppercase letter).")), "alias"));
+	assert(has(hints::diagnostics(err("fn int f(int x) @require(x > 0) {}", "This is not a known valid attribute name.")), "doc comment"));
+	assert(has(hints::diagnostics(err("int x = (int)g();", "It is not possible to cast from 'int?' to 'int'.")), "??"));
+	assert(!has(hints::diagnostics(err("short x = (short)g();", "It is not possible to cast from 'Foo' to 'short'.")), "??"));
+	assert(has(hints::diagnostics(err("mem::alloc(10);", "A type, like 'int' or 'double' was expected for the parameter '$Type'.")), "mem::alloc(int)"));
+	assert(has(hints::diagnostics(err("$typeof(x) y = 4;", "Expected ';'")), "$Typeof"));
+	// the false positive: `anyfault` is not `isz`
+	assert(!has(hints::diagnostics(err("anyfault e;", "Expected a type here.")), "isz"));
+	assert(has(hints::diagnostics(err("isz n = 0;", "Expected a type here.")), "isz"));
+	// the other message form for a member that does not exist
+	assert(has(hints::diagnostics(err("File f; f.read_line();", "There is no field or method 'File.read_line'.")), "File.read_line"));
+}
+
+fn void rewrite_skips_what_is_not_a_type() @test
+{
+	assert(hints::rewrite("fn int Pt.min(Pt a, int b) => 1;").count == 0, "a method definition");
+	assert(hints::rewrite("int a = LIMIT.max;").count == 0, "a constant");
+	assert(hints::rewrite("int a = /+ int.sizeof /+ nested +/ int.sizeof +/ 1;").count == 0, "a nested comment");
+	assert(hints::rewrite("int a = Foo.max;").code == "int a = Foo::max;", "still a type");
+	assert(hints::rewrite("usz n = $sizeof(Foo[$sizeof(int)]);").code == "usz n = Foo[int::size]::size;", "nested");
+	assert(hints::rewrite("usz n = $sizeof ( int );").code == "usz n = int::size;", "spaces");
+	assert(hints::rewrite("usz n = $sizeof(x);").code == "usz n = $Typeof(x)::size;", "an expression, not a type");
+	assert(hints::rewrite("usz n = $sizeof(Foo*);").code == "usz n = Foo*::size;", "a pointer type");
+}
+
+fn void test_summary_survives_a_long_run() @test
+{
+	DString body = dstring::temp();
+	body.append("module app;\nfn void main() {}\n");
+	for (int i = 0; i < 150; i++) body.appendf("fn void a_rather_long_test_name_to_fill_the_output_%d() @test { assert(true); }\n", i);
+	body.append("fn void the_one_failing_test() @test { assert(false, \"boom\"); }\n");
+	Path dir = make_project(body.str_view());
+	defer (void)path::rmtree(dir);
+	String t = check::c3_test((String)dir);
+	assert(has(t, "the_one_failing_test") && has(t, "boom") && has(t, "150 passed, 1 failed"), "%s", t);
+	assert(!has(t, "[PASS]") && t.len < 8000, "%d bytes", (int)t.len);
+}
+
+fn void target_cannot_be_a_compiler_option() @test
+{
+	Path dir = make_project(PROJECT_OK);
+	defer (void)path::rmtree(dir);
+	String[*] bads = { "--trust=full", "-O3", "a b", "x;y", "../x" };
+	foreach (bad : bads)
+	{
+		assert(has(check::c3_check(path: (String)dir, target: bad), "build target name"), "check accepted %s", bad);
+		assert(has(check::c3_run(path: (String)dir, target: bad), "build target name"), "run accepted %s", bad);
+	}
+	assert(check::valid_target("app") && check::valid_target("my-app_2.0") && check::valid_target(""));
+}
+
+fn void stale_sweep_does_not_follow_symlinks() @test
+{
+	Path victim = support::make_temp_dir("c3victim");
+	defer (void)path::rmtree(victim);
+	String v = (String)victim;
+	String tmp = (String)path::temp_directory(tmem)!!;
+	String link = string::tformat("%s/c3guide-symlink-test", tmp);
+	// the target is older than the one-hour limit, so a followed link would be swept
+	support::sh(string::tformat("echo keep > '%s/keep.txt'; touch -d '3 hours ago' '%s' '%s/keep.txt'; ln -sfn '%s' '%s'", v, v, v, v, link));
+	defer support::sh(string::tformat("rm -f '%s'", link));
+	assert(has(check::c3_check("fn void main() {}"), "OK"));   // every call sweeps the temp dir first
+	assert(file::exists(string::tformat("%s/keep.txt", v)), "the sweep followed a symlink and emptied its target");
 }
 
 fn void run_tool_kills_a_hanging_compiler_after_its_deadline_flag() @test
