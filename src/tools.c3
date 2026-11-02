@@ -26,7 +26,7 @@ fn String format_hits(Hit[] hits, sz snippet)
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
-// "C3C Release Notes > 0.8.5 Change list > Fixes" -> 800005 (0.8.5), so newer versions sort higher.
+// "C3C Release Notes > 0.8.5 Change list > Fixes" -> 805 (0.8.5), so newer versions sort higher.
 fn int version_key(String title)
 {
 	String[] parts = title.tsplit(" > ");
@@ -58,6 +58,25 @@ fn String matching_lines(String body, String[] terms, bool all)
 		n++;
 	}
 	return out.str_view();
+}
+
+// Names from C3 0.6/0.7 that a model still writes. They are not in the standard library or the keyword
+// lists of 0.8, so a plain "does not exist" would send it searching; say what replaced them.
+const String[2][*] LEGACY = {
+	{ "$sizeof", "`$sizeof(T)` is `T::size` since 0.8 (`$alignof(T)` is `T::alignment`). c3_fix rewrites it; c3_syntax type-properties lists the properties." },
+	{ "$alignof", "`$alignof(T)` is `T::alignment` since 0.8. c3_fix rewrites it." },
+	{ "$typeof", "`$typeof(x)` is spelled `$Typeof(x)` where a type is expected (`$Typeof(x) y = 4;`)." },
+	{ "$vacount", "`$vacount` is `$vaarg.len` since 0.8. c3_fix rewrites it." },
+	{ "$vasplat", "`$vasplat` is `...$vaarg` since 0.8. c3_fix rewrites it." },
+	{ "isz", "`isz` is `sz` since 0.8 (`usz` is unchanged). c3_fix rewrites it." },
+	{ "fault", "`fault E { A, B }` is `faultdef A, B;` since 0.8. c3_changes faultdef has the notes." },
+	{ "def", "`def Foo = int;` is `alias Foo = int;` since 0.7." },
+};
+
+fn String legacy_note(String name)
+{
+	foreach (pair : LEGACY) if (pair[0] == name) return string::tformat("'%s' is old C3 syntax: %s\n", name, pair[1]);
+	return "";
 }
 
 fn String strip_prefix(String s, String prefix) => s.starts_with(prefix) ? s[prefix.len..] : s;
@@ -92,11 +111,19 @@ fn String c3_changes(String topic @Desc("keyword, e.g. 'foreach', 'faultdef', 't
 	@ReadOnly
 {
 	String[] terms = search::query_terms(topic);
-	Hit[] hits = search::search(topic, { "change" }, 12);
+	Hit[] hits = search::search(topic, { "change" }, 24);
 	if (hits.len == 0) return "nothing in the release notes";
 	Hit[] sorted = mem::talloc_array(Hit, hits.len);
 	foreach (i, h : hits) sorted[i] = h;
-	sort::quicksort(sorted, fn int(Hit a, Hit b) => version_key(corpus::entries[b.idx].title) - version_key(corpus::entries[a.idx].title));
+	// "Fixes" sections list crashes; a rename or removal is under the change list and is what breaks old code
+	sort::quicksort(sorted, fn int(Hit a, Hit b) {
+		String ta = corpus::entries[a.idx].title;
+		String tb = corpus::entries[b.idx].title;
+		int fa = ta.contains("> Fixes") ? 1 : 0;
+		int fb = tb.contains("> Fixes") ? 1 : 0;
+		if (fa != fb) return fa - fb;
+		return version_key(tb) - version_key(ta);
+	});
 	DString out = dstring::temp();
 	int shown = 0;
 	for (int pass = 0; pass < 2; pass++)
@@ -129,6 +156,11 @@ fn String c3_syntax(String topic @Desc("one of: attributes, builtins, keywords, 
 		{
 			if (line.contains(topic)) out.appendf("%s: %s\n", e.title, line);
 		}
+	}
+	if (out.len() == 0)
+	{
+		String old = legacy_note(topic.trim(" \t\n"));
+		if (old.len > 0) return old;
 	}
 	if (out.len() == 0) return "no such list or entry; lists: attributes, builtins, keywords, type-properties, operators, precedence";
 	return util::clip(out.str_view(), MAX_REPLY);
@@ -176,6 +208,16 @@ fn String describe(String query)
 	if (hits.len == 0) return string::tformat("no symbol matches '%s'; try other words", query);
 	DString out = dstring::temp();
 	out.appendf("Symbols matching '%s' (c3c %s):\n", query, corpus::snapshot_version);
+	// names people describe in other words (`to_int` for "parse a string to int") come first
+	int named = 0;
+	foreach (name : search::alias_names(search::query_terms(search::words_only(query))))
+	{
+		foreach (&e : corpus::entries)
+		{
+			if (named >= 3) break;
+			if (is_symbol(e.kind) && uid_matches(e.title, name)) { out.append(brief(e)); named++; }
+		}
+	}
 	foreach (h : hits) out.append(brief(&corpus::entries[h.idx]));
 	// a recipe that matches is worth more than five signatures: point to it (c3_search shows the program)
 	Hit[] rec = search::search(query, { "recipe" }, 1, true);
@@ -203,6 +245,7 @@ fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 
 		return util::clip(out.str_view(), MAX_REPLY);
 	}
 	// not found: say so (a model must not assume a guessed API exists), then offer close names
+	out.append(legacy_note(n));
 	out.appendf("'%s' does not exist in the standard library of c3c %s.\n", n, corpus::snapshot_version);
 	String lower = n.to_lower_tcopy();
 	int shown = 0;
@@ -240,6 +283,33 @@ fn bool has_word(String line, String word)
 	return false;
 }
 
+// A recipe uses the temp or `_temp` variant of a name (`tsplit` for split, `load_temp` for load): match the
+// word when only a leading `t` or a trailing `_suffix` sets it apart.
+fn bool has_variant(String line, String word)
+{
+	sz from = 0;
+	while (from < line.len)
+	{
+		sz? at = line[from..].index_of(word);
+		if (catch at) return false;
+		sz a = from + at;
+		sz b = a + word.len;
+		bool left = a == 0 || !hints::ident_char(line[a - 1]) || (line[a - 1] == 't' && (a == 1 || !hints::ident_char(line[a - 2])));
+		bool right = b >= line.len || !hints::ident_char(line[b]) || line[b] == '_';
+		if (left && right) return true;
+		from = a + 1;
+	}
+	return false;
+}
+
+// In the manual only a use that looks like code counts: `word(` or `::word` (not `project.json`). Prose that merely
+// contains the word is not an example.
+fn bool looks_like_use(String line, String word)
+{
+	if (!has_word(line, word)) return false;
+	return line.contains(string::tformat("%s(", word)) || line.contains(string::tformat("::%s", word));
+}
+
 fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'HashMap', 'String.split', 'sort::quicksort'"),
 	int limit @Desc("number of examples (1..5)") = 3)
 	@Desc("Working code that uses a standard library function or type: the verified recipes and the manual's examples, with the lines around each use. Use it after c3_symbol when the signature is not enough to see how it is called.")
@@ -260,7 +330,7 @@ fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'Hash
 			String[] lines = e.body.tsplit("\n");
 			foreach (i, line : lines)
 			{
-				if (!has_word(line, word)) continue;
+				if (!(e.kind == "recipe" ? has_variant(line, word) : looks_like_use(line, word))) continue;
 				// a few lines before and after the first use; a recipe is short, so show it all when it is
 				sz from = e.kind == "recipe" && lines.len <= 24 ? 0 : (i > 3 ? i - 3 : 0);
 				sz to = e.kind == "recipe" && lines.len <= 24 ? lines.len : (i + 6 < lines.len ? i + 6 : lines.len);

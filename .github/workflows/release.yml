@@ -7,7 +7,7 @@ env:
   C3C_VERSION: v0.8.5_1            # the snapshot in data/corpus.dat and the tests belong to exactly this compiler
   MCP_REF: a7d0dd196640340ee9c1cc7d9dceb2a0128af5e7   # konimarti/mcp.c3l, pinned
 permissions:
-  contents: write
+  contents: read         # the build jobs only read; `publish` below asks for write
 jobs:
   build:
     strategy:
@@ -20,6 +20,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Versions agree (project.json, server, c3c pin, tag)
+        shell: bash
+        run: sh test/version_check.sh "${GITHUB_REF_NAME}"
+        if: startsWith(github.ref, 'refs/tags/v')
       - name: SDK (mcp.c3l, pinned)
         shell: bash
         run: |
@@ -71,6 +75,8 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:

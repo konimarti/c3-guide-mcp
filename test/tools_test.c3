@@ -1,8 +1,55 @@
 module c3guide::test::tools;
-import c3guide::tools, c3guide::util, c3guide::test::support;
-import std::core::string;
+import c3guide::tools, c3guide::util, c3guide::search, c3guide::test::support;
+import std::core::string, std::time::clock;
 
 const sz MAX_TEXT = 3300;   // reply cap (3200) plus the cut marker
+
+fn void a_huge_query_is_cut_and_stays_fast() @test
+{
+	DString q = dstring::temp();
+	for (int i = 0; i < 20000; i++) q.appendf("word%d ", i);
+	Clock t = clock::now();
+	String r = tools::c3_search(q.str_view());
+	long ms = (long)t.to_now() / 1_000_000;
+	assert(ms < 2000, "a 20,000-word query took %d ms", (int)ms);
+	assert(r.len > 0);
+	assert(search::query_terms(q.str_view()).len <= 16);
+}
+
+fn void examples_find_temp_variants_and_skip_prose() @test
+{
+	String t = tools::c3_examples("String.split");
+	assert(t.contains("tsplit"), "%s", t);
+	String j = tools::c3_examples("json");
+	assert(j.contains("json::parse"), "the JSON recipe: %s", j);
+	String none = tools::c3_examples("ZipEntry");
+	assert(none.starts_with("no recipe or manual example uses"), "prose and file names are not examples: %s", none);
+	String l = tools::c3_examples("file::load");
+	assert(l.contains("load_temp") || l.starts_with("no recipe"), "%s", l);
+}
+
+fn void old_names_point_to_their_replacement() @test
+{
+	assert(tools::c3_syntax("$sizeof").contains("T::size"));
+	String t = tools::c3_symbol("$typeof");
+	assert(t.contains("$Typeof") && t.contains("does not exist"), "%s", t);
+	assert(tools::c3_symbol("isz").contains("`sz`"));
+}
+
+fn void symbol_finds_names_by_what_they_do() @test
+{
+	String p = tools::c3_symbol("parse string to int");
+	assert(p.contains("to_int"), "%s", p);
+	String n = tools::c3_symbol("current time in milliseconds");
+	assert(n.contains("::now"), "%s", n);
+}
+
+fn void changes_put_renames_before_fixes() @test
+{
+	String c = tools::c3_changes("faultdef");
+	String first = c.tsplit("\n")[0];
+	assert(!first.contains("Fixes"), "%s", c);
+}
 
 fn void symbol_by_name() @test
 {

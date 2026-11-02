@@ -6,21 +6,35 @@ import c3guide::tools, c3guide::util;
 //  - hints:   what the error means in C3 0.8 and where the answer is (a stdlib signature, a release note)
 //  - rewrite: the mechanical 0.7 -> 0.8 syntax changes, applied to the code
 
-const sz MAX_ERRORS_HINTED = 3;
+const sz MAX_ERRORS_HINTED = 5;
 
+// needle: part of the compiler's message. require: when set, that text must also appear in the compiler's
+// output (which echoes the source line), so a generic message only gets the hint when the old syntax is there.
 struct StaticHint
 {
 	String needle;
+	String require;
 	String hint;
 }
 
 const StaticHint[*] STATIC_HINTS = {
-	{ "must use '{ }'", "C3 0.8: an `if` with an `else` needs braces on both branches: `if (c) { a(); } else { b(); }`." },
-	{ "This doesn't seem to be a valid literal", "C3 0.8 removed the `i64`/`u8` style literal suffixes: use `5L`, `5UL` or a cast, `(long)5`." },
-	{ "Expected a type here", "If you wrote `isz`: it is `sz` since 0.8 (`usz` is unchanged). `c3_fix` applies this." },
-	{ "'$sizeof' could not be found", "`$sizeof(T)` is gone: write `T::size`. `c3_fix` applies this." },
-	{ "'$vacount' could not be found", "`$vacount` is `$vaarg.len` and `$vasplat` is `...$vaarg` since 0.8. `c3_fix` applies this." },
-	{ "'$vasplat' could not be found", "`$vasplat` is `...$vaarg` since 0.8. `c3_fix` applies this." },
+	{ "must use '{ }'", "", "C3 0.8: an `if` with an `else` needs braces on both branches: `if (c) { a(); } else { b(); }`." },
+	{ "This doesn't seem to be a valid literal", "", "C3 0.8 removed the `i64`/`u8` style literal suffixes: use `5L`, `5UL` or a cast, `(long)5`." },
+	{ "Expected a type here", "isz", "`isz` is `sz` since 0.8 (`usz` is unchanged). `c3_fix` applies this." },
+	{ "'$sizeof' could not be found", "", "`$sizeof(T)` is gone: write `T::size`. `c3_fix` applies this." },
+	{ "'$vacount' could not be found", "", "`$vacount` is `$vaarg.len` and `$vasplat` is `...$vaarg` since 0.8. `c3_fix` applies this." },
+	{ "'$vasplat' could not be found", "", "`$vasplat` is `...$vaarg` since 0.8. `c3_fix` applies this." },
+	{ "Expected ';'", "$typeof(", "`$typeof(x)` is spelled `$Typeof(x)` where a type is expected (`$Typeof(x) y = 4;`)." },
+	{ "A type name was expected here", "!", "Optionals are written `int?` (not `int!`) since 0.8: `fn int? f()`, `int? x = f();`." },
+	{ "did you forget 'const'", "fault ", "Fault declarations are `faultdef A, B;` since 0.8 (`fault E { A }` is gone). Use them as `A?` or `return A~;`." },
+	{ "An expression was expected", "(<", "Generics use braces since 0.7: `List{int}`, not `List(<int>)`." },
+	{ "A type name was expected, but this looks a variable or function name", "def ", "`def` is `alias` since 0.7: `alias Foo = int;`." },
+	{ "not a known valid attribute name", "@require(", "Contracts are not attributes: write them in a doc comment above the function, `<* @require x > 0 *>`." },
+	{ "not a known valid attribute name", "@ensure(", "Contracts are not attributes: write them in a doc comment above the function, `<* @ensure return > 0 *>`." },
+	{ "Expected a ':' before the description", "", "In a contract the description follows a colon: `@param x : \"what it is\"`, `@require x > 0 : \"must be positive\"`." },
+	{ "It is not possible to cast from", "?'", "An optional is not a plain value: `x ?? default`, `x!!` (panics), `if (try v = f()) { ... }`, or return `T?` and call `f()!` (rethrow)." },
+	{ "was expected for the parameter '$Type'", "", "`mem::alloc(Type)` takes a type, not a size: `mem::alloc(int)`, `mem::alloc_array(int, n)`, or `mem::malloc(bytes)`." },
+	{ "You cannot cast 'String' to 'Allocator'", "", "A String is an immutable view. The allocating functions take an allocator first (`s.concat(mem, other)`), the `t`-prefixed ones use the temp allocator (`s.tconcat(other)`); use `DString` to build text." },
 };
 
 const String[*] OLD_PROPERTIES = { "sizeof", "alignof", "nameof", "max", "min", "elements", "associated", "lookup", "kindof", "typeid", "qnameof", "extnameof" };
@@ -42,9 +56,14 @@ fn bool is_name(String s)
 	return true;
 }
 
-fn String hint_for(String msg)
+fn String hint_for(String msg, String output)
 {
-	foreach (h : STATIC_HINTS) if (msg.contains(h.needle)) return string::tformat("  %s\n", h.hint);
+	foreach (h : STATIC_HINTS)
+	{
+		if (!msg.contains(h.needle)) continue;
+		if (h.require.len > 0 && !output.contains(h.require)) continue;
+		return string::tformat("  %s\n", h.hint);
+	}
 	String name = quoted(msg);
 	if (msg.contains("Did you mean")) return "";   // the compiler already names the fix
 	String marker = "member or method '";
@@ -59,7 +78,7 @@ fn String hint_for(String msg)
 		}
 	}
 	// 'x' could not be found / has no member 'x': the name is often a guessed stdlib function
-	if (!is_name(name) || !(msg.contains("could not be found") || msg.contains("member or method") || msg.contains("is not a function")))
+	if (!is_name(name) || !(msg.contains("could not be found") || msg.contains("member or method") || msg.contains("field or method") || msg.contains("is not a function")))
 	{
 		return "";
 	}
@@ -76,7 +95,7 @@ fn String hint_for(String msg)
 fn String diagnostics(String compiler_output)
 {
 	DString out = dstring::temp();
-	String[3] seen;
+	String[5] seen;
 	int n = 0;
 	foreach (line : compiler_output.tsplit("\n"))
 	{
@@ -87,11 +106,11 @@ fn String diagnostics(String compiler_output)
 		for (int i = 0; i < n; i++) if (seen[i] == msg) dup = true;
 		if (dup) continue;
 		seen[n++] = msg;
-		String h = hint_for(msg);
+		String h = hint_for(msg, compiler_output);
 		if (h.len > 0) out.append(h);
 	}
 	if (out.len() == 0) return "";
-	return util::clip(string::tformat("\nHints:\n%s", out.str_view()), 1500);
+	return util::clip(string::tformat("\nHints:\n%s", out.str_view()), 2400);
 }
 
 // ---------------------------------------------------------------- 0.7 -> 0.8 rewrites
@@ -106,7 +125,21 @@ fn bool type_like(String id)
 {
 	if (id.len == 0) return false;
 	foreach (t : BUILTIN_TYPES) if (t == id) return true;
-	return id[0] >= 'A' && id[0] <= 'Z';
+	if (!(id[0] >= 'A' && id[0] <= 'Z')) return false;
+	foreach (c : id) if (c >= 'a' && c <= 'z') return true;
+	return false;   // ALL CAPS is a constant (`LIMIT.max`), not a type
+}
+
+// Is `at` inside the head of a `fn` / `macro` line, before its '('? There `Type.min` names a method being
+// defined (`fn int Foo.min(...)`), which has no 0.8 rewrite.
+fn bool in_definition_head(String code, sz at)
+{
+	sz start = at;
+	while (start > 0 && code[start - 1] != '\n') start--;
+	String head = code[start:at - start];
+	String t = head.trim();
+	if (!t.starts_with("fn ") && !t.starts_with("macro ")) return false;
+	return !head.contains("(");
 }
 
 struct Rewrite
@@ -157,6 +190,21 @@ fn Rewrite rewrite(String code)
 			i = j;
 			continue;
 		}
+		if (c == '/' && i + 1 < code.len && code[i + 1] == '+')
+		{
+			// `/+ ... +/` comments nest
+			sz j = i + 2;
+			int depth = 1;
+			while (j < code.len && depth > 0)
+			{
+				if (code[j] == '/' && j + 1 < code.len && code[j + 1] == '+') { depth++; j += 2; continue; }
+				if (code[j] == '+' && j + 1 < code.len && code[j + 1] == '/') { depth--; j += 2; continue; }
+				j++;
+			}
+			out.append(code[i:j - i]);
+			i = j;
+			continue;
+		}
 		if (c == '/' && i + 1 < code.len && (code[i + 1] == '/' || code[i + 1] == '*'))
 		{
 			bool line = code[i + 1] == '/';
@@ -183,24 +231,31 @@ fn Rewrite rewrite(String code)
 			}
 			if (word == "$vacount") { out.append("$vaarg.len"); note(&notes, "$vacount -> $vaarg.len"); count++; i = j; continue; }
 			if (word == "$vasplat") { out.append("...$vaarg"); note(&notes, "$vasplat -> ...$vaarg"); count++; i = j; continue; }
-			if ((word == "$sizeof" || word == "$alignof") && j < code.len && code[j] == '(')
+			if (word == "$sizeof" || word == "$alignof")
 			{
-				sz k = j + 1;
-				int depth = 1;
-				while (k < code.len && depth > 0) { if (code[k] == '(') depth++; if (code[k] == ')') depth--; k++; }
-				if (depth == 0)
+				sz open = j;
+				while (open < code.len && (code[open] == ' ' || code[open] == '\t')) open++;
+				if (open < code.len && code[open] == '(')
 				{
-					String arg = code[j + 1:k - j - 2].trim();
-					String prop = word == "$sizeof" ? "size" : "alignment";
-					out.appendf("%s::%s", arg, prop);
-					note(&notes, string::tformat("%s(T) -> T::%s", word, prop));
-					count++;
-					i = k;
-					continue;
+					sz k = open + 1;
+					int depth = 1;
+					while (k < code.len && depth > 0) { if (code[k] == '(') depth++; if (code[k] == ')') depth--; k++; }
+					if (depth == 0)
+					{
+						String arg = rewrite(code[open + 1:k - open - 2]).code.trim();   // nested $sizeof first
+						String prop = word == "$sizeof" ? "size" : "alignment";
+						// `$sizeof(x)` took a type or an expression; `T::size` needs a type
+						bool is_type = arg.len > 0 && (type_like(arg) || arg.contains("*") || arg.contains("[") || arg.contains("::") || arg.contains("{"));
+						if (is_type) { out.appendf("%s::%s", arg, prop); } else { out.appendf("$Typeof(%s)::%s", arg, prop); }
+						note(&notes, string::tformat("%s(T) -> T::%s", word, prop));
+						count++;
+						i = k;
+						continue;
+					}
 				}
 			}
 			// Type.sizeof -> Type::size
-			if (!after_dot && type_like(word) && j < code.len && code[j] == '.')
+			if (!after_dot && type_like(word) && j < code.len && code[j] == '.' && !in_definition_head(code, i))
 			{
 				bool done = false;
 				foreach (pair : PROPERTY_RENAMES)
