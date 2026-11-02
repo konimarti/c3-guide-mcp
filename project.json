@@ -2,7 +2,7 @@
   "langrev": "1",
   "warnings": ["no-unused"],
   "authors": ["Koni Marti <koni.marti@gmail.com>"],
-  "version": "0.5.0",
+  "version": "0.5.1",
   "sources": ["src/**"],
   "test-sources": ["test/**"],
   "dependency-search-paths": ["deps"],

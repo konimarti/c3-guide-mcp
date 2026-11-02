@@ -79,7 +79,7 @@ Two more tools are off until you enable them (below): `c3_test` runs your `@test
 
 ## Install
 
-1. Download the binary for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases): Linux x64, macOS arm64 or Windows x64. Unpack it. On macOS, allow it once: `xattr -d com.apple.quarantine ./c3-guide-mcp`.
+1. Download the binary for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases): Linux x64, macOS arm64 or Windows x64. Unpack it. On macOS, allow it once: `xattr -d com.apple.quarantine ./c3-guide-mcp`. The Linux binary needs glibc 2.34 or newer (Ubuntu 22.04, Debian 12 and later).
 2. Install [c3c](https://github.com/c3lang/c3c/releases). Built and tested with **0.8.5**. If you run another version (a newer release or the pre-release), the server reads the standard library signatures from your own `c3c` on the first lookup (about 0.2 s, once), so `c3_symbol` matches the compiler you build with. The manual and release notes stay at 0.8.5.
 
 The server finds `c3c` on your `PATH` and in the usual install folders. If your editor uses a short `PATH`, set `C3C=/path/to/c3c`. The search tools work without it.
