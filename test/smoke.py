@@ -28,7 +28,7 @@ def check(label, ok, detail=""):
 text = lambda i: out[i]["result"]["content"][0]["text"]
 check("initialize carries instructions", "instructions" in out[0]["result"], out.get(0))
 names = sorted(t["name"] for t in out[1]["result"]["tools"])
-check("7 tools (c3_test, c3_run only with C3_GUIDE_ALLOW_RUN=1)", names == ["c3_changes", "c3_check", "c3_examples", "c3_fix", "c3_search", "c3_symbol", "c3_syntax"], names)
+check("8 tools (c3_test, c3_run only with C3_GUIDE_ALLOW_RUN=1)", names == ["c3_changes", "c3_check", "c3_examples", "c3_fix", "c3_outline", "c3_search", "c3_symbol", "c3_syntax"], names)
 check("c3_search defer", "defer" in text(2).lower(), text(2))
 check("c3_symbol String.split", "split" in text(3), text(3))
 check("c3_changes foreach", "foreach" in text(4).lower(), text(4))

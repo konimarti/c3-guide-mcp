@@ -21,6 +21,7 @@ model:  c3_symbol("read line")    ->  std::io::readline: macro String? readline(
 | `c3_search(query)` | the language manual and the [recipes](recipes/) (small programs that compile and run: read a file line by line, HashMap, sort, mkdir, threads, generics...), best first |
 | `c3_symbol(name or description)` | exact signature, doc and file:line of a stdlib function, macro, method or type; says so when it does not exist and suggests close names. Given words instead of a name (`read line`, `get environment variable`) it ranks symbols by the words in their name and doc comment |
 | `c3_examples(symbol)` | working code that uses a stdlib function or type: the verified recipes and the manual's examples, with the lines around each use |
+| `c3_outline(path)` | what a project contains: one line per top-level declaration (functions and methods with signatures, structs, enums, macros, faults, constants) with file and line, plus the first line of each doc comment. Parsed with the C3 tree-sitter grammar, so nothing is compiled; capped at 6 KB |
 | `c3_changes(topic)` | the release-note lines about a topic, newest first |
 | `c3_syntax(topic)` | the compiler's lists: attributes, builtins, keywords, type properties, operators |
 | `c3_test(path, filter)` | **opt-in** (see below): builds a project or file in a scratch directory, runs its `@test` functions, returns pass/fail with the failing assertion and file:line, without the runtime's stack frames |

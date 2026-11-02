@@ -7,5 +7,10 @@ c3-guide-mcp contains material from other projects:
   Copyright (c) the C3 contributors.
 - deps/mcp.c3l (not part of this repository, fetched at build time) is the MCP SDK by Koni Marti, MIT.
 
+- vendor/tree-sitter is the tree-sitter runtime v0.27.1 (https://github.com/tree-sitter/tree-sitter), MIT,
+  Copyright (c) 2018 Max Brunsfeld. vendor/tree-sitter-c3 is the generated parser of tree-sitter-c3 v0.13.0
+  (https://github.com/c3lang/tree-sitter-c3), MIT, Copyright (c) 2024 Christian Buttner. Both are
+  compiled into the binary; each directory keeps its LICENSE and a SOURCE file with the version.
+
 The compiler c3c itself (LGPL 3.0) is not included or linked: c3_check starts it as a separate process
 from the user's installation.

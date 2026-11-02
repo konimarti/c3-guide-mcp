@@ -1,11 +1,12 @@
 module c3guide;
 import mcp, std::core::string;
-import c3guide::corpus, c3guide::tools, c3guide::check;
+import c3guide::corpus, c3guide::tools, c3guide::check, c3guide::outline;
 
 // Sent to the model in `initialize`: this is what makes a model use the tools without being told.
 const String INSTRUCTIONS = `Your memory of C3 is probably outdated (most training data is C3 0.6/0.7; the language changed a lot in 0.8).
 Do not write C3 from memory, and do not run the c3c compiler by hand to check code: these tools run the real compiler and add what its messages lack.
 - c3_symbol before using any stdlib function, macro or method: exact signature or "does not exist". Do not know the name? Describe it ("read line from stdin") and it lists the matching functions.
+- c3_outline to see what a project contains (its declarations with file:line) before reading its files.
 - c3_examples for working code that calls a stdlib function or type.
 - c3_search for language rules (the manual); c3_changes when old syntax fails (release notes, newest first); c3_fix rewrites 0.7 syntax to 0.8.
 - c3_check instead of "c3c compile" or "c3c build": give code for a snippet, or path for a project or file on disk. Run it on every snippet before you show it.
@@ -23,5 +24,6 @@ fn void main()
 	defer server.free();
 	tools::register(&server);
 	check::register(&server);
+	outline::register(&server);
 	server.serve_stdio();
 }
