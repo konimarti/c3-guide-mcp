@@ -30,3 +30,15 @@ fn String clip(String s, sz max)
 	sz cut = head.rindex_of("\n") ?? head.len;
 	return string::tformat("%s\n[...cut]", head[:cut]);
 }
+
+// The length of `s` without a trailing UTF-8 sequence that was cut in the middle.
+fn sz cut_utf8(String s)
+{
+	sz j = s.len;
+	int back = 0;
+	while (j > 0 && back < 3 && (s[j - 1] & 0xC0) == 0x80) { j--; back++; }
+	if (j == 0) return s.len;
+	char lead = s[j - 1];
+	sz need = lead >= 0xF0 ? 4 : (lead >= 0xE0 ? 3 : (lead >= 0xC0 ? 2 : 1));
+	return s.len - (j - 1) < need ? j - 1 : s.len;
+}

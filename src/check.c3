@@ -1,5 +1,5 @@
 module c3guide::check;
-import mcp, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
+import mcp, libc, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
 import c3guide::util, c3guide::hints, c3guide::corpus, std::time;
 
 // Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
@@ -144,28 +144,67 @@ fn String version_note()
 	}
 	return "";
 }
-// Kills the child when the deadline passes. The mutex makes "check done, then kill" atomic against the
-// main thread's "set done, then join": the kill can never hit a pid that was already reaped.
 faultdef WATCHDOG_FAILED;
 
-struct Watchdog
+// Everything the reader thread shares with the caller. It is allocated with libc and, if the reader cannot be
+// stopped (something outside our reach holds the pipe open), deliberately left behind: a stuck thread is a
+// smaller harm than a server that never answers again.
+struct Capture
 {
 	Mutex mutex;
 	ConditionVariable cond;
 	Process* proc;
-	ulong deadline_ms;
-	String sweep;   // when set: also kill every process whose command line contains this (see kill_matching)
-	bool done;
-	bool fired;
+	char* buf;
+	sz max;
+	sz len;
+	bool finished;
+	bool capped;
 }
 
-// Killing c3c leaves the program it started running, and that program holds the output pipe open: a test stuck
-// in a loop would block the read for good. Everything c3_test and c3_run start lives under the scratch directory,
-// whose name is unique, so a pattern kill on that name reaches exactly those processes. pkill is on Linux and macOS.
-fn void kill_matching(String pattern)
+fn int read_pipe(void* arg) @private
+{
+	Capture* c = (Capture*)arg;
+	char[2048] tmp;
+	while (true)
+	{
+		sz? n = c.proc.read_stdout(&tmp, tmp.len);
+		if (catch n) break;
+		if (n == 0) break;
+		(void)c.mutex.lock();
+		sz room = c.max - c.len;
+		sz take = n > room ? room : n;
+		if (take > 0)
+		{
+			mem::copy(c.buf + c.len, &tmp, take);
+			c.len += take;
+		}
+		bool stop = c.len >= c.max;
+		if (stop) c.capped = true;
+		c.mutex.unlock();
+		if (stop) break;
+	}
+	(void)c.mutex.lock();
+	c.finished = true;
+	c.cond.signal();
+	c.mutex.unlock();
+	return 0;
+}
+
+// Killing c3c leaves the program it started running, and that program holds the output pipe open. Everything
+// c3_test and c3_run start lives under the scratch directory, whose name is unique, so a pattern kill on that
+// name reaches those processes. pkill is on Linux and macOS and reads an extended regex: the path is escaped and
+// anchored on the '/' that follows the directory name, so `c3guide-12` never matches `c3guide-123`.
+fn void kill_matching(String dir)
 {
 	$if !env::WIN32:
-		String[] argv = { "pkill", "-9", "-f", pattern };
+		DString pattern = dstring::temp();
+		foreach (c : dir)
+		{
+			if (c == '.' || c == '^' || c == '$' || c == '*' || c == '+' || c == '?' || c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' || c == '|' || c == '\\') pattern.append_char('\\');
+			pattern.append_char(c);
+		}
+		pattern.append("/");
+		String[] argv = { "pkill", "-9", "-f", pattern.str_view() };
 		Process? p = process::spawn(argv, process::SpawnOptions.INHERIT_ENV);
 		if (catch p) return;
 		(void)p.join();
@@ -173,71 +212,96 @@ fn void kill_matching(String pattern)
 	$endif
 }
 
-fn int watch(void* arg) @private
-{
-	Watchdog* w = (Watchdog*)arg;
-	Clock start = clock::now();
-	(void)w.mutex.lock();
-	while (!w.done)
-	{
-		long left = (long)w.deadline_ms - (long)(start.to_now() / 1_000_000);
-		if (left <= 0)
-		{
-			w.fired = true;
-			(void)w.proc.terminate();
-			if (w.sweep.len > 0) kill_matching(w.sweep);
-			break;
-		}
-		(void)w.cond.wait_timeout(&w.mutex, (ulong)left);
-	}
-	w.mutex.unlock();
-	return 0;
-}
+const ulong DRAIN_MS = 1000;     // c3c has exited but the pipe is still open: wait this long for the output, then move on
+const ulong REAP_MS = 2000;      // after a kill: wait this long for the reader to see the pipe close
 
-// Run argv (no shell), capture stdout+stderr up to MAX_OUTPUT, kill the child past that or past the
-// deadline, always join. *code gets the exit status (0 when we killed it ourselves), *timed_out says
-// whether the deadline fired. A killed child closes its pipe, so the blocking read below always ends.
+fn long ms_since(Clock t) => (long)(t.to_now() / 1_000_000);
+
+// Run argv (no shell), capture stdout+stderr up to max_output, kill the child past that or past the deadline.
+// *code gets the exit status (0 when we killed it ourselves), *timed_out says whether the deadline fired. A reader
+// thread does the blocking read, so this call always returns: with the output so far if something keeps the pipe open.
 fn String? run_capped(String[] cmd, int* code, bool* timed_out, ulong deadline_ms = DEADLINE_MS, sz max_output = MAX_OUTPUT, String sweep = "")
 {
-	Process p = process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT | process::SpawnOptions.INHERIT_ENV)!;
-	defer (void)p.destroy();
-	Watchdog w = { .proc = &p, .deadline_ms = deadline_ms, .sweep = sweep };
-	(void)w.mutex.init();
-	(void)w.cond.init();
+	Process spawned = process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT | process::SpawnOptions.INHERIT_ENV)!;
+	Process* proc = libc::calloc(1, Process::size);
+	*proc = spawned;
+	Capture* c = libc::calloc(1, Capture::size);
+	c.proc = proc;
+	c.max = max_output;
+	c.buf = libc::malloc((usz)max_output + 1);
+	(void)c.mutex.init();
+	(void)c.cond.init();
 	Thread th;
-	if (catch th.create(&watch, &w))
+	if (catch th.create(&read_pipe, c))
 	{
-		(void)p.terminate();   // no deadline without a watchdog: do not run the compiler at all
-		(void)p.join();
+		(void)proc.terminate();
+		(void)proc.join();
+		(void)proc.destroy();
+		libc::free(c.buf);
+		libc::free(c);
+		libc::free(proc);
 		return WATCHDOG_FAILED~;
 	}
-	DString out = dstring::temp();
-	char[2048] buf;
-	bool capped = false;
-	while (true)
+
+	Clock start = clock::now();
+	bool fired = false;
+	bool exited = false;
+	long exited_at = 0;
+	(void)c.mutex.lock();
+	while (!c.finished)
 	{
-		sz? n = p.read_stdout(&buf, buf.len);
-		if (catch n) break;
-		if (n == 0) break;
-		sz room = max_output - out.len();
-		out.append((String)buf[:n > room ? room : n]);
-		if (out.len() >= max_output)
+		long now = ms_since(start);
+		if (now >= (long)deadline_ms) { fired = true; break; }
+		if (!exited)
 		{
-			capped = true;
-			(void)p.terminate();
-			break;
+			bool? alive = proc.is_running();
+			if (try alive) { if (!alive) { exited = true; exited_at = now; } }
 		}
+		else if (now - exited_at > (long)DRAIN_MS)
+		{
+			break;   // a descendant outlived c3c and holds the pipe
+		}
+		long left = (long)deadline_ms - now;
+		(void)c.cond.wait_timeout(&c.mutex, (ulong)(left < 100 ? left : 100));
 	}
-	(void)w.mutex.lock();
-	w.done = true;
-	w.cond.signal();
-	w.mutex.unlock();
-	(void)th.join();
-	*timed_out = w.fired;
-	*code = p.join()!;
+	bool capped = c.capped;
+	bool stray = !c.finished;
+	c.mutex.unlock();
+
+	if ((fired || capped) && !exited) (void)proc.terminate();
+	if (sweep.len > 0 && (fired || capped || stray)) kill_matching(sweep);
+
+	// the pipe should close now: let the reader see it
+	Clock reap = clock::now();
+	(void)c.mutex.lock();
+	while (!c.finished && ms_since(reap) < (long)REAP_MS) (void)c.cond.wait_timeout(&c.mutex, 100);
+	bool finished = c.finished;
+	DString out = dstring::temp();
+	out.append((String)c.buf[:c.len]);
+	c.mutex.unlock();
+
+	int status = 0;
+	if (exited) { status = proc.return_status; }
+	else { CInt? j = proc.join(); status = j ?? 0; }
+	*timed_out = fired;
+	*code = (fired || capped) ? 0 : status;
+
+	if (finished)
+	{
+		(void)th.join();
+		(void)proc.destroy();
+		(void)c.mutex.destroy();
+		(void)c.cond.destroy();
+		libc::free(c.buf);
+		libc::free(c);
+		libc::free(proc);
+	}
+	else
+	{
+		(void)th.detach();   // still blocked on a pipe we cannot close: leave it (and what it uses) alone
+	}
 	String s = out.str_view();
-	if (capped || w.fired) *code = 0;
-	if (capped) return string::tformat("%s\n[output cut]", s[:util::utf8_boundary(s, s.len)]);
+	if (capped) return string::tformat("%s\n[output cut]", s[:util::cut_utf8(s)]);
 	return s;
 }
 

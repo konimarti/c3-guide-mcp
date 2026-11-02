@@ -181,3 +181,12 @@ fn void optional_interface_methods_are_found() @test
 	String t = tools::c3_search("call optional interface method that may not be implemented", 2);
 	assert(t.contains("Recipe: optional interface method"), "%s", t);
 }
+
+fn void a_cut_utf8_tail_is_dropped() @test
+{
+	assert(util::cut_utf8("ab") == 2 && util::cut_utf8("") == 0);
+	assert(util::cut_utf8("ab\xF0\x9F\xA6") == 2, "three bytes of a four-byte character");
+	assert(util::cut_utf8("a\xC3") == 1);
+	assert(util::cut_utf8("a\xC3\xA9") == 3, "a complete character stays");
+	assert(util::cut_utf8("ab\U0001F980") == 6);
+}

@@ -420,13 +420,61 @@ fn void ambiguous_names_get_no_hint_list() @test
 	assert(!d.contains("Url.free") && !d.contains("std::"), "a name with dozens of owners is not a hint: %s", d);
 }
 
+// Processes whose command line matches `pattern`. Tests compare before and after: another session may be running.
+fn int count_procs(String pattern) @local => (support::sh(string::tformat("pgrep -f '%s' | wc -l", pattern)).trim().to_int()) ?? 0;
+
+const String SCRATCH_PROC = "c3guide-[0-9]+/";
+
 fn void a_hung_program_is_stopped_and_leaves_nothing_running() @test
 {
-	assert(check::deadline_for(0) == 120000 && check::deadline_for(5) == 5000 && check::deadline_for(999) == 120000);
+	assert(check::deadline_for(0) == 120000 && check::deadline_for(5) == 5000 && check::deadline_for(120) == 120000 && check::deadline_for(-3) == 120000 && check::deadline_for(999) == 120000);
+	int before = count_procs(SCRATCH_PROC);
+	Clock t = clock::now();
 	String r = check::c3_run("import std::thread;\nfn void main() { thread::sleep_ms(600000); }", "", "", "", 3);
-	assert(r.contains("timeout"), "%s", r);
-	String left = support::sh("pgrep -f 'c3guide-[0-9]' | wc -l");
-	assert(left.trim() == "0", "processes left behind: %s", left);
+	long ms = (long)t.to_now() / 1_000_000;
+	assert(r.contains("timeout") && ms < 15000, "%s (%d ms)", r, (int)ms);
+	assert(count_procs(SCRATCH_PROC) <= before, "processes left behind");
+}
+
+fn void a_program_that_leaves_a_background_process_cannot_hang_the_server() @test
+{
+	// `sleep 301 &` keeps the output pipe open and its command line does not name the scratch directory
+	Clock t = clock::now();
+	String r = check::c3_run(`import libc;
+fn void main() { libc::system("sleep 301 &"); }`, "", "", "", 3);
+	long ms = (long)t.to_now() / 1_000_000;
+	support::sh("pkill -f '[s]leep 301'; true");
+	assert(ms < 20000, "the call took %d ms: %s", (int)ms, r);
+}
+
+fn void regex_characters_in_the_scratch_path_do_not_defeat_the_sweep() @test
+{
+	String base = support::sh("d=$(mktemp -d)/x'(b'; mkdir -p \"$d\"; printf %s \"$d\"").trim();
+	String? saved = env::tget_var("TMPDIR");
+	env::set_var("TMPDIR", base);
+	int before = count_procs("sleep 600000|x.\\(b");
+	Clock t = clock::now();
+	String r = check::c3_run("import std::thread;\nfn void main() { thread::sleep_ms(600000); }", "", "", "", 3);
+	long ms = (long)t.to_now() / 1_000_000;
+	if (try s = saved) { env::set_var("TMPDIR", s); } else { env::clear_var("TMPDIR"); }
+	support::sh(string::tformat("pkill -9 -f '%s/c3guide'; rm -rf \"$(dirname '%s')\"; true", "x.\\(b", base));
+	assert(r.contains("timeout") && ms < 15000, "%s (%d ms)", r, (int)ms);
+}
+
+fn void a_program_past_the_output_cap_is_stopped() @test
+{
+	int before = count_procs(SCRATCH_PROC);
+	Clock t = clock::now();
+	String r = check::c3_run(`import std::io;
+import std::thread;
+fn void main()
+{
+	for (int i = 0; i < 20000; i++) io::printn("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+	thread::sleep_ms(600000);
+}`, "", "", "", 20);
+	long ms = (long)t.to_now() / 1_000_000;
+	assert(ms < 15000 && r.len > 1000, "%d ms, %d bytes", (int)ms, (int)r.len);
+	assert(count_procs(SCRATCH_PROC) <= before, "the program kept running after the cap");
 }
 
 fn void a_file_of_a_project_points_to_the_project() @test
