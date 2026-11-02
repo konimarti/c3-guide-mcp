@@ -46,6 +46,11 @@ jobs:
           export PATH="$HOME/bin:$PATH"
           c3l sync --frozen
           c3l verify
+      - name: Versions and the c3c hook
+        if: runner.os == 'Linux'
+        run: |
+          sh test/version_check.sh
+          sh test/hook_test.sh
       - name: Build (-O3)
         shell: bash
         run: c3c build c3-guide-mcp -O3
