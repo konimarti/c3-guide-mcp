@@ -7,7 +7,10 @@ binary = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__fi
 INIT = {"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "smoke", "version": "0"}}}
 CALLS = [("c3_search", {"query": "defer"}), ("c3_symbol", {"name": "String.split"}), ("c3_changes", {"topic": "foreach"}),
          ("c3_syntax", {"topic": "attributes"}), ("c3_check", {"code": "fn void f() {}"}),
-         ("c3_check", {"code": "fn void f() { int x = ; }"}), ("c3_check", {"code": 'const char[*] X = $embed("x");'})]
+         ("c3_check", {"code": "fn void f() { int x = ; }"}), ("c3_check", {"code": 'const char[*] X = $embed("x");'}),
+         ("c3_fix", {"code": "fn void f() { usz n = int.sizeof; }"}), ("c3_examples", {"symbol": "HashMap"}),
+         ("c3_check", {"path": os.path.dirname(os.path.abspath(__file__)), "target": "--trust=full"}),
+         ("c3_search", {"query": "word " * 5000})]
 reqs = [INIT, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}]
 for i, (name, args) in enumerate(CALLS, 2):
     reqs.append({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": args}})
@@ -33,4 +36,8 @@ check("c3_syntax attributes", "@" in text(5), text(5))
 check("c3_check valid code is OK", text(6).startswith("OK"), text(6))
 check("c3_check invalid code reports an error", "error" in text(7).lower(), text(7))
 check("c3_check rejects $embed", "rejected" in text(8), text(8))
+check("c3_fix rewrites .sizeof and verifies", "int::size" in text(9) and "no errors" in text(9).lower(), text(9))
+check("c3_examples HashMap", "HashMap" in text(10), text(10))
+check("c3_check refuses a target that is an option", "build target name" in text(11), text(11))
+check("c3_search survives a 5000-word query", len(text(12)) > 0, text(12))
 sys.exit(1 if fails else 0)
