@@ -87,10 +87,60 @@ fn String hint_for(String msg, String output)
 	foreach (t : BUILTIN_TYPES) if (t == name) return "";
 	// `free`, `init`, `len`: dozens of methods of that name say nothing about the one that was meant
 	if (!name.contains("::") && tools::exact_matches(name) > 3) return "";
-	String s = tools::symbol_reply(name);   // the reply itself, without the notes c3_symbol adds for the user
+	// when the compiler itself proposes a name, the signature of that name is the useful answer
+	String proposed = quoted_after(msg, "perhaps want '");
+	String s = tools::symbol_reply(is_name(proposed) ? proposed : name);   // the reply itself, without the notes c3_symbol adds
 	// a name that is not in the stdlib and has no close name is the user's own: say nothing
 	if (s.contains("does not exist") && !s.contains("Similar names") && !s.contains("Symbols matching")) return "";
-	return string::tformat("  c3_symbol '%s':\n%s\n", name, util::clip(s, 700));
+	return string::tformat("  c3_symbol '%s':\n%s\n", is_name(proposed) ? proposed : name, compact(s));
+}
+
+// The word between the quotes right after `marker`, "" when the marker is absent.
+fn String quoted_after(String msg, String marker)
+{
+	sz at = msg.index_of(marker) ?? msg.len;
+	if (at >= msg.len) return "";
+	return quoted(msg[at + marker.len - 1..]);
+}
+
+const int HINT_ENTRIES = 3;
+
+// What a hint needs from a c3_symbol reply: where the name went (similar names, a rename in the release notes)
+// and the first signatures. Not the doc comments, and not the sentence repeating the question.
+fn String compact(String reply)
+{
+	DString out = dstring::temp();
+	int entries = 0;
+	bool listing = false;      // true once the entries start
+	bool exact = false;        // an exact hit: "### title (loc)", then the signature unindented; a list: title, then an indented signature
+	bool want_signature = false;
+	foreach (line : reply.tsplit("\n"))
+	{
+		if (line.contains(" does not exist in the standard library")) continue;
+		if (line.starts_with("Symbols matching")) { listing = true; continue; }
+		if (!listing && line.starts_with("### ")) { listing = true; exact = true; }
+		if (!listing)
+		{
+			if (line.trim().len > 0) out.appendf("  %s\n", line);   // similar names, release notes
+			continue;
+		}
+		if (line.trim().len == 0) continue;
+		bool title = exact ? line.starts_with("### ") : !line.starts_with(" ");
+		if (title)
+		{
+			if (entries >= HINT_ENTRIES) break;
+			entries++;
+			sz loc = line.index_of("  (") ?? line.len;   // the file and line are not needed to pick a name
+			out.appendf("  %s\n", exact ? line[4:loc - 4] : line[:loc]);
+			want_signature = true;
+		}
+		else if (want_signature)
+		{
+			out.appendf("    %s\n", line.trim());
+			want_signature = false;
+		}
+	}
+	return util::clip(out.str_view(), 900);
 }
 
 <*

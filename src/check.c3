@@ -132,18 +132,23 @@ fn String path_c3c_version()
 
 // The docs are a snapshot of one c3c release. When the installed compiler is another one, say so: a signature
 // may have changed, and the compiler is right.
-fn String version_note()
+bool version_noted;
+
+// Said once per session, and again when a name was not found (that is when a version difference matters).
+fn String version_note(bool relevant = false)
 {
 	String have = compiler_version();
-	if (have.len == 0) return "";
+	if (have.len == 0 || (version_noted && !relevant)) return "";
 	if (have != corpus::snapshot_version)
 	{
-		return string::tformat("\nnote: these docs are for c3c %s but the tools run c3c %s; if a signature fails, trust the compiler.\n", corpus::snapshot_version, have);
+		version_noted = true;
+		return string::tformat("\nnote: these docs describe c3c %s, but the tools run c3c %s. A signature that fails to compile may have changed: trust the compiler, and c3_changes lists renames.\n", corpus::snapshot_version, have);
 	}
 	String other = path_c3c_version();
-	if (other.len > 0 && other != have)
+	if (other.len > 0 && other != have && !version_noted)
 	{
-		return string::tformat("\nnote: the tools run c3c %s (%s), but `c3c` on your PATH is %s. Set C3C to the one you mean.\n", have, c3c_binary(), other);
+		version_noted = true;
+		return string::tformat("\nnote: the tools run c3c %s (%s), but `c3c` on your PATH is %s. These docs describe %s; if you build with %s, a signature may differ (c3_changes lists renames). Set C3C to the one you mean.\n", have, c3c_binary(), other, have, other);
 	}
 	return "";
 }
@@ -496,7 +501,7 @@ fn String report(String out, int status, bool timed_out, String hide, String rep
 fn String c3_check(String code @Desc("a C3 snippet or file content; a main function is not required") = "",
 	String path @Desc("instead of code: a project directory (with project.json) or a .c3 file on disk; a project is built (not run) in a scratch directory, nothing is written to it") = "",
 	String target @Desc("with a project path: the build target, default the first") = "") 
-	@Desc("USE THIS INSTEAD OF running `c3c compile` or `c3c build` yourself. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. Check code before showing it.")
+	@Desc("USE THIS INSTEAD OF running `c3c compile` or `c3c build` yourself. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. A project (path) is built through the link; a snippet or single file is only type-checked. Check code before showing it.")
 	@Timeout(30000)
 {
 	String bad = exclusive_args(code, path);

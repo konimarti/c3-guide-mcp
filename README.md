@@ -49,7 +49,7 @@ Also: `c3_examples` (working code for a function), `c3_search` (the manual and t
 
 ### 3. A whole project in one call
 
-`c3_outline` lists every function, type, macro and constant in a project, with file and line. The assistant sees what is there before it reads a single file.
+`c3_outline` lists every function, type, macro and constant in a project, with file and line. The assistant sees what is there before it reads a single file. Third-party libraries are not a blind spot.
 
 ```
 c3_outline("lib/std/collections/hashmap.c3")
@@ -60,6 +60,15 @@ c3_outline("lib/std/collections/hashmap.c3")
   166  fn bool HashMap.is_empty(&map) @inline
   171  fn sz HashMap.len(&map) @inline
   176  fn Value*? HashMap.get_ref(&map, Key key)
+```
+
+It reads your dependencies too. Point it at `deps` and filter with `match`:
+
+```
+c3_outline("deps", match="new_server")
+
+mcp.c3l!/src/mcp/types.c3
+  59   fn Server new_server(String name, String version)
 ```
 
 It uses the official C3 tree-sitter grammar and compiles nothing. The whole standard library (364 files) takes 0.3 seconds. A file the parser cannot fully read is marked incomplete.

@@ -256,7 +256,7 @@ fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 
 	@ReadOnly
 {
 	String reply = symbol_reply(name);
-	return string::tformat("%s%s", reply, check::version_note());
+	return string::tformat("%s%s", reply, check::version_note(reply.contains("does not exist")));
 }
 
 // Do the two names start the same and have about the same length? `read` and `read_line` are different words.

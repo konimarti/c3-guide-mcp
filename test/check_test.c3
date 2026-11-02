@@ -495,3 +495,18 @@ fn void a_test_filter_cannot_be_an_option() @test
 	assert(check::c3_test("src", "--trust=full").starts_with("filter must be"));
 	assert(check::c3_test("src", "-x").starts_with("filter must be"));
 }
+
+fn void hints_are_complete_and_short() @test
+{
+	String d = hints::diagnostics(err("s.append_chars(\"a\");", "There is no field or method 'DString.append_chars'."));
+	assert(d.contains("DString.append_char") && !d.contains("[...cut]") && !d.contains("does not exist"), "%s", d);
+	assert(d.len < 1200, "%d bytes: %s", (int)d.len, d);
+	String p = hints::diagnostics(err("string::ztformat(\"\");", "'string::ztformat' could not be found, did you perhaps want 'string::tformat'?"));
+	assert(p.contains("fn String tformat") && !p.contains("ZString") && !p.contains("@str_"), "the proposed name, not a keyword search: %s", p);
+}
+
+fn void the_version_note_is_said_once() @test
+{
+	(void)check::version_note();
+	assert(check::version_note() == "", "a second reply stays quiet");
+}

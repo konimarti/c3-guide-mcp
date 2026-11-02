@@ -1,10 +1,11 @@
 module c3guide::outline;
-import mcp, std::core::string, std::io, std::io::file, std::io::path, std::collections::list, std::sort;
+import mcp, std::core::string, std::io, std::io::file, std::io::path, std::collections::list, std::sort, std::compression::zip;
 import c3guide::ts, c3guide::util;
 
 const sz MAX_OUTLINE = 6 * 1024;
 const sz MAX_SOURCE = 1024 * 1024;   // a bigger .c3 file is generated or hostile: parsing it costs memory in proportion
 const sz MAX_FILES = 400;
+const long MAX_ARCHIVE = 32 * 1024 * 1024;
 
 // A top-level declaration the outline lists, by tree-sitter-c3 node type.
 const String[*] DECLARATIONS = {
@@ -33,8 +34,9 @@ fn String doc_line(String text)
 }
 
 // One line per top-level declaration of `source`: "line  header  -- first line of its doc comment".
-fn String outline_source(String source)
+fn String outline_source(String source, String match = "")
 {
+	String needle = match.to_lower_tcopy();
 	TSParser* parser = ts::ts_parser_new();
 	defer ts::ts_parser_delete(parser);
 	if (!ts::ts_parser_set_language(parser, ts::tree_sitter_c3())) return "  (tree-sitter: language version mismatch)\n";
@@ -81,11 +83,12 @@ fn String outline_source(String source)
 		// a constant's value is rarely what you are looking for, and can be a page long
 		if (type == "const_declaration" || type == "global_declaration") shown = shown[:shown.index_of(" = ") ?? shown.len];
 		if (shown.len > 160) shown = string::tformat("%s...", shown[:util::utf8_boundary(shown, 160)]);
+		if (needle.len > 0 && !shown.to_lower_tcopy().contains(needle)) continue;
 		out.appendf("  %-4d %s", row, shown);
 		if (doc.len > 0) out.appendf("  -- %s", doc);
 		out.append("\n");
 	}
-	if (partial) out.append("  (the parser did not accept all of this file: the list may be incomplete)\n");
+	if (partial && out.len() > 0) out.append("  (the parser did not accept all of this file: the list may be incomplete)\n");
 	return out.str_view();
 }
 
@@ -115,6 +118,7 @@ fn int unparsed_files(String dir, DString* names)
 }
 
 fn bool is_c3_file(String name) => name.ends_with(".c3") || name.ends_with(".c3i");
+fn bool is_archive(String name) => name.ends_with(".c3l");   // a library: a zip file of .c3 sources
 
 // Directories that hold other people's code or build output, not the project's own.
 fn bool skipped_dir(String name) => name == "build" || name == "deps" || name == "lib" || name == "vendor" || name.starts_with(".");
@@ -135,15 +139,16 @@ fn void collect(Path dir, List{String}* files, int depth)
 		{
 			if (!skipped_dir(name)) collect(full, files, depth + 1);
 		}
-		else if (is_c3_file(name))
+		else if (is_c3_file(name) || is_archive(name))
 		{
 			files.push(string::tformat("%s", (String)full));
 		}
 	}
 }
 
-fn String c3_outline(String path @Desc("a project directory (its src/ is read, or the directory itself) or one .c3 file"))
-	@Desc("The declarations of the project's own code, one line each with file and line: functions and methods with their signatures, structs, enums, macros, faults, constants, and the first line of each doc comment. Use it to see what a project contains before reading files. Parsed with the C3 tree-sitter grammar; nothing is compiled or run.")
+fn String c3_outline(String path @Desc("a project directory (its src/ is read, or the directory itself), one .c3 file, a library archive (.c3l), or a directory of libraries such as deps"),
+	String match @Desc("only declarations whose line contains this text, case-insensitive: finds a function in a library") = "")
+	@Desc("The declarations of the project's own code, one line each with file and line: functions and methods with their signatures, structs, enums, macros, faults, constants, and the first line of each doc comment. Use it to see what a project contains before reading files, and to look up a function in its third-party libraries: c3_outline with path 'deps' and match 'curl_easy'. Parsed with the C3 tree-sitter grammar; nothing is compiled or run.")
 	@ReadOnly
 {
 	if (path.len == 0 || path.len > 4096) return "give a project directory or a .c3 file";
@@ -155,8 +160,8 @@ fn String c3_outline(String path @Desc("a project directory (its src/ is read, o
 	DString out = dstring::temp();
 	if (!path::is_dir(abs))
 	{
-		if (!is_c3_file(root) || !file::exists(root)) return "path must be a project directory or an existing .c3 file";
-		String one = c3_outline_file(root, root);
+		if (!(is_c3_file(root) || is_archive(root)) || !file::exists(root)) return "path must be a project directory, a .c3 file or a .c3l library";
+		String one = is_archive(root) ? archive_outline(root, root, match) : c3_outline_file(root, root, match);
 		return one.len > 0 ? util::clip(one, MAX_OUTLINE) : "no declarations found";
 	}
 	Path base = abs;
@@ -172,7 +177,7 @@ fn String c3_outline(String path @Desc("a project directory (its src/ is read, o
 	{
 		if (out.len() >= MAX_OUTLINE) { unread = (int)(sorted.len - i); break; }   // parse only what can be shown
 		String shown = f.starts_with(root) && f.len > root.len + 1 ? f[root.len + 1..] : f;
-		String part = c3_outline_file(f, shown);
+		String part = is_archive(f) ? archive_outline(f, shown, match) : c3_outline_file(f, shown, match);
 		if (out.len() + part.len > MAX_OUTLINE) { unread = (int)(sorted.len - i); break; }
 		out.append(part);
 	}
@@ -181,16 +186,40 @@ fn String c3_outline(String path @Desc("a project directory (its src/ is read, o
 	return out.len() == 0 ? "no declarations found" : out.str_view();
 }
 
-fn String c3_outline_file(String file_path, String shown)
+fn String c3_outline_file(String file_path, String shown, String match = "")
 {
 	long? size = file::get_size(file_path);
 	if (catch size) return "";
 	if (size > (long)MAX_SOURCE) return string::tformat("%s\n  (skipped: %d KB is more than the %d KB limit)\n", shown, (int)(size / 1024), (int)(MAX_SOURCE / 1024));
 	char[]? data = file::load_temp(file_path);
 	if (catch data) return "";
-	String body = outline_source((String)data);
+	String body = outline_source((String)data, match);
 	if (body.len == 0) return "";
 	return string::tformat("%s\n%s", shown, body);
+}
+
+// The sources inside a library archive (.c3l is a zip file), listed as "archive!/path/in/it".
+fn String archive_outline(String archive, String shown, String match)
+{
+	long? size = file::get_size(archive);
+	if (catch size) return "";
+	if (size > MAX_ARCHIVE) return string::tformat("%s\n  (skipped: larger than %d MB)\n", shown, (int)(MAX_ARCHIVE / 1024 / 1024));
+	ZipArchive? z = zip::open(tmem, archive);
+	if (catch z) return "";
+	defer (void)z.close();
+	DString out = dstring::temp();
+	sz entries = z.count();
+	for (sz i = 0; i < entries && i < MAX_FILES; i++)
+	{
+		ZipEntry? e = z.stat_at(i);
+		if (catch e) continue;
+		if (e.is_directory || e.is_encrypted || !is_c3_file(e.name) || e.uncompressed_size > (long)MAX_SOURCE) continue;
+		char[]? data = z.read_file_all(tmem, e.name);
+		if (catch data) continue;
+		String body = outline_source((String)data, match);
+		if (body.len > 0) out.appendf("%s!/%s\n%s", shown, util::sanitize_utf8(e.name), body);
+	}
+	return out.str_view();
 }
 
 fn void register(mcp::Server* s)

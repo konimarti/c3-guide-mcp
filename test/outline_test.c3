@@ -111,3 +111,20 @@ fn void a_file_the_grammar_rejects_is_marked_incomplete() @test
 	assert(o.contains("may be incomplete") && o.contains("fn void ok()"), "%s", o);
 	assert(!outline::outline_source("fn void ok() {}\n").contains("incomplete"));
 }
+
+fn void libraries_and_a_match_filter() @test
+{
+	Path dir = project_dir();
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	// a .c3l library is a zip file of sources: one entry stored, one deflated
+	support::sh(string::tformat("mkdir -p '%s/deps' && python3 -c \"import zipfile; z = zipfile.ZipFile('%s/deps/curl.c3l', 'w'); z.writestr('curl.c3', 'module curl;\\nfn int curl_easy_init() => 1;\\nfn void curl_free() {}\\n', zipfile.ZIP_STORED); z.writestr('sub/util.c3', 'module curl::util;\\nfn int helper(int x) => x;\\n' * 40, zipfile.ZIP_DEFLATED); z.writestr('README.md', 'x'); z.close()\"", root, root));
+	String lib = outline::c3_outline(string::tformat("%s/deps/curl.c3l", root));
+	assert(lib.contains("curl.c3l!/curl.c3") && lib.contains("fn int curl_easy_init()") && lib.contains("fn int helper(int x)"), "%s", lib);
+	assert(!lib.contains("README"), "only sources are listed: %s", lib);
+	String found = outline::c3_outline(string::tformat("%s/deps", root), "CURL_EASY");
+	assert(found.contains("curl_easy_init") && !found.contains("curl_free") && !found.contains("helper"), "match is case-insensitive and filters: %s", found);
+	assert(outline::c3_outline(string::tformat("%s/deps", root), "no_such_function") == "no declarations found");
+	String src = outline::c3_outline("src/util.c3", "clip");
+	assert(src.contains("fn String clip(") && !src.contains("utf8_boundary"), "%s", src);
+}
