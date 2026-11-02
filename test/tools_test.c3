@@ -173,7 +173,9 @@ fn void a_name_in_the_wrong_module_finds_the_right_one() @test
 {
 	String t = tools::c3_symbol("allocator::free");
 	assert(t.contains("std::core::mem::alloc::free"), "%s", t);
-	assert(!t.contains("libc::free") || t.index_of("std::core::mem::alloc::free") ?? 0 < t.index_of("libc::free") ?? 0, "the module that resembles the asked one comes first: %s", t);
+	String first = t.tsplit("\n")[2];
+	assert(first.contains("std::core::mem::alloc::free"), "the plain function in the module that resembles the asked one comes first: %s", t);
+	assert(!t.contains("Similar names:\n  std::core::mem::allocators::Vmem"), "methods do not lead: %s", t);
 }
 
 fn void optional_interface_methods_are_found() @test

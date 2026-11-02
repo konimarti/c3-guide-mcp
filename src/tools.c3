@@ -292,7 +292,8 @@ fn String symbol_reply(String name)
 	String module_hint = "";
 	if (n.contains("::")) { String m = n[:n.rindex_of("::") ?? 0].to_lower_tcopy(); module_hint = m[(m.rindex_of("::") ?? -2) + 2..]; }
 	int shown = 0;
-	for (int pass = 0; pass < 3; pass++)
+	bool qualified = module_hint.len > 0;
+	for (int pass = 0; pass < 4; pass++)
 	{
 		foreach (&e : corpus::entries)
 		{
@@ -300,11 +301,16 @@ fn String symbol_reply(String name)
 			String uid = e.title.to_lower_tcopy();
 			String last = last_segment(e.title).to_lower_tcopy();
 			bool same = last == q;
-			// pass 0: same name, module resembles the one asked for; pass 1: same name, a plain function;
-			// pass 2: names that start alike
 			bool near = module_hint.len >= 3 && uid.contains(module_hint[:module_hint.len < 4 ? module_hint.len : 4]);
 			bool plain = !e.title[(e.title.rindex_of("::") ?? 0)..].contains(".");
-			bool take = pass == 0 ? (same && near && module_hint.len > 0) : (pass == 1 ? (same && (plain || module_hint.len == 0) && !(near && module_hint.len > 0)) : (!same && alike(last, q)));
+			bool take;
+			switch (pass)
+			{
+				case 0: take = same && plain && near;          // the same function in a module that resembles the asked one
+				case 1: take = same && plain;                  // the same function anywhere
+				case 2: take = same && !plain && !qualified;   // methods of that name, when no module was named
+				default: take = !same && alike(last, q);       // names that start alike
+			}
 			if (!take || out.str_view().contains(string::tformat("  %s\n", e.title))) continue;
 			if (shown++ == 0) out.append("Similar names:\n");
 			out.appendf("  %s\n", e.title);
