@@ -41,6 +41,8 @@ jobs:
           # c3c compiles project.json "c-sources" with `cc`, which windows-latest does not have; clang is preinstalled
           clang --version
           echo "C3C_CC=clang" >> "$GITHUB_ENV"
+          # c3c adds -fPIE to every C compile; clang for the MSVC target rejects it
+          echo "C3_BUILD_FLAGS=--reloc=none" >> "$GITHUB_ENV"
       - name: c3c version
         shell: bash
         run: c3c --version
@@ -60,7 +62,7 @@ jobs:
           sh test/hook_test.sh
       - name: Build (-O3)
         shell: bash
-        run: c3c build c3-guide-mcp -O3
+        run: c3c build c3-guide-mcp -O3 $C3_BUILD_FLAGS
       - name: Smoke test
         shell: bash
         run: |
