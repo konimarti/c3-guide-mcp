@@ -43,7 +43,7 @@ Do not run c3c by hand to check or run C3 code. Use the c3-guide MCP tools:
   mcp__c3-guide__c3_test    run `c3c test` (listed only when the server has C3_GUIDE_ALLOW_RUN=1)
   mcp__c3-guide__c3_run     build and run a program (same switch)
 If the run tools are not listed, ask the user to enable them rather than falling back to c3c.
-Use `c3c build` / `c3c compile` through Bash only to produce a binary.
+Use `c3c build` / `c3c compile` through Bash to produce a binary, or for a step that needs a shell (creating a project, running the built app).
 MSG
 	exit 2
 fi

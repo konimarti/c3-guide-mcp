@@ -126,7 +126,7 @@ A run is stopped after the time limit you set (up to 120 s). This is not a sandb
 ## Good to know
 
 - Signatures come from your `c3c`. If anything still disagrees with the compiler, trust the compiler.
-- The tools check snippets and single projects. A workflow that scaffolds and runs an app (`new`, `cd`, `build`, run) needs a shell, so use `c3c build` yourself for that; the hook allows it.
+- The tools are for checking, testing and running code. Anything that needs a shell (creating a project, `c3c build` for the binary, running the built app with its own input or working directory) is done with `c3c` directly, and the hook allows it.
 - Search matches words, not meaning. For a standard library function, ask by name.
 - Tested by hand on Linux x64. CI builds and smoke-tests Linux, macOS and Windows.
 

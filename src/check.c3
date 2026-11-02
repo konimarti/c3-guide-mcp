@@ -562,7 +562,7 @@ fn String report(String out, int status, bool timed_out, String hide, String rep
 fn String c3_check(String code @Desc("a C3 snippet or file content; a main function is not required") = "",
 	String path @Desc("instead of code: a project directory (with project.json) or a .c3 file on disk; a project is built (not run) in a scratch directory, nothing is written to it") = "",
 	String target @Desc("with a project path: the build target, default the first") = "") 
-	@Desc("USE THIS INSTEAD OF running `c3c compile` or `c3c build` yourself. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. A project (path) is built through the link; a snippet or single file is only type-checked. Check code before showing it.")
+	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. A project (path) is built through the link; a snippet or single file is only type-checked. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
 	@Timeout(30000)
 {
 	String bad = exclusive_args(code, path);
@@ -701,7 +701,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	String target @Desc("with a project path: the target to run") = "",
 	String opt @Desc("optimization level: O0 O1 O2 O3 O4 O5 Os Oz; default is the compiler's (use it to compare speed)") = "",
 	int timeout_s @Desc("give up after this many seconds (1..120, default 120); a program stuck in a loop is killed") = 0)
-	@Desc("USE THIS INSTEAD OF running `c3c compile-run` or `c3c run` yourself. Builds in a scratch directory and runs the program (stdin empty, 120 s limit), returning its output or the compile errors with hints.")
+	@Desc("USE THIS INSTEAD OF running `c3c compile-run` or `c3c run` yourself. Builds in a scratch directory and runs the program (stdin empty, 120 s limit), returning its output or the compile errors with hints. For a program that needs input or its own working directory, build it with `c3c build` and run it in the shell.")
 	@Timeout(150000)
 {
 	String bad = exclusive_args(code, path);
