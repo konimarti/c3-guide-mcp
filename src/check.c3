@@ -20,7 +20,6 @@ const ulong DEADLINE_MS = 10000;
 const ulong RUN_DEADLINE_MS = 60000;   // c3_test / c3_run: the program has to build and run
 const sz MAX_RUN_OUTPUT = 6 * 1024;
 const sz MAX_RUN_CAPTURE = 64 * 1024;
-const sz MAX_HINTS = 1500;
 const String[*] FORBIDDEN = { "$embed", "$include", "$exec" };
 
 fn String c3c_binary()
@@ -150,8 +149,6 @@ fn void sweep_stale(Path tmp)
 	}
 }
 
-
-
 // c3_test and c3_run execute the code they build. That is a different trust level than c3_check, so
 // the operator opts in: C3_GUIDE_ALLOW_RUN=1 in the server's environment.
 fn bool run_allowed()
@@ -239,6 +236,9 @@ fn String? resolve_target(String target, bool* is_dir)
 	return s;
 }
 
+// The directory a target lives in, with a trailing '/' (the prefix to hide in the compiler's paths).
+fn String dir_of(String where, bool is_dir) => is_dir ? string::tformat("%s/", where) : string::tformat("%s", where[:(where.rindex_of("/") ?? 0) + 1]);
+
 // Shown for the faults above, so the model knows what to give.
 const String BAD_TARGET_TEXT = "path must be a project directory (containing project.json) or a .c3 file that exists";
 
@@ -255,6 +255,7 @@ fn bool valid_target(String t)
 	return true;
 }
 
+const String NO_C3C = "could not start c3c: set the C3C environment variable to its path or put c3c on PATH";
 const String BAD_OPT = "opt must be one of O0 O1 O2 O3 O4 O5 Os Oz (or empty for the default)";
 
 fn bool valid_opt(String o)
@@ -309,12 +310,18 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	defer (void)path::rmtree(dir);
 	String file = string::tformat("%s/snippet.c3", (String)dir);
 	if (catch file::save(file, code)) return "cannot write the snippet";
+	return compile_only(file, (String)dir, "<code>");
+}
+
+// Type-check one file: nothing is emitted or run. `hide` is cut from the paths in the output.
+fn String compile_only(String file, String hide, String replacement)
+{
 	String[] argv = { c3c_binary(), "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", file };
 	int status = 0;
 	bool timed_out = false;
 	String? out = run_capped(argv, &status, &timed_out);
-	if (catch out) return "could not start c3c: set the C3C environment variable to its path or put c3c on PATH";
-	String shown = report(out, status, timed_out, (String)dir, "<code>", "OK: no errors", DEADLINE_MS);
+	if (catch out) return NO_C3C;
+	String shown = report(out, status, timed_out, hide, replacement, "OK: no errors", DEADLINE_MS);
 	return string::tformat("%s%s", shown, hints::diagnostics(shown));
 }
 
@@ -323,7 +330,7 @@ fn String check_path(String target_path, String target)
 	bool is_dir;
 	String? where = resolve_target(target_path, &is_dir);
 	if (catch where) return BAD_TARGET_TEXT;
-	String base = is_dir ? string::tformat("%s/", where) : string::tformat("%s", where[:(where.rindex_of("/") ?? 0) + 1]);
+	String base = dir_of(where, is_dir);
 	if (is_dir)
 	{
 		// `--no-obj` only exists for single files. A project is built (not run) in a scratch directory.
@@ -335,13 +342,7 @@ fn String check_path(String target_path, String target)
 		if (target.len > 0) m.add(target);
 		return run_c3c(m.list(), base, "", scratch, true, where, "OK: no errors");
 	}
-	String[] argv = { c3c_binary(), "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", where };
-	int status = 0;
-	bool timed_out = false;
-	String? out = run_capped(argv, &status, &timed_out);
-	if (catch out) return "could not start c3c: set the C3C environment variable to its path or put c3c on PATH";
-	String shown = report(out, status, timed_out, base, "", "OK: no errors", DEADLINE_MS);
-	return string::tformat("%s%s", shown, hints::diagnostics(shown));
+	return compile_only(where, base, "");
 }
 
 fn String c3_fix(String code @Desc("C3 code written with 0.6/0.7 syntax"))
@@ -383,7 +384,7 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	// capture more than is shown: the [PASS] lines are dropped below, and they must not push the
 	// failures and the summary line past the cap
 	String? out = run_capped(argv, &status, &timed_out, RUN_DEADLINE_MS, MAX_RUN_CAPTURE);
-	if (catch out) return "could not start c3c: set the C3C environment variable to its path or put c3c on PATH";
+	if (catch out) return NO_C3C;
 	String shown = drop_runtime_frames(report(out, status, timed_out, hide, replacement, ok, RUN_DEADLINE_MS));
 	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
 	return string::tformat("%s%s", shown, hints::diagnostics(shown));
@@ -400,7 +401,7 @@ fn String c3_test(String path @Desc("a project directory (with project.json) or 
 	Path? scratch = scratch_dir();
 	if (catch scratch) return "cannot create a temp directory";
 	defer (void)path::rmtree(scratch);
-	String base = is_dir ? string::tformat("%s/", where) : string::tformat("%s", where[:(where.rindex_of("/") ?? 0) + 1]);
+	String base = dir_of(where, is_dir);
 	Args m;
 	if (filter.len > 0)
 	{
@@ -441,7 +442,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	bool is_dir;
 	String? where = resolve_target(path, &is_dir);
 	if (catch where) return BAD_TARGET_TEXT;
-	String base = is_dir ? string::tformat("%s/", where) : string::tformat("%s", where[:(where.rindex_of("/") ?? 0) + 1]);
+	String base = dir_of(where, is_dir);
 	Args m;
 	if (opt.len > 0) m.add(string::tformat("-%s", opt));
 	if (is_dir)

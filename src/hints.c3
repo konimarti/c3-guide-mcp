@@ -21,9 +21,6 @@ const StaticHint[*] STATIC_HINTS = {
 	{ "must use '{ }'", "", "C3 0.8: an `if` with an `else` needs braces on both branches: `if (c) { a(); } else { b(); }`." },
 	{ "This doesn't seem to be a valid literal", "", "C3 0.8 removed the `i64`/`u8` style literal suffixes: use `5L`, `5UL` or a cast, `(long)5`." },
 	{ "Expected a type here", "isz", "`isz` is `sz` since 0.8 (`usz` is unchanged). `c3_fix` applies this." },
-	{ "'$sizeof' could not be found", "", "`$sizeof(T)` is gone: write `T::size`. `c3_fix` applies this." },
-	{ "'$vacount' could not be found", "", "`$vacount` is `$vaarg.len` and `$vasplat` is `...$vaarg` since 0.8. `c3_fix` applies this." },
-	{ "'$vasplat' could not be found", "", "`$vasplat` is `...$vaarg` since 0.8. `c3_fix` applies this." },
 	{ "Expected ';'", "$typeof(", "`$typeof(x)` is spelled `$Typeof(x)` where a type is expected (`$Typeof(x) y = 4;`)." },
 	{ "A type name was expected here", "!", "Optionals are written `int?` (not `int!`) since 0.8: `fn int? f()`, `int? x = f();`." },
 	{ "did you forget 'const'", "fault ", "Fault declarations are `faultdef A, B;` since 0.8 (`fault E { A }` is gone). Use them as `A?` or `return A~;`." },
@@ -65,6 +62,8 @@ fn String hint_for(String msg, String output)
 		return string::tformat("  %s\n", h.hint);
 	}
 	String name = quoted(msg);
+	String old = tools::legacy_note(name);   // `$sizeof`, `$vacount`...: the one table of names that were replaced
+	if (old.len > 0) return string::tformat("  %s", old);
 	if (msg.contains("Did you mean")) return "";   // the compiler already names the fix
 	String marker = "member or method '";
 	sz m = msg.index_of(marker) ?? msg.len;

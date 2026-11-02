@@ -211,20 +211,7 @@ fn String describe(String query)
 	if (hits.len == 0) return string::tformat("no symbol matches '%s'; try other words", query);
 	DString out = dstring::temp();
 	out.appendf("Symbols matching '%s' (c3c %s):\n", query, corpus::snapshot_version);
-	// names people describe in other words (`to_int` for "parse a string to int") come first
-	int named = 0;
-	foreach (name : search::alias_names(search::query_terms(search::words_only(query))))
-	{
-		foreach (&e : corpus::entries)
-		{
-			if (named >= 3) break;
-			if (is_symbol(e.kind) && uid_matches(e.title, name)) { out.append(brief(e)); named++; }
-		}
-	}
 	foreach (h : hits) out.append(brief(&corpus::entries[h.idx]));
-	// a recipe that matches is worth more than five signatures: point to it (c3_search shows the program)
-	Hit[] rec = search::search(query, { "recipe" }, 1, true);
-	if (rec.len > 0) out.appendf("Working program: c3_search \"%s\"\n", util::clip(corpus::entries[rec[0].idx].title, 120));
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
@@ -268,8 +255,9 @@ fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
-// Is `word` in `line` as a whole identifier (not inside `readline_all`)?
-fn bool has_word(String line, String word)
+// Is `word` in `line` as a whole identifier (not inside `readline_all`)? With variants, a leading `t` or a
+// trailing `_suffix` is let through: a recipe uses `tsplit` for split and `load_temp` for load.
+fn bool has_word(String line, String word, bool variants = false)
 {
 	sz from = 0;
 	while (from < line.len)
@@ -278,35 +266,15 @@ fn bool has_word(String line, String word)
 		if (catch at) return false;
 		sz a = from + at;
 		sz b = a + word.len;
-		bool left = a == 0 || !hints::ident_char(line[a - 1]);
-		bool right = b >= line.len || !hints::ident_char(line[b]);
+		bool left = a == 0 || !hints::ident_char(line[a - 1]) || (variants && line[a - 1] == 't' && (a == 1 || !hints::ident_char(line[a - 2])));
+		bool right = b >= line.len || !hints::ident_char(line[b]) || (variants && line[b] == '_');
 		if (left && right) return true;
 		from = a + 1;
 	}
 	return false;
 }
 
-// A recipe uses the temp or `_temp` variant of a name (`tsplit` for split, `load_temp` for load): match the
-// word when only a leading `t` or a trailing `_suffix` sets it apart.
-fn bool has_variant(String line, String word)
-{
-	sz from = 0;
-	while (from < line.len)
-	{
-		sz? at = line[from..].index_of(word);
-		if (catch at) return false;
-		sz a = from + at;
-		sz b = a + word.len;
-		bool left = a == 0 || !hints::ident_char(line[a - 1]) || (line[a - 1] == 't' && (a == 1 || !hints::ident_char(line[a - 2])));
-		bool right = b >= line.len || !hints::ident_char(line[b]) || line[b] == '_';
-		if (left && right) return true;
-		from = a + 1;
-	}
-	return false;
-}
-
-// In the manual only a use that looks like code counts: `word(` or `::word` (not `project.json`). Prose that merely
-// contains the word is not an example.
+// In the manual only a use that looks like code counts: `word(` or `::word` (not `project.json`).
 fn bool looks_like_use(String line, String word)
 {
 	if (!has_word(line, word)) return false;
@@ -333,7 +301,7 @@ fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'Hash
 			String[] lines = e.body.tsplit("\n");
 			foreach (i, line : lines)
 			{
-				if (!(e.kind == "recipe" ? has_variant(line, word) : looks_like_use(line, word))) continue;
+				if (!(e.kind == "recipe" ? has_word(line, word, true) : looks_like_use(line, word))) continue;
 				// a few lines before and after the first use; a recipe is short, so show it all when it is
 				sz from = e.kind == "recipe" && lines.len <= 24 ? 0 : (i > 3 ? i - 3 : 0);
 				sz to = e.kind == "recipe" && lines.len <= 24 ? lines.len : (i + 6 < lines.len ? i + 6 : lines.len);

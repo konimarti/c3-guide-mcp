@@ -99,7 +99,6 @@ python3 test/stdio_test.py               # JSON-RPC over the built binary
 python3 test/smoke.py                    # the same binary, one call per tool
 python3 test/growth_test.py              # memory over 4,000 calls
 python3 test/corpus_test.py /path/to/c3  # the snapshot matches the installed c3c
-python3 test/mutation_test.py            # breaks the code 15 ways; every break must fail a test (slow)
 ```
 
 `c3c test` needs `sh` and takes about 40 s: two tests wait out the 10 s compiler deadline, and the recipes test compiles all recipes. The tests are `@test` functions in `test/*.c3` and call the tool functions directly, so no binary has to be built first.

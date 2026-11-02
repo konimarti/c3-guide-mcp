@@ -35,7 +35,6 @@ const Case[*] CASES = {
 	{ "c3_search", "threads mutex", "Recipe: threads" },
 	{ "c3_search", "run external command capture output", "Recipe: run an external command" },
 	{ "c3_search", "generic struct module Type", "Recipe: generic" },
-	{ "c3_symbol", "create directory", "Working program: c3_search" },
 	{ "c3_search", "main(String[] args)", "Recipe: command line arguments" },
 	{ "c3_search", "args[0]", "Recipe: command line arguments" },
 	{ "c3_search", "List{", "Recipe: List" },

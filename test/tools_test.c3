@@ -38,9 +38,7 @@ fn void old_names_point_to_their_replacement() @test
 
 fn void symbol_finds_names_by_what_they_do() @test
 {
-	String p = tools::c3_symbol("parse string to int");
-	assert(p.contains("to_int"), "%s", p);
-	String n = tools::c3_symbol("current time in milliseconds");
+	String n = tools::c3_symbol("time now");
 	assert(n.contains("::now"), "%s", n);
 }
 
