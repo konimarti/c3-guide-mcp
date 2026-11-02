@@ -149,7 +149,7 @@ fn Entry make_entry(String kind, String title, String body, String loc)
 }
 
 // The public symbols of one module of the docgen output, appended to `out`.
-fn void add_module(Object* mod, String root, String cwd, List{Entry}* out)
+fn void add_module(Object* mod, String cwd, List{Entry}* out)
 {
 	foreach (k : KINDS)
 	{
@@ -165,16 +165,18 @@ fn void add_module(Object* mod, String root, String cwd, List{Entry}* out)
 			String body = doc.len > 0 ? string::tformat("%s\n%s", signature(it), doc) : signature(it);
 			// `env::PROJECT_PATH` evaluates to the directory docgen ran in: keep that machine's path out of the answers
 			if (cwd.len > 1) body = check::redact(body, cwd, "<project>");
+			// docgen prints the path relative to where the server runs, or absolute, or through a symlink: every
+			// standard library file lives under lib/std, so keep the path from there
 			String file = text(it, "file");
-			if (root.len > 0 && file.starts_with(root)) file = file[root.len..];
-			if (file.starts_with("/")) file = file[(file.index_of("lib/std/") ?? 0)..];   // docgen resolved a symlink: keep the path relative
+			sz at = file.rindex_of("lib/std/") ?? -1;
+			if (at >= 0) file = file[at..];
 			out.push(make_entry(k.code, text(it, "uid"), body, file));
 		}
 	}
 }
 
-// The symbol entries of a docgen JSON text. `root` is the install directory with a trailing '/', cut from file paths.
-fn Entry[]? entries_from_json(String json_text, String root)
+// The symbol entries of a docgen JSON text.
+fn Entry[]? entries_from_json(String json_text)
 {
 	Object* dg = json::parse(tmem, json_text)!;
 	Object* modules = child(dg, "modules");
@@ -184,7 +186,7 @@ fn Entry[]? entries_from_json(String json_text, String root)
 	if (try here = path::tcwd()) cwd = (String)here;
 	modules.@each_entry(; String key, Object* mod)
 	{
-		add_module(mod, root, cwd, &out);
+		add_module(mod, cwd, &out);
 	};
 	return out.array_view();
 }
@@ -245,8 +247,7 @@ fn Entry[]? read_live(String binary) => @pool()
 	String? out = check::run_capped(argv, &status, &timed_out, DOCGEN_MS, MAX_DOCGEN);
 	if (catch out) return NO_STDLIB~;
 	if (timed_out || status != 0 || out.len == 0) return NO_STDLIB~;
-	String root = libstd[:libstd.len - 7];   // "<install>/" : cut from file paths, as the snapshot's are relative
-	Entry[] live = entries_from_json(out, root)!;
+	Entry[] live = entries_from_json(out)!;
 	if (live.len < 1000) return NO_STDLIB~;   // an empty or partial answer is not a standard library
 	return live;
 }
