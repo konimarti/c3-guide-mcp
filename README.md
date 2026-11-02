@@ -45,7 +45,7 @@ Similar names:
 
 (Output shortened. When a release renamed the name, the release-note line is shown too.)
 
-Do not know the name? Describe it: `c3_symbol("get environment variable")`.
+Do not know the name? Describe it: `c3_symbol("get environment variable")`. A description that matches little says so, instead of returning the nearest unrelated names. Give a type or module (`List`, `std::io::path`) and it lists its methods or functions.
 
 Also: `c3_examples` (working code for a function), `c3_search` (the manual and tested example programs), `c3_changes` (what changed between releases).
 

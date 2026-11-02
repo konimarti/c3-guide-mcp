@@ -241,3 +241,26 @@ fn void a_name_in_another_spelling_is_found() @test
 	String[2][*] cases = { { "readLine", "std::io::readline" }, { "toInt", "String.to_int" }, { "getVar", "get_var" }, { "isEmpty", "is_empty" }, { "read_line", "std::io::readline" } };
 	foreach (c : cases) assert(tools::c3_symbol(c[0]).contains(c[1]), "%s: %s", c[0], tools::c3_symbol(c[0]));
 }
+
+fn void a_type_or_module_lists_what_it_has() @test
+{
+	String l = tools::c3_symbol("List");
+	assert(l.contains("Methods (") && l.contains("push") && l.contains("pop"), "%s", l);
+	String m = tools::c3_symbol("std::io::path");
+	assert(m.contains("Functions and types (") && m.contains("chdir") && m.contains("cwd"), "%s", m);
+	assert(tools::c3_symbol("io::path").contains("chdir"), "a module can be named by its tail too");
+}
+
+fn void a_description_with_nothing_close_says_so_and_a_good_one_does_not() @test
+{
+	assert(tools::c3_symbol("create symbolic link").contains("Weak matches"));
+	assert(tools::c3_symbol("compare semantic version strings").contains("Weak matches"));
+	String ok = tools::c3_symbol("sha256 hash of bytes");
+	assert(!ok.contains("Weak matches") && ok.contains("sha256::hash"), "%s", ok);
+	assert(!tools::c3_symbol("pause execution for a while").contains("Weak matches"), "found through a synonym");
+}
+
+fn void a_missing_name_points_to_project_code() @test
+{
+	assert(tools::c3_symbol("curl_easy_perform").contains("c3_outline"));
+}

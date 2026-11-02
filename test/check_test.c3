@@ -557,3 +557,10 @@ fn void a_library_manifest_without_targets_is_explained() @test
 	String d = hints::diagnostics(err("import foo;", "Library 'foo' cannot be used with arch/os 'linux-x64'."));
 	assert(has(d, "targets") && has(d, "manifest.json") && has(d, "0.8.6"), "%s", d);
 }
+
+fn void an_optional_struct_field_is_explained() @test
+{
+	String d = hints::diagnostics(err("struct Conf { String[]? deps; }", "A valid member name was expected here."));
+	assert(has(d, "cannot be optional"), "%s", d);
+	assert(!has(hints::diagnostics(err("struct Conf { int x; } y", "A valid member name was expected here.")), "cannot be optional"), "only where a `?` is in the code");
+}

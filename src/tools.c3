@@ -211,8 +211,39 @@ fn String describe(String query)
 	if (hits.len == 0) return string::tformat("no symbol matches '%s'; try other words", query);
 	DString out = dstring::temp();
 	out.appendf("Symbols matching '%s' (c3c %s):\n", query, corpus::symbols_version);
+	// Words are all a description search has. When even the best hit has few of them, the nearest names are not an
+	// answer: say so, since "the standard library has no such function" is the usual truth (symlinks, mkdtemp...)
+	String[] terms = search::query_terms(search::words_only(query));
+	int best = 0;
+	foreach (h : hits)
+	{
+		int n = words_in(&corpus::entries[h.idx], terms);
+		if (n > best) best = n;
+	}
+	if (terms.len >= 3 && best * 2 < (int)terms.len)
+	{
+		out.appendf("Weak matches: no symbol below has more than %d of your %d words. The standard library may not have this; libc:: and os::posix:: hold the raw system calls, or declare an extern.\n", best, (int)terms.len);
+	}
 	foreach (h : hits) out.append(brief(&corpus::entries[h.idx]));
 	return util::clip(out.str_view(), MAX_REPLY);
+}
+
+// How many of the query words the name and doc of this symbol contain, a word counting when it or one of its
+// synonyms is there (the answer to "pause" is `sleep`: a hit found through the table is not a weak one).
+fn int words_in(Entry* e, String[] terms)
+{
+	String text = string::tformat("%s %s", e.title, e.body);
+	int n = 0;
+	foreach (t : terms)
+	{
+		String[1] one = { t };
+		String[] closure = search::with_synonyms(one[..]);
+		int[] tf = mem::talloc_array(int, closure.len);
+		tf[..] = 0;
+		search::count_terms(text, closure, tf, true);
+		foreach (c : tf) if (c > 0) { n++; break; }
+	}
+	return n;
 }
 
 // How many stdlib symbols this name stands for (`free` is a dozen of them: too many to be a useful hint).
@@ -254,7 +285,7 @@ fn String rename_notes(String word)
 }
 
 fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 'String.split', 'talloc_array') or, when you do not know the name, what it does ('read a line from a file', 'trim whitespace')"))
-	@Desc("Exact signature, docs and source location of a C3 standard library function, macro, method or type; or, given a description, the functions that do it. Never guess a signature, look it up.")
+	@Desc("Exact signature, docs and source location of a C3 standard library function, macro, method or type; or, given a description, the functions that do it. A type name or a module (`List`, `std::io::path`) lists its methods or functions. Standard library only: for project or dependency code use c3_outline. Never guess a signature, look it up.")
 	@ReadOnly
 {
 	String reply = symbol_reply(name);
@@ -278,6 +309,40 @@ fn bool alike(String a, String b)
 	return common >= 3 && common * 10 >= longer * 7;
 }
 
+// The names a type has as methods (`prefix.name`) or a module has as functions and macros (`prefix::name`), as one line.
+fn String members_of(String prefix, bool methods)
+{
+	DString names = dstring::temp();
+	int count = 0;
+	foreach (&e : corpus::entries)
+	{
+		if (!is_symbol(e.kind) || !e.title.starts_with(prefix) || e.title.len <= prefix.len + 1) continue;
+		String rest = e.title[prefix.len + 1..];
+		bool is_method = e.title[prefix.len] == '.';
+		if (methods ? !is_method : (e.title[prefix.len] != ':' || rest.contains("::") || rest.contains("."))) continue;
+		if (methods ? !(e.kind == "method" || e.kind == "mmethod") : false) continue;
+		rest = methods ? rest : rest[(rest.index_of(":") ?? -1) + 1..];
+		if (count++ > 0) names.append(", ");
+		names.append(rest);
+	}
+	if (count == 0) return "";
+	return string::tformat("%s (%d): %s\n  c3_symbol %s%sNAME for one signature.\n", methods ? "Methods" : "Functions and types", count, util::clip(names.str_view(), 1400), last_segment(prefix), methods ? "." : "::");
+}
+
+// `std::io::path`, `io::path`, `path`: the module, when it is one. Its functions and macros, names only.
+fn String module_listing(String n)
+{
+	String full = "";
+	foreach (&e : corpus::entries)
+	{
+		if (!is_symbol(e.kind) || e.title.contains(".")) continue;
+		String parent = e.title[:e.title.rindex_of("::") ?? 0];
+		if (parent.len > 0 && uid_matches(parent, n)) { full = parent; break; }
+	}
+	if (full.len == 0) return "";
+	return string::tformat("%s\n%s", full, members_of(full, false));
+}
+
 fn String symbol_reply(String name)
 {
 	live::ensure();
@@ -294,11 +359,14 @@ fn String symbol_reply(String name)
 	if (found > 0)
 	{
 		if (found > 6) out.appendf("[%d more matches; qualify the name, e.g. io::%s]\n", found - 6, n);
+		foreach (&e : corpus::entries) if (e.kind == "type" && uid_matches(e.title, n)) out.append(members_of(e.title, true));
 		return util::clip(out.str_view(), MAX_REPLY);
 	}
+	String module_members = module_listing(n);
+	if (module_members.len > 0) return module_members;
 	// not found: say so (a model must not assume a guessed API exists), then offer close names
 	out.append(legacy_note(n));
-	out.appendf("'%s' does not exist in the standard library of c3c %s.\n", n, corpus::symbols_version);
+	out.appendf("'%s' does not exist in the standard library of c3c %s. (Project or library code: c3_outline with a path and match.)\n", n, corpus::symbols_version);
 	// `allocator::free` is asked for by its old module: the same name in another module is the likely answer
 	String q = last_segment(n).to_lower_tcopy();
 	String module_hint = "";
