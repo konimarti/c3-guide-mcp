@@ -19,13 +19,13 @@ model:  c3_symbol("read line")    ->  std::io::readline: macro String? readline(
 | `c3_check(code or path)` | the compiler's diagnostics for a snippet, or for a real project directory / `.c3` file on disk, plus **hints**: for an error that names a guessed stdlib function or an old 0.7 property, the right signature or the 0.8 form |
 | `c3_fix(code)` | rewrites the mechanical 0.7 -> 0.8 changes (`int.sizeof` -> `int::size`, `$sizeof(T)`, `isz` -> `sz`, `$vacount`, `$vasplat`), then compiles the result and shows what is left |
 | `c3_search(query)` | the language manual and the [recipes](recipes/) (small programs that compile and run: read a file line by line, HashMap, sort, mkdir, threads, generics...), best first |
-| `c3_symbol(name or description)` | exact signature, doc and file:line of a stdlib function, macro, method or type; says so when it does not exist and suggests close names. Given words instead of a name (`read line`, `get environment variable`) it ranks symbols by the words in their name and doc comment |
+| `c3_symbol(name or description)` | exact signature, doc and file:line of a stdlib function, macro, method or type; says so when it does not exist and suggests close names: the same name in another module (`allocator::free` finds `alloc::free`) and the release-note lines that say it was renamed. Given words instead of a name (`read line`, `get environment variable`) it ranks symbols by the words in their name and doc comment |
 | `c3_examples(symbol)` | working code that uses a stdlib function or type: the verified recipes and the manual's examples, with the lines around each use |
 | `c3_outline(path)` | what a project contains: one line per top-level declaration (functions and methods with signatures, structs, enums, macros, faults, constants) with file and line, plus the first line of each doc comment. Parsed with the C3 tree-sitter grammar, so nothing is compiled; capped at 6 KB |
 | `c3_changes(topic)` | the release-note lines about a topic, newest first |
 | `c3_syntax(topic)` | the compiler's lists: attributes, builtins, keywords, type properties, operators |
-| `c3_test(path, filter)` | **opt-in** (see below): builds a project or file in a scratch directory, runs its `@test` functions, returns pass/fail with the failing assertion and file:line, without the runtime's stack frames |
-| `c3_run(code or path)` | **opt-in**: builds in a scratch directory and runs a program (stdin empty), returns its output or the compile errors with hints |
+| `c3_test(path, filter, timeout_s)` | **opt-in** (see below): builds a project or file in a scratch directory, runs its `@test` functions, returns pass/fail with the failing assertion and file:line, without the runtime's stack frames |
+| `c3_run(code or path, target, opt, timeout_s)` | **opt-in**: builds in a scratch directory and runs a program (stdin empty) at an optimization level `O0`..`O5`, `Os`, `Oz`, returns its output or the compile errors with hints. A program that outlives `timeout_s` (default and maximum 120) is killed together with anything it started |
 
 Replies of the docs tools are capped at 3.2 KB, `c3_check` at 4 KB plus at most 1.5 KB of hints, `c3_test`/`c3_run` at 6 KB. A server that dumps pages into the context makes the model worse.
 

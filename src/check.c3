@@ -17,7 +17,10 @@ const sz MAX_CODE = 32 * 1024;
 const sz MAX_FIX = 12 * 1024;
 const sz MAX_OUTPUT = 4 * 1024;
 const ulong DEADLINE_MS = 10000;
-const ulong RUN_DEADLINE_MS = 120000;   // c3_test / c3_run: the program has to build and run
+const ulong RUN_DEADLINE_MS = 120000;   // c3_test / c3_run: the program has to build and run (the most a caller may ask for)
+
+// timeout_s: 0 = the default, else 1..120 seconds
+fn ulong deadline_for(int timeout_s) => timeout_s <= 0 || timeout_s > 120 ? RUN_DEADLINE_MS : (ulong)timeout_s * 1000;
 const sz MAX_RUN_OUTPUT = 6 * 1024;
 const sz MAX_RUN_CAPTURE = 64 * 1024;
 const String[*] FORBIDDEN = { "$embed", "$include", "$exec" };
@@ -71,14 +74,10 @@ fn String c3c_binary()
 	return found_c3c;
 }
 
-// The version the installed compiler reports ("0.8.5_1"), "" when it cannot be run. Asked once.
-char[64] version_buf;
-String installed_version;
-
-fn String compiler_version()
+// The version a compiler reports ("0.8.5_1"), "" when it cannot be run. Temp memory: copy it to keep it.
+fn String version_of(String binary)
 {
-	if (installed_version.len > 0) return installed_version;
-	String[] argv = { c3c_binary(), "--version" };
+	String[] argv = { binary, "--version" };
 	int status = 0;
 	bool timed_out = false;
 	String? out = run_capped(argv, &status, &timed_out);
@@ -87,13 +86,45 @@ fn String compiler_version()
 	{
 		if (!line.contains("Compiler Version:")) continue;
 		sz colon = line.index_of(":") ?? 0;
-		String v = line[colon..].trim(" :\t\r");
-		if (v.len >= version_buf.len) return "";
-		version_buf[:v.len] = v[..];
-		installed_version = (String)version_buf[:v.len];
-		break;
+		return line[colon..].trim(" :\t\r");
 	}
+	return "";
+}
+
+// The version of the compiler the tools run, asked once. Kept in a fixed buffer: temp memory is reset between calls.
+char[64] version_buf;
+String installed_version;
+
+fn String compiler_version()
+{
+	if (installed_version.len > 0) return installed_version;
+	String v = version_of(c3c_binary());
+	if (v.len == 0 || v.len >= version_buf.len) return "";
+	version_buf[:v.len] = v[..];
+	installed_version = (String)version_buf[:v.len];
 	return installed_version;
+}
+
+// The version of the `c3c` a developer gets by typing `c3c`, when that is a different program than the one
+// the tools run (C3C points elsewhere). "" when they are the same program or none is on PATH.
+char[64] path_version_buf;
+String path_version;
+bool path_version_asked;
+
+fn String path_c3c_version()
+{
+	if (path_version_asked) return path_version;
+	String? p = env::tget_var("PATH");
+	if (catch p) return "";
+	String? f = which(EXE, p);
+	if (catch f) return "";
+	path_version_asked = true;
+	if (f == c3c_binary()) return "";
+	String v = version_of(f);
+	if (v.len == 0 || v.len >= path_version_buf.len) return "";
+	path_version_buf[:v.len] = v[..];
+	path_version = (String)path_version_buf[:v.len];
+	return path_version;
 }
 
 // The docs are a snapshot of one c3c release. When the installed compiler is another one, say so: a signature
@@ -101,10 +132,18 @@ fn String compiler_version()
 fn String version_note()
 {
 	String have = compiler_version();
-	if (have.len == 0 || have == corpus::snapshot_version) return "";
-	return string::tformat("\nnote: these docs are for c3c %s but %s is installed; if a signature fails, trust the compiler.\n", corpus::snapshot_version, have);
+	if (have.len == 0) return "";
+	if (have != corpus::snapshot_version)
+	{
+		return string::tformat("\nnote: these docs are for c3c %s but the tools run c3c %s; if a signature fails, trust the compiler.\n", corpus::snapshot_version, have);
+	}
+	String other = path_c3c_version();
+	if (other.len > 0 && other != have)
+	{
+		return string::tformat("\nnote: the tools run c3c %s (%s), but `c3c` on your PATH is %s. Set C3C to the one you mean.\n", have, c3c_binary(), other);
+	}
+	return "";
 }
-
 // Kills the child when the deadline passes. The mutex makes "check done, then kill" atomic against the
 // main thread's "set done, then join": the kill can never hit a pid that was already reaped.
 faultdef WATCHDOG_FAILED;
@@ -115,8 +154,23 @@ struct Watchdog
 	ConditionVariable cond;
 	Process* proc;
 	ulong deadline_ms;
+	String sweep;   // when set: also kill every process whose command line contains this (see kill_matching)
 	bool done;
 	bool fired;
+}
+
+// Killing c3c leaves the program it started running, and that program holds the output pipe open: a test stuck
+// in a loop would block the read for good. Everything c3_test and c3_run start lives under the scratch directory,
+// whose name is unique, so a pattern kill on that name reaches exactly those processes. pkill is on Linux and macOS.
+fn void kill_matching(String pattern)
+{
+	$if !env::WIN32:
+		String[] argv = { "pkill", "-9", "-f", pattern };
+		Process? p = process::spawn(argv, process::SpawnOptions.INHERIT_ENV);
+		if (catch p) return;
+		(void)p.join();
+		(void)p.destroy();
+	$endif
 }
 
 fn int watch(void* arg) @private
@@ -131,6 +185,7 @@ fn int watch(void* arg) @private
 		{
 			w.fired = true;
 			(void)w.proc.terminate();
+			if (w.sweep.len > 0) kill_matching(w.sweep);
 			break;
 		}
 		(void)w.cond.wait_timeout(&w.mutex, (ulong)left);
@@ -142,11 +197,11 @@ fn int watch(void* arg) @private
 // Run argv (no shell), capture stdout+stderr up to MAX_OUTPUT, kill the child past that or past the
 // deadline, always join. *code gets the exit status (0 when we killed it ourselves), *timed_out says
 // whether the deadline fired. A killed child closes its pipe, so the blocking read below always ends.
-fn String? run_capped(String[] cmd, int* code, bool* timed_out, ulong deadline_ms = DEADLINE_MS, sz max_output = MAX_OUTPUT)
+fn String? run_capped(String[] cmd, int* code, bool* timed_out, ulong deadline_ms = DEADLINE_MS, sz max_output = MAX_OUTPUT, String sweep = "")
 {
 	Process p = process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT | process::SpawnOptions.INHERIT_ENV)!;
 	defer (void)p.destroy();
-	Watchdog w = { .proc = &p, .deadline_ms = deadline_ms };
+	Watchdog w = { .proc = &p, .deadline_ms = deadline_ms, .sweep = sweep };
 	(void)w.mutex.init();
 	(void)w.cond.init();
 	Thread th;
@@ -414,7 +469,23 @@ fn String check_path(String target_path, String target)
 		if (target.len > 0) m.add(target);
 		return run_c3c(m.list(), base, "", scratch, true, where, "OK: no errors");
 	}
-	return compile_only(where, base, "");
+	String shown = compile_only(where, base, "");
+	return shown.contains("No module named") ? string::tformat("%s%s", shown, project_note(where)) : shown;
+}
+
+// A file checked on its own cannot see its project's other modules. Say where the project is.
+fn String project_note(String file)
+{
+	String dir = file[:file.rindex_of("/") ?? 0];
+	for (int up = 0; up < 6 && dir.len > 1; up++)
+	{
+		if (file::exists(string::tformat("%s/project.json", dir)))
+		{
+			return string::tformat("\n\nnote: this file was compiled alone. It belongs to the project in %s: give that directory as path to compile all its modules together.\n", dir);
+		}
+		dir = dir[:dir.rindex_of("/") ?? 0];
+	}
+	return "";
 }
 
 fn String c3_fix(String code @Desc("C3 code written with 0.6/0.7 syntax"))
@@ -431,7 +502,7 @@ fn String c3_fix(String code @Desc("C3 code written with 0.6/0.7 syntax"))
 // Build and run the target's tests / the program in a scratch directory: every artifact goes there, the
 // user's tree is not written to. `--trust=none` as for check; stdin is an empty pipe, so a program that reads it
 // waits for the deadline.
-fn String run_c3c(String[] mode_args, String hide, String replacement, Path scratch, bool is_dir_target, String where, String ok)
+fn String run_c3c(String[] mode_args, String hide, String replacement, Path scratch, bool is_dir_target, String where, String ok, ulong deadline_ms = RUN_DEADLINE_MS)
 {
 	String sd = (String)scratch;
 	Args a;
@@ -455,15 +526,16 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	bool timed_out = false;
 	// capture more than is shown: the [PASS] lines are dropped below, and they must not push the
 	// failures and the summary line past the cap
-	String? out = run_capped(argv, &status, &timed_out, RUN_DEADLINE_MS, MAX_RUN_CAPTURE);
+	String? out = run_capped(argv, &status, &timed_out, deadline_ms, MAX_RUN_CAPTURE, sd);
 	if (catch out) return NO_C3C;
-	String shown = drop_runtime_frames(report(out, status, timed_out, hide, replacement, ok, RUN_DEADLINE_MS));
+	String shown = drop_runtime_frames(report(out, status, timed_out, hide, replacement, ok, deadline_ms));
 	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
 	return string::tformat("%s%s", shown, hints::diagnostics(shown));
 }
 
 fn String c3_test(String path @Desc("a project directory (with project.json) or a .c3 file with @test functions"),
-	String filter @Desc("run only the tests whose name matches") = "")
+	String filter @Desc("run only the tests whose name matches") = "",
+	int timeout_s @Desc("give up after this many seconds (1..120, default 120); a test stuck in a loop is killed") = 0)
 	@Desc("USE THIS INSTEAD OF running `c3c test` yourself. Builds the project or file in a scratch directory, runs its @test functions and returns pass/fail with the failing assertion and file:line; compile errors come with hints. Nothing is written to your tree. 120 s limit.")
 	@Timeout(150000)
 {
@@ -482,13 +554,14 @@ fn String c3_test(String path @Desc("a project directory (with project.json) or 
 	}
 	m.add(is_dir ? "test" : "compile-test");
 	if (!is_dir) m.add(where);
-	return run_c3c(m.list(), base, "", scratch, is_dir, where, "no output (are there @test functions?)");
+	return run_c3c(m.list(), base, "", scratch, is_dir, where, "no output (are there @test functions?)", deadline_for(timeout_s));
 }
 
 fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	String path @Desc("instead of code: a project directory or a .c3 file") = "",
 	String target @Desc("with a project path: the target to run") = "",
-	String opt @Desc("optimization level: O0 O1 O2 O3 O4 O5 Os Oz; default is the compiler's (use it to compare speed)") = "")
+	String opt @Desc("optimization level: O0 O1 O2 O3 O4 O5 Os Oz; default is the compiler's (use it to compare speed)") = "",
+	int timeout_s @Desc("give up after this many seconds (1..120, default 120); a program stuck in a loop is killed") = 0)
 	@Desc("USE THIS INSTEAD OF running `c3c compile-run` or `c3c run` yourself. Builds in a scratch directory and runs the program (stdin empty, 120 s limit), returning its output or the compile errors with hints.")
 	@Timeout(150000)
 {
@@ -509,7 +582,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 		c.add((String)scratch);
 		c.add("compile-run");
 		c.add(file);
-		return run_c3c(c.list(), (String)scratch, "<code>", scratch, false, "", "(no output)");
+		return run_c3c(c.list(), (String)scratch, "<code>", scratch, false, "", "(no output)", deadline_for(timeout_s));
 	}
 	bool is_dir;
 	String? where = resolve_target(path, &is_dir);
@@ -529,7 +602,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 		m.add("compile-run");
 		m.add(where);
 	}
-	return run_c3c(m.list(), base, "", scratch, is_dir, where, "(no output)");
+	return run_c3c(m.list(), base, "", scratch, is_dir, where, "(no output)", deadline_for(timeout_s));
 }
 
 fn void register(mcp::Server* s)

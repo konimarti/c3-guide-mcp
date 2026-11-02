@@ -410,3 +410,31 @@ fn void c3c_is_found_in_path_and_the_version_is_read() @test
 	assert(@catch(check::which(check::EXE, "/nonexistent")) == check::NOT_FOUND);
 	assert(check::compiler_version().len > 0, "c3c --version is readable");
 }
+
+fn void ambiguous_names_get_no_hint_list() @test
+{
+	String d = hints::diagnostics(err("x.free();", "'free' could not be found, did you spell it right?"));
+	assert(!d.contains("Url.free") && !d.contains("std::"), "a name with dozens of owners is not a hint: %s", d);
+}
+
+fn void a_hung_program_is_stopped_and_leaves_nothing_running() @test
+{
+	assert(check::deadline_for(0) == 120000 && check::deadline_for(5) == 5000 && check::deadline_for(999) == 120000);
+	String r = check::c3_run("import std::thread;\nfn void main() { thread::sleep_ms(600000); }", "", "", "", 3);
+	assert(r.contains("timeout"), "%s", r);
+	String left = support::sh("pgrep -f 'c3guide-[0-9]' | wc -l");
+	assert(left.trim() == "0", "processes left behind: %s", left);
+}
+
+fn void a_file_of_a_project_points_to_the_project() @test
+{
+	Path dir = check::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
+	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	String f = string::tformat("%s/src/a.c3", root);
+	file::save(f, "module a;\nimport encoding::pem;\nfn void main() {}\n")!!;
+	String r = check::c3_check("", f);
+	assert(r.contains("compiled alone") && r.contains(root), "%s", r);
+}

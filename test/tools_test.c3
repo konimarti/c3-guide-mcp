@@ -162,3 +162,22 @@ fn void enum_count_is_found() @test
 	String t = tools::c3_search("number of enum values count", 2);
 	assert(t.contains("Status::len"), "%s", t);
 }
+
+fn void renamed_names_point_to_the_release_note() @test
+{
+	String t = tools::c3_symbol("printfln");
+	assert(t.contains("does not exist") && t.contains("Release notes") && t.contains("printfn"), "%s", t);
+}
+
+fn void a_name_in_the_wrong_module_finds_the_right_one() @test
+{
+	String t = tools::c3_symbol("allocator::free");
+	assert(t.contains("std::core::mem::alloc::free"), "%s", t);
+	assert(!t.contains("libc::free") || t.index_of("std::core::mem::alloc::free") ?? 0 < t.index_of("libc::free") ?? 0, "the module that resembles the asked one comes first: %s", t);
+}
+
+fn void optional_interface_methods_are_found() @test
+{
+	String t = tools::c3_search("call optional interface method that may not be implemented", 2);
+	assert(t.contains("Recipe: optional interface method"), "%s", t);
+}
