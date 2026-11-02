@@ -25,3 +25,4 @@ extern fn uint ts_node_end_byte(TSNode node);
 extern fn TSPoint ts_node_start_point(TSNode node);
 extern fn bool ts_node_is_null(TSNode node);
 extern fn bool ts_node_has_error(TSNode node);
+extern fn ZString ts_node_string(TSNode node);

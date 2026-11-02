@@ -1,6 +1,7 @@
 module c3guide::hints;
 import std::core::string;
-import c3guide::tools, c3guide::util;
+import c3guide::tools, c3guide::util, c3guide::ts;
+import std::collections::list;
 
 // Two things the compiler's message alone does not give a model:
 //  - hints:   what the error means in C3 0.8 and where the answer is (a stdlib signature, a release note)
@@ -121,28 +122,6 @@ const String[2][*] PROPERTY_RENAMES = { { "sizeof", "size" }, { "alignof", "alig
 
 fn bool ident_char(char c) @inline => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 
-// A type-looking name: a builtin type or something capitalised (`Foo`, `Bar{int}`-less). `x.max` on a variable stays.
-fn bool type_like(String id)
-{
-	if (id.len == 0) return false;
-	foreach (t : BUILTIN_TYPES) if (t == id) return true;
-	if (!(id[0] >= 'A' && id[0] <= 'Z')) return false;
-	foreach (c : id) if (c >= 'a' && c <= 'z') return true;
-	return false;   // ALL CAPS is a constant (`LIMIT.max`), not a type
-}
-
-// Is `at` inside the head of a `fn` / `macro` line, before its '('? There `Type.min` names a method being
-// defined (`fn int Foo.min(...)`), which has no 0.8 rewrite.
-fn bool in_definition_head(String code, sz at)
-{
-	sz start = at;
-	while (start > 0 && code[start - 1] != '\n') start--;
-	String head = code[start:at - start];
-	String t = head.trim();
-	if (!t.starts_with("fn ") && !t.starts_with("macro ")) return false;
-	return !head.contains("(");
-}
-
 struct Rewrite
 {
 	String code;
@@ -158,128 +137,126 @@ fn void note(DString* notes, String what)
 	notes.append(what);
 }
 
+struct Edit
+{
+	uint start;
+	uint end;
+	String text;
+}
+
+fn String node_text(String src, TSNode n)
+{
+	uint a = ts::ts_node_start_byte(n);
+	return src[a:ts::ts_node_end_byte(n) - a];
+}
+
+fn String type_of(TSNode n) => ts::ts_node_type(n).str_view();
+
+fn TSNode field_of(TSNode n, String name) => ts::ts_node_child_by_field_name(n, name.ptr, (uint)name.len);
+
+// Walk the syntax tree and note every 0.7 spelling worth an edit. A node that is edited is not entered again.
+// Strings and comments are never identifiers in the tree, and `x.max` (a value) is told from `int.max` (a type)
+// by what the grammar made of the left side.
+fn void collect(String src, TSNode n, String parent, List{Edit}* edits, DString* notes, int* count)
+{
+	String type = type_of(n);
+	String text = node_text(src, n);
+	uint start = ts::ts_node_start_byte(n);
+	uint end = ts::ts_node_end_byte(n);
+	if (type == "ident" && text == "isz" && parent != "access_ident")
+	{
+		edits.push({ start, end, "sz" });
+		note(notes, "isz -> sz");
+		*count += 1;
+		return;
+	}
+	if (type == "ct_ident" && (text == "$vacount" || text == "$vasplat"))
+	{
+		edits.push({ start, end, text == "$vacount" ? "$vaarg.len" : "...$vaarg" });
+		note(notes, text == "$vacount" ? "$vacount -> $vaarg.len" : "$vasplat -> ...$vaarg");
+		*count += 1;
+		return;
+	}
+	if (type == "call_expr")
+	{
+		TSNode fn_node = field_of(n, "function");
+		TSNode args = field_of(n, "arguments");
+		String name = ts::ts_node_is_null(fn_node) ? "" : node_text(src, fn_node);
+		if ((name == "$sizeof" || name == "$alignof") && !ts::ts_node_is_null(args) && ts::ts_node_named_child_count(args) == 1)
+		{
+			TSNode arg = ts::ts_node_named_child(args, 0);
+			TSNode inner = ts::ts_node_named_child_count(arg) > 0 ? ts::ts_node_named_child(arg, 0) : arg;
+			Rewrite nested = rewrite(node_text(src, inner).trim());   // `$sizeof(Foo[$sizeof(int)])`
+			String prop = name == "$sizeof" ? "size" : "alignment";
+			// `$sizeof(x)` took a type or an expression; `T::size` needs a type
+			bool is_type = type_of(inner) == "type";
+			edits.push({ start, end, is_type ? string::tformat("%s::%s", nested.code, prop) : string::tformat("$Typeof(%s)::%s", nested.code, prop) });
+			note(notes, string::tformat("%s(T) -> T::%s", name, prop));
+			*count += 1 + nested.count;
+			return;
+		}
+	}
+	if (type == "field_expr")
+	{
+		TSNode left = field_of(n, "argument");
+		TSNode right = field_of(n, "field");
+		if (!ts::ts_node_is_null(left) && !ts::ts_node_is_null(right) && type_of(left) == "type")
+		{
+			String prop = node_text(src, right);
+			foreach (pair : PROPERTY_RENAMES)
+			{
+				if (pair[0] != prop) continue;
+				edits.push({ start, end, string::tformat("%s::%s", rewrite(node_text(src, left)).code, pair[1]) });
+				note(notes, string::tformat(".%s -> ::%s", pair[0], pair[1]));
+				*count += 1;
+				return;
+			}
+		}
+	}
+	uint kids = ts::ts_node_named_child_count(n);
+	for (uint i = 0; i < kids; i++) collect(src, ts::ts_node_named_child(n, i), type, edits, notes, count);
+}
+
+fn Rewrite rewrite_once(String code, DString* notes)
+{
+	TSParser* parser = ts::ts_parser_new();
+	defer ts::ts_parser_delete(parser);
+	ts::ts_parser_set_language(parser, ts::tree_sitter_c3());
+	TSTree* tree = ts::ts_parser_parse_string(parser, null, code.ptr, (uint)code.len);
+	defer ts::ts_tree_delete(tree);
+	List{Edit} edits;
+	edits.init(tmem);
+	int count = 0;
+	collect(code, ts::ts_tree_root_node(tree), "", &edits, notes, &count);
+	DString out = dstring::temp();
+	uint at = 0;
+	foreach (e : edits)
+	{
+		out.append(code[at:e.start - at]);
+		out.append(e.text);
+		at = e.end;
+	}
+	out.append(code[at..]);
+	return { out.str_view(), count, "" };
+}
+
 <*
  Apply the mechanical C3 0.7 -> 0.8 changes outside strings and comments:
  `T.sizeof` -> `T::size` (also alignof, nameof, max, min), `$sizeof(T)` -> `T::size`, `$alignof(T)`,
  `isz` -> `sz`, `$vacount` -> `$vaarg.len`, `$vasplat` -> `...$vaarg`.
+ `isz` is not a type in 0.8, so code that uses it does not parse as a whole: it goes first, then the rest is
+ read from the tree of the repaired code.
 *>
 fn Rewrite rewrite(String code)
 {
-	DString out = dstring::temp();
 	DString notes = dstring::temp();
-	int count = 0;
-	sz i = 0;
-	while (i < code.len)
+	int total = 0;
+	for (int pass = 0; pass < 3; pass++)
 	{
-		char c = code[i];
-		// string, raw string, char literal, comments: copied untouched
-		if (c == '"' || c == '\'')
-		{
-			sz j = i + 1;
-			while (j < code.len && code[j] != c) { if (code[j] == '\\') j++; j++; }
-			j = j < code.len ? j + 1 : code.len;
-			out.append(code[i:j - i]);
-			i = j;
-			continue;
-		}
-		if (c == '`')
-		{
-			sz j = i + 1;
-			while (j < code.len && code[j] != '`') j++;
-			j = j < code.len ? j + 1 : code.len;
-			out.append(code[i:j - i]);
-			i = j;
-			continue;
-		}
-		if (c == '/' && i + 1 < code.len && code[i + 1] == '+')
-		{
-			// `/+ ... +/` comments nest
-			sz j = i + 2;
-			int depth = 1;
-			while (j < code.len && depth > 0)
-			{
-				if (code[j] == '/' && j + 1 < code.len && code[j + 1] == '+') { depth++; j += 2; continue; }
-				if (code[j] == '+' && j + 1 < code.len && code[j + 1] == '/') { depth--; j += 2; continue; }
-				j++;
-			}
-			out.append(code[i:j - i]);
-			i = j;
-			continue;
-		}
-		if (c == '/' && i + 1 < code.len && (code[i + 1] == '/' || code[i + 1] == '*'))
-		{
-			bool line = code[i + 1] == '/';
-			sz j = i + 2;
-			while (j < code.len && (line ? code[j] != '\n' : !(code[j] == '*' && j + 1 < code.len && code[j + 1] == '/'))) j++;
-			if (!line) j = j + 2 < code.len ? j + 2 : code.len;
-			out.append(code[i:j - i]);
-			i = j;
-			continue;
-		}
-		if (c == '$' || ident_char(c))
-		{
-			sz j = i + 1;
-			while (j < code.len && ident_char(code[j])) j++;
-			String word = code[i:j - i];
-			bool after_dot = i > 0 && code[i - 1] == '.';
-			if (word == "isz" && !after_dot)
-			{
-				out.append("sz");
-				note(&notes, "isz -> sz");
-				count++;
-				i = j;
-				continue;
-			}
-			if (word == "$vacount") { out.append("$vaarg.len"); note(&notes, "$vacount -> $vaarg.len"); count++; i = j; continue; }
-			if (word == "$vasplat") { out.append("...$vaarg"); note(&notes, "$vasplat -> ...$vaarg"); count++; i = j; continue; }
-			if (word == "$sizeof" || word == "$alignof")
-			{
-				sz open = j;
-				while (open < code.len && (code[open] == ' ' || code[open] == '\t')) open++;
-				if (open < code.len && code[open] == '(')
-				{
-					sz k = open + 1;
-					int depth = 1;
-					while (k < code.len && depth > 0) { if (code[k] == '(') depth++; if (code[k] == ')') depth--; k++; }
-					if (depth == 0)
-					{
-						String arg = rewrite(code[open + 1:k - open - 2]).code.trim();   // nested $sizeof first
-						String prop = word == "$sizeof" ? "size" : "alignment";
-						// `$sizeof(x)` took a type or an expression; `T::size` needs a type
-						bool is_type = arg.len > 0 && (type_like(arg) || arg.contains("*") || arg.contains("[") || arg.contains("::") || arg.contains("{"));
-						if (is_type) { out.appendf("%s::%s", arg, prop); } else { out.appendf("$Typeof(%s)::%s", arg, prop); }
-						note(&notes, string::tformat("%s(T) -> T::%s", word, prop));
-						count++;
-						i = k;
-						continue;
-					}
-				}
-			}
-			// Type.sizeof -> Type::size
-			if (!after_dot && type_like(word) && j < code.len && code[j] == '.' && !in_definition_head(code, i))
-			{
-				bool done = false;
-				foreach (pair : PROPERTY_RENAMES)
-				{
-					sz end = j + 1 + pair[0].len;
-					if (end <= code.len && code[j + 1:pair[0].len] == pair[0] && (end == code.len || !ident_char(code[end])))
-					{
-						out.appendf("%s::%s", word, pair[1]);
-						note(&notes, string::tformat(".%s -> ::%s", pair[0], pair[1]));
-						count++;
-						i = end;
-						done = true;
-						break;
-					}
-				}
-				if (done) continue;
-			}
-			out.append(word);
-			i = j;
-			continue;
-		}
-		out.append_char(c);
-		i++;
+		Rewrite r = rewrite_once(code, &notes);
+		if (r.count == 0) break;
+		code = r.code;
+		total += r.count;
 	}
-	return { out.str_view(), count, notes.str_view() };
+	return { code, total, notes.str_view() };
 }

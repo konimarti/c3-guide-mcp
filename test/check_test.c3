@@ -333,12 +333,15 @@ fn void rewrite_skips_what_is_not_a_type() @test
 {
 	assert(hints::rewrite("fn int Pt.min(Pt a, int b) => 1;").count == 0, "a method definition");
 	assert(hints::rewrite("int a = LIMIT.max;").count == 0, "a constant");
-	assert(hints::rewrite("int a = /+ int.sizeof /+ nested +/ int.sizeof +/ 1;").count == 0, "a nested comment");
+	assert(hints::rewrite("int a = /* int.sizeof /* nested */ int.sizeof */ 1;").count == 0, "a nested comment");
 	assert(hints::rewrite("int a = Foo.max;").code == "int a = Foo::max;", "still a type");
 	assert(hints::rewrite("usz n = $sizeof(Foo[$sizeof(int)]);").code == "usz n = Foo[int::size]::size;", "nested");
 	assert(hints::rewrite("usz n = $sizeof ( int );").code == "usz n = int::size;", "spaces");
 	assert(hints::rewrite("usz n = $sizeof(x);").code == "usz n = $Typeof(x)::size;", "an expression, not a type");
 	assert(hints::rewrite("usz n = $sizeof(Foo*);").code == "usz n = Foo*::size;", "a pointer type");
+	assert(hints::rewrite("int a = Foo*.sizeof + p.s.max;").code == "int a = Foo*::size + p.s.max;", "a pointer type property, a member chain");
+	assert(hints::rewrite("fn isz f(isz n) { isz x = int.sizeof; return x.max; }").code == "fn sz f(sz n) { sz x = int::size; return x.max; }", "isz makes the function unparseable: repaired first");
+	assert(hints::rewrite("fn void f(Foo x) { x.isz = 1; }").count == 0, "a field that happens to be called isz");
 }
 
 fn void test_summary_survives_a_long_run() @test
