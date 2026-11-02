@@ -11,6 +11,17 @@ fn sz utf8_boundary(String s, sz max)
 	return n;
 }
 
+// Like clip, but keeps the last `tail` bytes (from a line start): test output ends with the summary line.
+fn String clip_keep_tail(String s, sz max, sz tail)
+{
+	if (s.len <= max) return s;
+	String head = s[:utf8_boundary(s, max - tail)];
+	sz cut = head.rindex_of("\n") ?? head.len;
+	String end = s[s.len - tail..];
+	sz nl = end.index_of("\n") ?? 0;   // start at a line, never in the middle of one (or of a character)
+	return string::tformat("%s\n[...cut]\n%s", head[:cut], end[nl + 1..]);
+}
+
 // Cut `s` below `max` bytes at a line boundary (else at a character boundary), marking the cut.
 fn String clip(String s, sz max)
 {

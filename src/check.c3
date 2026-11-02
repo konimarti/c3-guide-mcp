@@ -19,6 +19,7 @@ const sz MAX_OUTPUT = 4 * 1024;
 const ulong DEADLINE_MS = 10000;
 const ulong RUN_DEADLINE_MS = 60000;   // c3_test / c3_run: the program has to build and run
 const sz MAX_RUN_OUTPUT = 6 * 1024;
+const sz MAX_RUN_CAPTURE = 64 * 1024;
 const sz MAX_HINTS = 1500;
 const String[*] FORBIDDEN = { "$embed", "$include", "$exec" };
 
@@ -142,6 +143,7 @@ fn void sweep_stale(Path tmp)
 		if (!name.starts_with("c3guide-")) continue;
 		Path? full = tmp.tappend(name);
 		if (catch full) continue;
+		if (path::is_link(full)) continue;   // never follow a planted symlink into someone else's files
 		Time? mt = file::last_modified((String)full);
 		if (catch mt) continue;
 		if ((long)time::now() - (long)mt > 3600L * (long)time::SEC) (void)path::rmtree(full);
@@ -186,6 +188,9 @@ fn String drop_runtime_frames(String s)
 	foreach (line : s.tsplit("\n"))
 	{
 		if (line.contains("std.core.runtime.") || line.contains("[inline]")) continue;
+		// a passing test is one line of noise; the failures and the summary line are what matter
+		// (and what the output cap must not cut)
+		if (line.starts_with("Testing ") && line.contains("[PASS]")) continue;
 		out.appendf("%s\n", line);
 	}
 	return out.str_view();
@@ -237,6 +242,21 @@ fn String? resolve_target(String target, bool* is_dir)
 // Shown for the faults above, so the model knows what to give.
 const String BAD_TARGET_TEXT = "path must be a project directory (containing project.json) or a .c3 file that exists";
 
+// A build target is a name, never a flag: `build --trust=full` would undo the fixed --trust=none.
+fn bool valid_target(String t)
+{
+	if (t.len == 0) return true;
+	if (t.len > 128 || t[0] == '-') return false;
+	foreach (c : t)
+	{
+		bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-';
+		if (!ok) return false;
+	}
+	return true;
+}
+
+const String BAD_TARGET_NAME = "target must be a build target name (letters, digits, _ . -), not an option";
+
 // Exactly one of code / path. Returns "" when the arguments are fine, else the message to show.
 fn String exclusive_args(String code, String target)
 {
@@ -271,6 +291,7 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 {
 	String bad = exclusive_args(code, path);
 	if (bad.len > 0) return bad;
+	if (!valid_target(target)) return BAD_TARGET_NAME;
 	if (path.len > 0) return check_path(path, target);
 	// No @pool here: the result lives in the caller's temp memory (a nested pool would free it on return).
 	Path? dir = scratch_dir();
@@ -349,9 +370,12 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	String[] argv = a.list();
 	int status = 0;
 	bool timed_out = false;
-	String? out = run_capped(argv, &status, &timed_out, RUN_DEADLINE_MS, MAX_RUN_OUTPUT);
+	// capture more than is shown: the [PASS] lines are dropped below, and they must not push the
+	// failures and the summary line past the cap
+	String? out = run_capped(argv, &status, &timed_out, RUN_DEADLINE_MS, MAX_RUN_CAPTURE);
 	if (catch out) return "could not start c3c: set the C3C environment variable to its path or put c3c on PATH";
 	String shown = drop_runtime_frames(report(out, status, timed_out, hide, replacement, ok, RUN_DEADLINE_MS));
+	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
 	return string::tformat("%s%s", shown, hints::diagnostics(shown));
 }
 
@@ -386,6 +410,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 {
 	String bad = exclusive_args(code, path);
 	if (bad.len > 0) return bad;
+	if (!valid_target(target)) return BAD_TARGET_NAME;
 	Path? scratch = scratch_dir();
 	if (catch scratch) return "cannot create a temp directory";
 	defer (void)path::rmtree(scratch);
