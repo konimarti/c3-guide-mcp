@@ -1,5 +1,6 @@
 module c3guide::test::live;
-import c3guide::live, c3guide::corpus, c3guide::check, c3guide::search;
+import c3guide::live, c3guide::corpus, c3guide::check, c3guide::search, c3guide::test::support;
+import std::io::path;
 import std::core::string, std::collections::map, std::os::env, std::io;
 
 // Run with C3_DIR=<the c3c install the snapshot belongs to> (CI sets it). The port in src/live.c3 must give the
@@ -125,4 +126,18 @@ fn void standard_library_paths_are_kept_from_lib_std() @test
 		foreach (&e : got) if (e.loc == w) found = true;
 		assert(found, "no entry located at %s", w);
 	}
+}
+
+// A build tree of c3c has the library twice: <install>/lib/std (a copy that docgen rejects, because the compiler also
+// loads the real one) and <install>/../lib/std. The fake compiler below behaves like that.
+fn void a_build_tree_with_two_copies_of_the_library_still_works() @test
+{
+	Path dir = support::make_temp_dir("c3tree");
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	support::sh(string::tformat("mkdir -p '%s/build/lib/std' '%s/lib/std' && python3 -c \"import json; json.dump({'modules': {'std::x': {'functions': [{'name': 'f%%d' %% i, 'kind': 'function', 'uid': 'std::x::f%%d' %% i, 'file': 'lib/std/x.c3:1:1'} for i in range(1200)]}}}, open('%s/dg.json', 'w'))\"", root, root, root));
+	String fake = support::write_fake(dir, "c3c", string::tformat("if [ \"$1\" = --version ]; then echo 'C3 Compiler Version: 9.9.9'; echo 'Installed directory: %s/build'; exit 0; fi\ncase \"$3\" in */build/lib/std) echo \"error: 'CShake' would shadow a previous declaration.\" >&2; exit 1;; esac\ncat '%s/dg.json'", root, root));
+	Entry[] live = live::read_live(fake)!!;
+	defer free_live(live);
+	assert(live.len == 1200, "%d entries", (int)live.len);
 }

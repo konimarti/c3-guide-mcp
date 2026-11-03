@@ -191,15 +191,6 @@ fn Entry[]? entries_from_json(String json_text)
 	return out.array_view();
 }
 
-// Where the standard library sources are: <install>/lib/std, or <install>/../lib/std for a build tree. "" if neither.
-fn String stdlib_dir(String install)
-{
-	String a = string::tformat("%s/lib/std", install);
-	if (file::exists(a)) return a;
-	String b = string::tformat("%s/../lib/std", install);
-	return file::exists(b) ? b : "";
-}
-
 // The overlay is applied on the first lookup that reads symbols, not at startup: the server answers `initialize` at
 // once, and a user who only searches the manual never pays for it. main() turns it on; the tests leave it off.
 bool enabled;
@@ -235,12 +226,25 @@ fn bool overlay_from(String binary, String version)
 }
 
 // The symbols of the standard library of the compiler at `binary`, as read by `c3c docgen`.
-fn Entry[]? read_live(String binary) => @pool()
+fn Entry[]? read_live(String binary)
 {
 	String install = check::install_dir(binary);
 	if (install.len == 0) return NO_STDLIB~;
-	String libstd = stdlib_dir(install);
-	if (libstd.len == 0) return NO_STDLIB~;
+	// A release keeps the library in <install>/lib/std. A build tree keeps a copy there and the real one next to it,
+	// and docgen of the copy fails ("would shadow a previous declaration": the compiler also loads its own). So: the
+	// first of the two that docgen accepts.
+	String[2] candidates = { string::tformat("%s/lib/std", install), string::tformat("%s/../lib/std", install) };
+	foreach (libstd : candidates)
+	{
+		if (!file::exists(libstd)) continue;
+		Entry[]? live = docgen_entries(binary, libstd);
+		if (try live) return live;
+	}
+	return NO_STDLIB~;
+}
+
+fn Entry[]? docgen_entries(String binary, String libstd) => @pool()
+{
 	String[] argv = { binary, "--trust=none", "docgen", libstd, "--json" };
 	int status = 0;
 	bool timed_out = false;
