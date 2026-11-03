@@ -61,6 +61,12 @@ jobs:
       - name: Build (-O3)
         shell: bash
         run: c3c build c3-guide-mcp -O3
+      - name: Windows exe has no debug runtime (VCRUNTIME140D, ucrtbased exist only with Visual Studio)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          if grep -qaiE 'vcruntime[0-9]*d\.dll|ucrtbased\.dll' build/c3-guide-mcp.exe; then echo "the exe imports a debug runtime"; exit 1; fi
+          echo "no debug runtime imported"
       - name: Linux binary needs glibc 2.35 or older
         if: runner.os == 'Linux'
         shell: bash
