@@ -115,8 +115,24 @@ fn String signature(Object* it)
 		String v = it.has_key("value") ? string::tformat(" = %s", text(it, "value")) : "";
 		return string::tformat("%s %s%s", text(child(it, "type"), "name"), name, v).trim();
 	}
+	// a distinct type or an alias says what it is made of (`inline` types have all the methods of that type)
+	String base = text(child(it, "base_type"), "uid");
+	if (base.len > 0 && (kind == "distinct type" || kind == "alias"))
+	{
+		return string::tformat("%s %s%s = %s%s", kind, name, gen, text(it, "is_inline") == "true" ? "inline " : "", base);
+	}
+	DString ifs = dstring::temp();
+	Object* interfaces = child_any(it, "interfaces");
+	if (interfaces.is_array())
+	{
+		for (sz i = 0; i < interfaces.get_len(); i++)
+		{
+			String n = text(interfaces.get_at(i), "name");
+			ifs.appendf("%s%s", i > 0 ? ", " : "", n.len > 0 ? n : "?");
+		}
+	}
 	String mem = params.str_view();
-	return string::tformat("%s %s%s%s", kind, name, gen, (mem.len > 0 && mem.len < 300) ? string::tformat(" { %s }", mem) : "");
+	return string::tformat("%s %s%s%s%s", kind, name, gen, ifs.len() > 0 ? string::tformat(" (%s)", ifs.str_view()) : "", (mem.len > 0 && mem.len < 300) ? string::tformat(" { %s }", mem) : "");
 }
 
 // The doc comment of a symbol as one line, with its @param and @return parts.

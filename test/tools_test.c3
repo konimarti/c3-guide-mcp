@@ -264,3 +264,11 @@ fn void a_missing_name_points_to_project_code() @test
 {
 	assert(tools::c3_symbol("curl_easy_perform").contains("c3_outline"));
 }
+
+fn void an_inline_type_lists_the_methods_of_its_base() @test
+{
+	String reply = tools::c3_symbol("TcpSocket");
+	assert(reply.contains("distinct type TcpSocket = inline std::net::Socket"), "%s", reply);
+	assert(reply.contains("Inherited from std::net::Socket") && reply.contains("close"), "%s", reply);
+	assert(tools::c3_symbol("std::net::Socket").contains("struct Socket (InStream, OutStream)"), "the interfaces are part of the signature");
+}

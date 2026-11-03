@@ -87,8 +87,12 @@ def sig(it):
     if kind in ("constant", "variable"):
         v = f" = {it['value']}" if "value" in it else ""
         return f"{(it.get('type') or {}).get('name', '')} {name}{v}".strip()
+    base = (it.get("base_type") or {}).get("uid", "")
+    if base and kind in ("distinct type", "alias"):
+        return f"{kind} {name}{gen} = {'inline ' if it.get('is_inline') else ''}{base}"
+    ifs = ", ".join(i.get("name", "?") for i in it.get("interfaces") or [])
     mem = ", ".join(ps)
-    return f"{kind} {name}{gen}" + (f" {{ {mem} }}" if mem and len(mem) < 300 else "")
+    return f"{kind} {name}{gen}" + (f" ({ifs})" if ifs else "") + (f" {{ {mem} }}" if mem and len(mem) < 300 else "")
 
 def symbols(c3):
     # run inside the install dir: docgen prints locations relative to the working directory

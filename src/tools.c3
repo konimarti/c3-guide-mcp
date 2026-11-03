@@ -351,6 +351,19 @@ fn String members_of(String prefix, bool methods)
 	return string::tformat("%s (%d): %s\n  c3_symbol %s%sNAME for one signature.\n", methods ? "Methods" : "Functions and types", count, util::clip(names.str_view(), 1400), last_segment(prefix), methods ? "." : "::");
 }
 
+// "distinct type TcpSocket = inline std::net::Socket": the methods of Socket are TcpSocket's too.
+fn String inherited_methods(String body)
+{
+	String marker = " = inline ";
+	sz at = body.index_of(marker) ?? -1;
+	if (at < 0) return "";
+	String base = body[at + marker.len..];
+	base = base[:base.index_of("\n") ?? base.len];
+	base = base[:base.index_of("{") ?? base.len];   // `List{String}`: the methods are listed under `List`
+	String methods = members_of(base, true);
+	return methods.len == 0 ? "" : string::tformat("Inherited from %s: %s", base, methods);
+}
+
 // `std::io::path`, `io::path`, `path`: the module, when it is one. Its functions and macros, names only.
 fn String module_listing(String n)
 {
@@ -381,7 +394,12 @@ fn String symbol_reply(String name)
 	if (found > 0)
 	{
 		if (found > 6) out.appendf("[%d more matches; qualify the name, e.g. io::%s]\n", found - 6, n);
-		foreach (&e : corpus::entries) if (e.kind == "type" && uid_matches(e.title, n)) out.append(members_of(e.title, true));
+		foreach (&e : corpus::entries)
+		{
+			if (e.kind != "type" || !uid_matches(e.title, n)) continue;
+			out.append(members_of(e.title, true));
+			out.append(inherited_methods(e.body));
+		}
 		return util::clip(out.str_view(), MAX_REPLY);
 	}
 	String module_members = module_listing(n);
