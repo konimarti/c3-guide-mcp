@@ -275,7 +275,7 @@ fn void an_inline_type_lists_the_methods_of_its_base() @test
 
 fn void no_example_says_whether_the_name_is_real() @test
 {
-	String real = tools::c3_examples("tcp::listen", 3);
+	String real = tools::c3_examples("tcp::listen_to", 3);
 	assert(real.contains("is in the standard library") && real.contains("no recipe"), "%s", real);
 	String fake = tools::c3_examples("nosuchfunction", 3);
 	assert(fake.contains("is not a standard library name"), "%s", fake);

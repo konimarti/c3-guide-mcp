@@ -94,7 +94,7 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 	if (hits.len == 0) hits = search::search(search::code_words(query), { "recipe", "doc" }, n);
 	// The library is searched on every question: a task ("tcp server") is often one word in the manual ("accept" in
 	// attributes) and a whole module in the library. A name that holds two of the question's words is shown when it has
-	// more of them than the manual's best section, or the section has under half; the one with more goes first.
+	// as many of them as the manual's best section, or the section has under half; the one with more goes first.
 	live::ensure();
 	Hit[] syms = search::search(query, SYMBOL_KINDS[..], 3, true);
 	String[] terms = search::query_terms(search::words_only(query));
@@ -102,8 +102,8 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 	int library = 0;
 	foreach (h : syms) library = math::max(library, words_in(&corpus::entries[h.idx], terms));
 	if (hits.len == 0 && syms.len == 0) return "no match in the manual; try other words or c3_symbol for a stdlib name";
-	bool show_library = syms.len > 0 && (hits.len == 0 || (library >= 2 && (library > manual || manual * 2 < (int)terms.len)));
-	bool library_first = show_library && library >= manual;
+	bool show_library = syms.len > 0 && (hits.len == 0 || (library >= 2 && (library >= manual || manual * 2 < (int)terms.len)));
+	bool library_first = show_library && library > manual;
 	DString out = dstring::temp();
 	if (library_first)
 	{

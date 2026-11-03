@@ -59,7 +59,7 @@ const Case[*] MANUAL = {
 	{ "enum with explicit values", "enum" },
 };
 
-const int MIN_TASKS = 22;
+const int MIN_TASKS = 24;
 
 fn bool found(String reply, String want)
 {

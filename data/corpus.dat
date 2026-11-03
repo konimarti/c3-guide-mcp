@@ -1,4 +1,4 @@
-metac3c0.8.5_1records=7323docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
+metac3c0.8.5_1records=7324docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
 
 
 
@@ -18465,7 +18465,36 @@ fn void main()
 
 	Describe d = &r;                       // interface value from a pointer
 	io::printn(d.describe());
-}recipes/struct_method.c3recipeRecipe: a unit test (@test function with assert; run with c3_test / `c3c test`, not part of the program)// Also: testing, unit test, assert, @test, test function, expect
+}recipes/struct_method.c3recipeRecipe: tcp server and client: tcp::listen, accept, connect, read and write a message over a socket (std::net)// Also: socket, listen, accept, connect, tcp server, tcp client, network, port, localhost, echo, send, recv, TcpSocket, TcpServerSocket
+import std::io;
+import std::net;
+
+fn void? run()
+{
+	// port 0: the system picks a free port; the connection waits in the backlog until accept
+	TcpServerSocket server = tcp::listen("127.0.0.1", 0, 4, REUSEADDR)!;
+	defer (void)server.close();
+	ushort port = server.local_port()!;
+
+	TcpSocket client = tcp::connect("127.0.0.1", port)!;
+	defer (void)client.close();
+	TcpSocket conn = tcp::accept(&server)!;   // takes a pointer to the server socket
+	defer (void)conn.close();
+
+	client.write("hello")!;                    // a TcpSocket has the methods of Socket: read, write, close...
+	char[16] buf;
+	sz n = conn.read(&buf)!;
+	io::printfn("server got: %s", (String)buf[:n]);
+
+	conn.write("HELLO")!;
+	n = client.read(&buf)!;
+	io::printfn("client got: %s", (String)buf[:n]);
+}
+
+fn void main()
+{
+	if (catch err = run()) io::printfn("failed: %s", err);
+}recipes/tcp_echo.c3recipeRecipe: a unit test (@test function with assert; run with c3_test / `c3c test`, not part of the program)// Also: testing, unit test, assert, @test, test function, expect
 import std::io;
 
 fn int add(int a, int b) => a + b;
