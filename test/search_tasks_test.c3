@@ -1,5 +1,5 @@
 module c3guide::test::search_tasks;
-import c3guide::tools, c3guide::test::support;
+import c3guide::tools, c3guide::context, c3guide::test::support;
 import std::io;
 
 // c3_search for a task in words, not a name. Written before the ranking was touched, from queries that were not used
@@ -69,6 +69,7 @@ fn bool found(String reply, String want)
 
 fn void tasks_find_their_answer() @test
 {
+	context::clear();
 	int hits = 0;
 	foreach (c : TASKS)
 	{
@@ -81,6 +82,7 @@ fn void tasks_find_their_answer() @test
 
 fn void manual_questions_stay_in_the_manual() @test
 {
+	context::clear();
 	int hits = 0;
 	foreach (c : MANUAL)
 	{

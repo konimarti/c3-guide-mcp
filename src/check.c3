@@ -1,6 +1,6 @@
 module c3guide::check;
 import mcp, libc, std::os::posix, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
-import c3guide::util, c3guide::hints, c3guide::corpus, std::time;
+import c3guide::util, c3guide::hints, c3guide::corpus, c3guide::context, std::time;
 
 // Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
 // fresh temp dir and compiled with a FIXED command line:
@@ -568,7 +568,12 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	String bad = exclusive_args(code, path);
 	if (bad.len > 0) return bad;
 	if (!valid_target(target)) return BAD_TARGET_NAME;
-	if (path.len > 0) return check_path(path, target);
+	if (path.len > 0)
+	{
+		if (path.ends_with(".c3")) context::note_file(path);
+		return check_path(path, target);
+	}
+	context::note_source(code);
 	// No @pool here: the result lives in the caller's temp memory (a nested pool would free it on return).
 	Path? dir = scratch_dir();
 	if (catch dir) return "cannot create a temp directory";

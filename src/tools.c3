@@ -1,6 +1,6 @@
 module c3guide::tools;
 import mcp, std::core::string;
-import c3guide::corpus, c3guide::search, c3guide::util, c3guide::hints, c3guide::check, c3guide::live;
+import c3guide::corpus, c3guide::context, c3guide::search, c3guide::util, c3guide::hints, c3guide::check, c3guide::live;
 import std::sort, std::math;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
@@ -84,11 +84,13 @@ fn String strip_prefix(String s, String prefix) => s.starts_with(prefix) ? s[pre
 fn int clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
 
 fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach with index', 'defer catch'"),
-	int limit @Desc("number of results (1..5)") = 3)
+	int limit @Desc("number of results (1..5)") = 3,
+	String file @Desc("the C3 file you are editing, if any: the standard library modules it imports narrow the library names") = "")
 	@Desc("Start here for any 'how do I' question about C3: searches the language manual (the snapshot embedded in this server, see c3_symbol for its version), the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...) and the standard library names that fit the words ('tcp server' gives std::net::tcp). Use c3_symbol when you already know the name.")
 	@ReadOnly
 {
 	int n = clamp(limit, 1, 5);
+	if (file.len > 0) context::note_file(file);
 	Hit[] hits = search::search(query, { "recipe", "doc" }, n);
 	// pasted code (`main(String[] args)`, `path::ls`, `List{`) has no words until the punctuation is gone
 	if (hits.len == 0) hits = search::search(search::code_words(query), { "recipe", "doc" }, n);
@@ -100,10 +102,16 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 	String[] terms = search::query_terms(search::words_only(query));
 	int manual = hits.len > 0 ? words_in(&corpus::entries[hits[0].idx], terms) : 0;
 	int library = 0;
-	foreach (h : syms) library = math::max(library, words_in(&corpus::entries[h.idx], terms));
+	int library_context = 0;   // a name from a module the session works with counts as one more word
+	foreach (h : syms)
+	{
+		int words = words_in(&corpus::entries[h.idx], terms);
+		library = math::max(library, words);
+		library_context = math::max(library_context, words + (context::boost(corpus::entries[h.idx].title) > 1.0f ? 1 : 0));
+	}
 	if (hits.len == 0 && syms.len == 0) return "no match in the manual; try other words or c3_symbol for a stdlib name";
-	bool show_library = syms.len > 0 && (hits.len == 0 || (library >= 2 && (library >= manual || manual * 2 < (int)terms.len)));
-	bool library_first = show_library && library > manual;
+	bool show_library = syms.len > 0 && (hits.len == 0 || (library >= 2 && (library_context >= manual || manual * 2 < (int)terms.len)));
+	bool library_first = show_library && library_context > manual;
 	DString out = dstring::temp();
 	if (library_first)
 	{
@@ -390,6 +398,7 @@ fn String symbol_reply(String name)
 	{
 		if (!is_symbol(e.kind) || !uid_matches(e.title, n)) continue;
 		if (found++ < 6) out.append(hit_text(e, MAX_SNIPPET));
+		if (found == 1) context::note_symbol(e.title);
 	}
 	if (found > 0)
 	{

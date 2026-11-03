@@ -1,5 +1,5 @@
 module c3guide::test::paraphrase;
-import c3guide::tools, c3guide::test::support;
+import c3guide::tools, c3guide::context, c3guide::test::support;
 import std::io;
 
 // How people ask for a function when they do not know its name. Written before the synonym table existed and
@@ -51,6 +51,7 @@ fn bool found(String reply, String want)
 
 fn void paraphrases_find_their_function() @test
 {
+	context::clear();
 	int hits = 0;
 	foreach (c : CASES)
 	{

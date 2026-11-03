@@ -1,5 +1,5 @@
 module c3guide::search;
-import c3guide::corpus, c3guide::util;
+import c3guide::corpus, c3guide::util, c3guide::context;
 import std::core::ascii;
 import std::collections::list;
 import std::sort, std::math;
@@ -227,6 +227,7 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 			float weight = k < typed ? 1.0f : SYNONYM_WEIGHT;
 				s += weight * idf * (norm + 3.0f * short_bonus[i] * (tt > 0 ? 1.0f : 0.0f));
 		}
+		if (symbols) s *= context::boost(e.title);   // a name from a module the session works with
 		if (e.kind == "recipe") s *= RECIPE_BOOST;   // a program that was compiled and run beats prose that says the same
 		if (s > 0) hits.push({ s, (int)i });
 	}

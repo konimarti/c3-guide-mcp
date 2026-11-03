@@ -1,5 +1,5 @@
 module c3guide::test::quality;
-import c3guide::tools, c3guide::test::support;
+import c3guide::tools, c3guide::context, c3guide::test::support;
 import std::io;
 
 // Search quality: each question must have the expected text in the reply (top 3 hits for c3_search).
@@ -85,6 +85,7 @@ fn String ask(Case c)
 
 fn void every_question_finds_its_answer() @test
 {
+	context::clear();
 	int misses = 0;
 	foreach (c : CASES)
 	{

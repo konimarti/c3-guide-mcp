@@ -1,6 +1,6 @@
 module c3guide::outline;
 import mcp, std::core::string, std::io, std::io::file, std::io::path, std::collections::list, std::sort, std::compression::zip;
-import c3guide::ts, c3guide::util;
+import c3guide::ts, c3guide::util, c3guide::context;
 
 const sz MAX_OUTLINE = 6 * 1024;
 const sz MAX_SOURCE = 1024 * 1024;   // a bigger .c3 file is generated or hostile: parsing it costs memory in proportion
@@ -167,6 +167,7 @@ fn String c3_outline(String path @Desc("a project directory (its src/ is read, o
 	if (!path::is_dir(abs))
 	{
 		if (!(is_c3_file(root) || is_archive(root)) || !file::exists(root)) return "path must be a project directory, a .c3 file or a .c3l library";
+		if (is_c3_file(root)) context::note_file(root);
 		String one = is_archive(root) ? archive_outline(root, root, match) : c3_outline_file(root, root, match);
 		return one.len > 0 ? util::clip(one, MAX_OUTLINE) : "no declarations found";
 	}
