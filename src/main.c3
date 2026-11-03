@@ -20,7 +20,7 @@ fn void main()
 {
 	corpus::load();
 	live::enabled = true;   // the standard library as the installed c3c has it, read on the first symbol lookup
-	mcp::Server server = mcp::new_server("c3-guide-mcp", "0.5.3");
+	mcp::Server server = mcp::new_server("c3-guide-mcp", "0.5.4");
 	server.instructions = check::run_allowed() ? string::format(mem, "%s%s", INSTRUCTIONS, RUN_INSTRUCTIONS) : INSTRUCTIONS;
 	defer server.free();
 	tools::register(&server);
