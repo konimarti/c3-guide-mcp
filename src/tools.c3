@@ -1,7 +1,7 @@
 module c3guide::tools;
 import mcp, std::core::string;
 import c3guide::corpus, c3guide::search, c3guide::util, c3guide::hints, c3guide::check, c3guide::live;
-import std::sort;
+import std::sort, std::math;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
 const sz MAX_REPLY = 3200;
@@ -85,25 +85,47 @@ fn int clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
 
 fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach with index', 'defer catch'"),
 	int limit @Desc("number of results (1..5)") = 3)
-	@Desc("Search the C3 language manual (the snapshot embedded in this server, see c3_symbol for its version) and the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...). Use this before writing C3 you are not sure about.")
+	@Desc("Start here for any 'how do I' question about C3: searches the language manual (the snapshot embedded in this server, see c3_symbol for its version), the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...) and the standard library names that fit the words ('tcp server' gives std::net::tcp). Use c3_symbol when you already know the name.")
 	@ReadOnly
 {
 	int n = clamp(limit, 1, 5);
 	Hit[] hits = search::search(query, { "recipe", "doc" }, n);
 	// pasted code (`main(String[] args)`, `path::ls`, `List{`) has no words until the punctuation is gone
 	if (hits.len == 0) hits = search::search(search::code_words(query), { "recipe", "doc" }, n);
-	if (hits.len > 0) return format_hits(hits, MAX_SNIPPET);
-	// `sort::quicksort`, `read_line`: a name, not a topic; the manual has no section, the standard library has
+	// The library is searched on every question: a task ("tcp server") is often one word in the manual ("accept" in
+	// attributes) and a whole module in the library. A name that holds two of the question's words is shown when it has
+	// more of them than the manual's best section, or the section has under half; the one with more goes first.
 	live::ensure();
-	Hit[] syms = search::search(query, { "fn", "macro", "method", "mmethod", "type", "var" }, 3, true);
-	if (syms.len > 0)
+	Hit[] syms = search::search(query, SYMBOL_KINDS[..], 3, true);
+	String[] terms = search::query_terms(search::words_only(query));
+	int manual = hits.len > 0 ? words_in(&corpus::entries[hits[0].idx], terms) : 0;
+	int library = 0;
+	foreach (h : syms) library = math::max(library, words_in(&corpus::entries[h.idx], terms));
+	if (hits.len == 0 && syms.len == 0) return "no match in the manual; try other words or c3_symbol for a stdlib name";
+	bool show_library = syms.len > 0 && (hits.len == 0 || (library >= 2 && (library > manual || manual * 2 < (int)terms.len)));
+	bool library_first = show_library && library >= manual;
+	DString out = dstring::temp();
+	if (library_first)
 	{
-		DString out = dstring::temp();
-		out.append("not in the manual; closest standard library names:\n");
+		out.append(hits.len == 0 ? "not in the manual; closest standard library names:\n" : "Standard library (c3_symbol has the full signature):\n");
 		foreach (h : syms) out.append(brief(&corpus::entries[h.idx]));
-		return util::clip(out.str_view(), MAX_REPLY);
 	}
-	return "no match in the manual; try other words or c3_symbol for a stdlib name";
+	// a manual section with under half of the words only got in through one of them: after a library name it is noise
+	// (a recipe is a program that ran: it stays)
+	bool noise = library_first && hits.len > 0 && manual * 2 < (int)terms.len && corpus::entries[hits[0].idx].kind != "recipe";
+	if (hits.len > 0 && !noise)
+	{
+		bool weak = terms.len >= 3 && manual * 2 < (int)terms.len && !show_library;
+		if (library_first) out.append("\nManual:\n");
+		if (weak) out.appendf("Weak match: the best manual section has %d of your %d words.\n", manual, (int)terms.len);
+		out.append(format_hits(hits, MAX_SNIPPET));
+	}
+	if (show_library && !library_first)
+	{
+		out.append("\nStandard library (c3_symbol has the full signature):\n");
+		foreach (h : syms) out.append(brief(&corpus::entries[h.idx]));
+	}
+	return util::clip(out.str_view(), MAX_REPLY);
 }
 
 fn String c3_changes(String topic @Desc("keyword, e.g. 'foreach', 'faultdef', 'type properties'"),
