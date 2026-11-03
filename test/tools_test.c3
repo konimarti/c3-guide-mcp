@@ -23,7 +23,7 @@ fn void examples_find_temp_variants_and_skip_prose() @test
 	String j = tools::c3_examples("json");
 	assert(j.contains("json::parse"), "the JSON recipe: %s", j);
 	String none = tools::c3_examples("ZipEntry");
-	assert(none.starts_with("no recipe or manual example uses"), "prose and file names are not examples: %s", none);
+	assert(none.contains("no recipe or manual example uses it"), "prose and file names are not examples: %s", none);
 	String l = tools::c3_examples("file::load");
 	assert(l.contains("load_temp") || l.starts_with("no recipe"), "%s", l);
 }
@@ -148,7 +148,7 @@ fn void examples_show_working_code() @test
 	String t = tools::c3_examples("HashMap");
 	assert(t.contains("HashMap{String, int}") && t.len <= 3200 + 64, "%s", t);
 	assert(tools::c3_examples("String.split").contains("split"), "qualified name uses its last segment");
-	assert(tools::c3_examples("qzxvwqjk").contains("no recipe or manual example"));
+	assert(tools::c3_examples("qzxvwqjk").contains("is not a standard library name"));
 	assert(!tools::c3_examples("readline").contains("readline_all"), "whole identifiers only");
 }
 
@@ -271,4 +271,12 @@ fn void an_inline_type_lists_the_methods_of_its_base() @test
 	assert(reply.contains("distinct type TcpSocket = inline std::net::Socket"), "%s", reply);
 	assert(reply.contains("Inherited from std::net::Socket") && reply.contains("close"), "%s", reply);
 	assert(tools::c3_symbol("std::net::Socket").contains("struct Socket (InStream, OutStream)"), "the interfaces are part of the signature");
+}
+
+fn void no_example_says_whether_the_name_is_real() @test
+{
+	String real = tools::c3_examples("tcp::listen", 3);
+	assert(real.contains("is in the standard library") && real.contains("no recipe"), "%s", real);
+	String fake = tools::c3_examples("nosuchfunction", 3);
+	assert(fake.contains("is not a standard library name"), "%s", fake);
 }

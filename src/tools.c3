@@ -504,7 +504,19 @@ fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'Hash
 			}
 		}
 	}
-	if (shown == 0) return string::tformat("no recipe or manual example uses '%s'. c3_symbol '%s' gives the signature.", util::clip(word, 80), util::clip(n, 80));
+	if (shown == 0)
+	{
+		// "no example" means two different things: the name is real and nothing shows it, or there is no such name
+		live::ensure();
+		foreach (&e : corpus::entries)
+		{
+			if (!is_symbol(e.kind) || !uid_matches(e.title, n)) continue;
+			bool documented = e.body.contains("\n");
+			return string::tformat("'%s' is in the standard library (%s, %s) but no recipe or manual example uses it. c3_symbol '%s' gives the signature%s.",
+				e.title, e.loc, documented ? "documented" : "no doc comment", util::clip(n, 80), e.loc.len > 0 ? string::tformat("; the source at that path is the reference") : "");
+		}
+		return string::tformat("'%s' is not a standard library name, so there is no example. c3_symbol '%s' lists similar names.", util::clip(n, 80), util::clip(n, 80));
+	}
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
