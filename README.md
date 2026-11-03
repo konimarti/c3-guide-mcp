@@ -47,7 +47,7 @@ Similar names:
 
 Do not know the name? Describe it: `c3_symbol("get environment variable")`. A description that matches little says so, instead of returning the nearest unrelated names. Give a type or module (`List`, `std::io::path`) and it lists its methods or functions.
 
-Also: `c3_examples` (working code for a function), `c3_search` (the manual and tested example programs), `c3_changes` (what changed between releases).
+Also: `c3_examples` (working code for a function), `c3_search` (the manual, tested example programs and the standard library, by what you want to do), `c3_changes` (what changed between releases).
 
 ### 3. A whole project in one call
 
@@ -127,7 +127,7 @@ A run is stopped after the time limit you set (up to 120 s). This is not a sandb
 
 - Signatures come from your `c3c`. If anything still disagrees with the compiler, trust the compiler.
 - The tools are for checking, testing and running code. Anything that needs a shell (creating a project, `c3c build` for the binary, running the built app with its own input or working directory) is done with `c3c` directly, and the hook allows it.
-- Search matches words, not meaning. For a standard library function, ask by name.
+- Search matches words, not meaning. `c3_search` also looks in the standard library, so "tcp server socket listen accept" finds `std::net::tcp`; for one function, ask `c3_symbol` by name.
 - Tested by hand on Linux x64. CI builds and smoke-tests Linux, macOS and Windows.
 
 ## Build from source
