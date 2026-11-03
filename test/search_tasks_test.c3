@@ -93,3 +93,12 @@ fn void manual_questions_stay_in_the_manual() @test
 	io::printfn("manual questions found: %d of %d", hits, MANUAL.len);
 	assert(hits >= MANUAL.len - 1, "a manual question lost its answer or got library names");
 }
+
+// The reported query: the recipe and the library answer it, and "accept" in the attributes is not shown after them.
+fn void a_good_answer_is_not_followed_by_manual_noise() @test
+{
+	context::clear();
+	String reply = tools::c3_search("tcp server socket listen accept", 3);
+	assert(support::contains_ci(reply, "Recipe: tcp server"), "%s", reply);
+	assert(!support::contains_ci(reply, "Attribute syntax") && !support::contains_ci(reply, "$defined"), "%s", reply);
+}

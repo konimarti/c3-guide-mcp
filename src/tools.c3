@@ -1,7 +1,7 @@
 module c3guide::tools;
 import mcp, std::core::string;
 import c3guide::corpus, c3guide::context, c3guide::search, c3guide::util, c3guide::hints, c3guide::check, c3guide::live;
-import std::sort, std::math;
+import std::sort, std::math, std::collections::list;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
 const sz MAX_REPLY = 3200;
@@ -118,15 +118,23 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 		out.append(hits.len == 0 ? "not in the manual; closest standard library names:\n" : "Standard library (c3_symbol has the full signature):\n");
 		foreach (h : syms) out.append(brief(&corpus::entries[h.idx]));
 	}
-	// a manual section with under half of the words only got in through one of them: after a library name it is noise
-	// (a recipe is a program that ran: it stays)
-	bool noise = library_first && hits.len > 0 && manual * 2 < (int)terms.len && corpus::entries[hits[0].idx].kind != "recipe";
-	if (hits.len > 0 && !noise)
+	// A manual section with under half of the words only got in through one of them ("accept" in the attributes):
+	// next to a better answer it is noise. A recipe is a program that ran: it stays.
+	List{Hit} fitting;
+	fitting.init(tmem);
+	foreach (h : hits)
 	{
-		bool weak = terms.len >= 3 && manual * 2 < (int)terms.len && !show_library;
+		bool few = terms.len >= 3 && corpus::entries[h.idx].kind != "recipe" && words_in(&corpus::entries[h.idx], terms) * 2 < (int)terms.len;
+		if (!few) fitting.push(h);
+	}
+	// when none fits, the manual has nothing on it: say so, unless the library has the answer
+	Hit[] manual_hits = fitting.len() > 0 ? fitting.array_view() : (show_library ? (Hit[]){} : hits);
+	if (manual_hits.len > 0)
+	{
+		bool weak = fitting.len() == 0;
 		if (library_first) out.append("\nManual:\n");
 		if (weak) out.appendf("Weak match: the best manual section has %d of your %d words.\n", manual, (int)terms.len);
-		out.append(format_hits(hits, MAX_SNIPPET));
+		out.append(format_hits(manual_hits, MAX_SNIPPET));
 	}
 	if (show_library && !library_first)
 	{

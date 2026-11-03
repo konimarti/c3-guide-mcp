@@ -1,5 +1,5 @@
 module c3guide::test::context_test;
-import c3guide::context, c3guide::tools, c3guide::test::support;
+import c3guide::context, c3guide::outline, c3guide::tools, c3guide::test::support;
 import std::io, std::io::file, std::io::path;
 
 fn void imports_become_context_and_only_the_standard_library() @test
@@ -49,4 +49,23 @@ fn void a_checked_file_and_a_looked_up_name_are_context() @test
 	tools::c3_symbol("String.split");
 	assert(context::count == 1 && context::name_at(0) == "std::core::string", "a name looked up");
 	context::clear();
+}
+
+fn void a_project_gives_the_imports_of_its_sources() @test
+{
+	Path dir = support::make_temp_dir("c3proj");
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(dir.tappend("src")!!)!!;
+	file::save(string::tformat("%s/project.json", root), "{}")!!;
+	file::save(string::tformat("%s/src/a.c3", root), "import std::net;\nfn void main() {}\n")!!;
+	file::save(string::tformat("%s/src/b.c3", root), "import std::io::path;\n")!!;
+	context::clear();
+	outline::note_project(root);
+	assert(context::count == 2, "%d", context::count);
+	// a directory that is not a project (a library folder such as deps) says nothing about the session
+	context::clear();
+	String lib = string::tformat("%s/src", root);
+	outline::note_project(lib);
+	assert(context::count == 0, "%d", context::count);
 }

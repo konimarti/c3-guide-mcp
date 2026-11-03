@@ -5,6 +5,7 @@ import c3guide::ts, c3guide::util, c3guide::context;
 const sz MAX_OUTLINE = 6 * 1024;
 const sz MAX_SOURCE = 1024 * 1024;   // a bigger .c3 file is generated or hostile: parsing it costs memory in proportion
 const sz MAX_FILES = 400;
+const sz MAX_CONTEXT_FILES = 60;   // a project's imports are in its first files; reading all of a big one is not worth it
 const long MAX_ARCHIVE = 32 * 1024 * 1024;
 const long MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;   // all the sources of one archive once inflated: a small .c3l can hold far more
 
@@ -171,6 +172,7 @@ fn String c3_outline(String path @Desc("a project directory (its src/ is read, o
 		String one = is_archive(root) ? archive_outline(root, root, match) : c3_outline_file(root, root, match);
 		return one.len > 0 ? util::clip(one, MAX_OUTLINE) : "no declarations found";
 	}
+	note_project(root);
 	Path base = abs;
 	if (try src = abs.tappend("src")) { if (path::is_dir(src)) base = src; }
 	List{String} files;
@@ -193,6 +195,21 @@ fn String c3_outline(String path @Desc("a project directory (its src/ is read, o
 	if (unread > 0) acc.appendf("[%d more files not shown; give a subdirectory or a file to see them]\n", unread);
 	if (files.len() >= MAX_FILES) acc.appendf("[stopped at %d files]\n", (int)MAX_FILES);
 	return acc.len() == 0 ? "no declarations found" : string::tformat("%s", acc.str_view());
+}
+
+// The standard library modules a project's own sources import, as context for the searches (a directory with a
+// project.json only: a `deps` or library directory is not what the session works on).
+fn void note_project(String root) => @pool()
+{
+	if (!file::exists(string::tformat("%s/project.json", root))) return;
+	Path? p = path::new(tmem, root);
+	if (catch p) return;
+	Path base = p;
+	if (try src = p.tappend("src")) { if (path::is_dir(src)) base = src; }
+	List{String} files;
+	files.init(tmem);
+	collect(base, &files, 0);
+	foreach (i, f : files) { if (i >= MAX_CONTEXT_FILES) break; context::note_file(f); }
 }
 
 // The outline of one file or archive appended to `out` (a heap string), false when it does not fit any more.
