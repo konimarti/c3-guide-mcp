@@ -322,11 +322,12 @@ fn String rename_notes(String word)
 	return string::tformat("Release notes:\n%s%s", best, second);
 }
 
-fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 'String.split', 'talloc_array') or, when you do not know the name, what it does ('read a line from a file', 'trim whitespace')"))
+fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 'String.split', 'talloc_array') or, when you do not know the name, what it does ('read a line from a file', 'trim whitespace')") = "",
+	String symbol @Desc("same as name (c3_examples calls it symbol)") = "")
 	@Desc("Exact signature, docs and source location of a C3 standard library function, macro, method or type; or, given a description, the functions that do it. A type name or a module (`List`, `std::io::path`) lists its methods or functions. Standard library only: for project or dependency code use c3_outline. Never guess a signature, look it up.")
 	@ReadOnly
 {
-	String reply = symbol_reply(name);
+	String reply = symbol_reply(name.len > 0 ? name : symbol);
 	return string::tformat("%s%s", reply, check::version_note(reply.contains("does not exist")));
 }
 
@@ -488,12 +489,13 @@ fn bool looks_like_use(String line, String word)
 	return line.contains(string::tformat("%s(", word)) || line.contains(string::tformat("::%s", word));
 }
 
-fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'HashMap', 'String.split', 'sort::quicksort'"),
-	int limit @Desc("number of examples (1..5)") = 3)
+fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'HashMap', 'String.split', 'sort::quicksort'") = "",
+	int limit @Desc("number of examples (1..5)") = 3,
+	String name @Desc("same as symbol (c3_symbol calls it name)") = "")
 	@Desc("Working code that uses a standard library function or type: the verified recipes and the manual's examples, with the lines around each use. Use it after c3_symbol when the signature is not enough to see how it is called.")
 	@ReadOnly
 {
-	String n = symbol.trim(" \t\n");
+	String n = (symbol.len > 0 ? symbol : name).trim(" \t\n");
 	if (n.len == 0) return "give a stdlib name, e.g. HashMap or readline";
 	String word = last_segment(n);
 	if (word.len < 2) return "give a stdlib name with at least two letters, e.g. HashMap or readline";

@@ -280,3 +280,10 @@ fn void no_example_says_whether_the_name_is_real() @test
 	String fake = tools::c3_examples("nosuchfunction", 3);
 	assert(fake.contains("is not a standard library name"), "%s", fake);
 }
+
+fn void symbol_and_name_are_the_same_argument() @test
+{
+	assert(tools::c3_symbol("", "String.split").contains("String.split"), "c3_symbol accepts symbol");
+	assert(tools::c3_examples("", 3, "HashMap").contains("HashMap"), "c3_examples accepts name");
+	assert(tools::c3_examples("HashMap", 3).contains("HashMap"));
+}

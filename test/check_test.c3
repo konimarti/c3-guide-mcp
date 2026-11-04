@@ -244,7 +244,7 @@ fn void project_error_has_relative_path() @test
 
 fn void single_file_path_is_checked() @test
 {
-	Path dir = make_project("module app;\nfn int f() { return 1; }\n");
+	Path dir = make_project("module app;\nfn int f() { return 1; }\nfn void main() {}\n");   // a file of a project is checked with the project: it needs its main
 	defer (void)path::rmtree(dir);
 	String t = check::c3_check(path: string::tformat("%s/src/main.c3", (String)dir));
 	assert(has(t, "OK"), "%s", t);
@@ -518,7 +518,7 @@ fn void main()
 	assert(count_procs(SCRATCH_PROC) <= before, "the program kept running after the cap");
 }
 
-fn void a_file_of_a_project_points_to_the_project() @test
+fn void a_file_of_a_project_is_checked_with_its_project() @test
 {
 	Path dir = check::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
@@ -526,9 +526,14 @@ fn void a_file_of_a_project_points_to_the_project() @test
 	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
 	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
 	String f = string::tformat("%s/src/a.c3", root);
-	file::save(f, "module a;\nimport encoding::pem;\nfn void main() {}\n")!!;
+	file::save(f, "module a;\nimport b;\nfn void main() { b::hello(); }\n")!!;
+	file::save(string::tformat("%s/src/b.c3", root), "module b;\nfn void hello() {}\n")!!;
+	// alone, a.c3 does not know module b; with its project it compiles
 	String r = check::c3_check("", f);
-	assert(r.contains("compiled alone") && r.contains(root), "%s", r);
+	assert(r.contains("belongs to the project in") && r.contains("OK"), "%s", r);
+	// a file outside any project is still compiled by itself
+	String lone = string::tformat("%s/lone.c3", root[:root.rindex_of("/") ?? 0]);
+	assert(check::project_dir("/tmp/none/x.c3").len == 0 && lone.len > 0);
 }
 
 fn void a_test_filter_cannot_be_an_option() @test
@@ -563,4 +568,48 @@ fn void an_optional_struct_field_is_explained() @test
 	String d = hints::diagnostics(err("struct Conf { String[]? deps; }", "A valid member name was expected here."));
 	assert(has(d, "cannot be optional"), "%s", d);
 	assert(!has(hints::diagnostics(err("struct Conf { int x; } y", "A valid member name was expected here.")), "cannot be optional"), "only where a `?` is in the code");
+}
+
+const String WIN_ONLY_ERROR = "fn void main() { $if env::WIN32: int x = \"not an int\"; $endif }";
+
+fn void a_snippet_can_be_checked_for_another_platform() @test
+{
+	assert(check::c3_check(WIN_ONLY_ERROR).starts_with("OK"), "fine here, the branch is for Windows");
+	String r = check::c3_check(WIN_ONLY_ERROR, "", "", "windows-x64");
+	assert(r.contains("error"), "%s", r);
+	assert(check::c3_check("fn void main() {}", "", "", "--trust=full").contains("not an option"), "a platform is a name, never a flag");
+}
+
+fn void a_project_can_be_checked_for_another_platform() @test
+{
+	Path dir = check::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
+	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/src/a.c3", root), WIN_ONLY_ERROR)!!;
+	assert(check::c3_check("", root).contains("OK"), "the project builds for this platform");
+	assert(check::c3_check("", root, "", "windows-x64").contains("error"), "and not for Windows");
+}
+
+fn void manifest_warnings_of_a_library_are_left_out() @test
+{
+	int n = 0;
+	String raw = "WARNING: Unknown parameter 'version' in 'library'\nWARNING: Unknown parameter 'authors' in 'library'\nYou can use '--list-manifest-properties' to list all valid properties.\nsrc/a.c3:1:1: error: boom\n";
+	String kept = check::without_manifest_warnings(raw, &n);
+	assert(n == 2 && !kept.contains("WARNING") && !kept.contains("list-manifest") && kept.contains("error: boom"), "%d: %s", n, kept);
+	String warning_only = check::report(raw[:raw.index_of("src")!!], 0, false, "/nowhere", "<x>", "OK: no errors", 1000);
+	assert(warning_only == "OK: no errors", "%s", warning_only);
+}
+
+fn void the_rules_that_fail_late_get_a_hint() @test
+{
+	String a = check::c3_check("fn int? f() => 1;\nfn void main() { for (int i = 0; i < 3; i++) { int x = f() ?? continue; } }");
+	assert(a.contains("Hints:") && a.contains("not `continue`"), "%s", a);
+	String b = check::c3_check("fn int? f() => 1;\nfn void main() { if (catch e = f() || true) {} }");
+	assert(b.contains("cannot be combined with `||`"), "%s", b);
+	String c = check::c3_check("module m;\nstruct Cat { int lives; }\nfn int Cat.secret(&self) @private => self.lives;\nfn void main() {}");
+	assert(c.contains("has no effect on a method"), "a warning gets its hint: %s", c);
+	String plain = check::c3_check("fn void main() { int x = ; }");
+	assert(!plain.contains("cannot be combined") && !plain.contains("has no effect on a method"), "%s", plain);
 }

@@ -21,6 +21,9 @@ struct StaticHint
 const StaticHint[*] STATIC_HINTS = {
 	{ "cannot be used with arch/os", "", "A library lists the platforms it supports in a `targets` map of its manifest.json: add this platform, e.g. `\"targets\": { \"linux-x64\": {} }`. c3c 0.8.5 requires the map; 0.8.6 does not, so the same library can pass with one compiler and fail with the other." },
 	{ "A valid member name was expected here", "?", "A struct field cannot be optional (`T? name;`). Optionals are for return values and local variables: keep the value and a `bool` for \"is set\" in the struct, or return `T?` from a function." },
+	{ "is a keyword and not an expression", "??", "`??` needs a value on its right, not `continue`, `return` or `break`. Give a default, `int x = f() ?? 0;`, or leave before using it: `int? v = f(); if (catch v) continue;` (after that `v` is a plain int), or `if (catch err = f()) { return; }`." },
+	{ "Expected ')'", "catch AND ||", "A `catch` cannot be combined with `||` or `&&` in one condition: `if (catch err = f()) { ... }` stands alone. Handle the error in its own `if`, then test the other condition." },
+	{ "'@private' modifiers are ignored for method declarations", "", "`@private` has no effect on a method: it is visible wherever its type is. For module-private code use a free function, `fn int helper(Cat* c) @private`." },
 	{ "must use '{ }'", "", "C3 0.8: an `if` with an `else` needs braces on both branches: `if (c) { a(); } else { b(); }`." },
 	{ "This doesn't seem to be a valid literal", "", "C3 0.8 removed the `i64`/`u8` style literal suffixes: use `5L`, `5UL` or a cast, `(long)5`." },
 	{ "Expected a type here", "isz", "`isz` is `sz` since 0.8 (`usz` is unchanged). `c3_fix` applies this." },
@@ -56,14 +59,23 @@ fn bool is_name(String s)
 	return true;
 }
 
-fn String hint_for(String msg, String output)
+fn String static_hint(String msg, String output)
 {
 	foreach (h : STATIC_HINTS)
 	{
 		if (!msg.contains(h.needle)) continue;
-		if (h.require.len > 0 && !output.contains(h.require)) continue;
+		bool all = true;
+		if (h.require.len > 0) foreach (part : h.require.tsplit(" AND ")) if (!output.contains(part)) all = false;   // every part must be there
+		if (!all) continue;
 		return string::tformat("  %s\n", h.hint);
 	}
+	return "";
+}
+
+fn String hint_for(String msg, String output)
+{
+	String fixed = static_hint(msg, output);
+	if (fixed.len > 0) return fixed;
 	String name = quoted(msg);
 	String old = tools::legacy_note(name);   // `$sizeof`, `$vacount`...: the one table of names that were replaced
 	if (old.len > 0) return string::tformat("  %s", old);
@@ -156,13 +168,19 @@ fn String diagnostics(String compiler_output)
 	foreach (line : compiler_output.tsplit("\n"))
 	{
 		sz at = line.index_of(": error: ") ?? line.len;
+		bool warning = false;
+		if (at >= line.len)
+		{
+			at = line.index_of(": warning: ") ?? line.len;   // a warning gets a hint only when the table has one for it
+			warning = true;
+		}
 		if (at >= line.len || n >= MAX_ERRORS_HINTED) continue;
-		String msg = line[at + 9..];
+		String msg = line[at + (warning ? 11 : 9)..];
 		bool dup = false;
 		for (int i = 0; i < n; i++) if (seen[i] == msg) dup = true;
 		if (dup) continue;
 		seen[n++] = msg;
-		String h = hint_for(msg, compiler_output);
+		String h = warning ? static_hint(msg, compiler_output) : hint_for(msg, compiler_output);
 		if (h.len > 0) out.append(h);
 	}
 	if (out.len() == 0) return "";

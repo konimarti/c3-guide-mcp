@@ -548,9 +548,24 @@ fn String exclusive_args(String code, String target)
 
 // The compiler's text, with the scratch directory (snippet) or the project directory (project) removed
 // from the paths, an explanation when it was cut or timed out, and hints for what went wrong.
+// c3c 0.8.5 warns about every key of a library manifest it does not know (`version`, `authors`), on every build, for a
+// library the user did not write. Left out, with a count, so the output is about the code.
+fn String without_manifest_warnings(String text, int* dropped)
+{
+	DString kept = dstring::temp();
+	foreach (line : text.tsplit("\n"))
+	{
+		if (line.starts_with("WARNING: Unknown parameter '") || line.starts_with("You can use '--list-manifest-properties'")) { *dropped += line.starts_with("WARNING") ? 1 : 0; continue; }
+		kept.appendf("%s\n", line);
+	}
+	return kept.str_view();
+}
+
 fn String report(String out, int status, bool timed_out, String hide, String replacement, String ok, ulong deadline_ms)
 {
-	String shown = strip_ansi(redact(out, hide, replacement)).trim_right();
+	int dropped = 0;
+	String shown = without_manifest_warnings(strip_ansi(redact(out, hide, replacement)), &dropped).trim_right();
+	if (dropped > 0 && shown.trim().len > 0) shown = string::tformat("%s\n\n(%d warning(s) about unknown keys in a library manifest left out: not your code)", shown, dropped);
 	if (timed_out) shown = string::tformat("%s\n[timeout: longer than %d s]", shown, (int)(deadline_ms / 1000));
 	if (shown.trim().len == 0 && !timed_out)
 	{
@@ -561,18 +576,19 @@ fn String report(String out, int status, bool timed_out, String hide, String rep
 
 fn String c3_check(String code @Desc("a C3 snippet or file content; a main function is not required") = "",
 	String path @Desc("instead of code: a project directory (with project.json) or a .c3 file on disk; a project is built (not run) in a scratch directory, nothing is written to it") = "",
-	String target @Desc("with a project path: the build target, default the first") = "") 
-	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. A project (path) is built through the link; a snippet or single file is only type-checked. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
+	String target @Desc("with a project path: the build target, default the first") = "",
+	String platform @Desc("check for another platform without linking, e.g. 'windows-x64', 'macos-aarch64', 'linux-x64' (c3c --list-targets lists them)") = "") 
+	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. A project (path) is built through the link; a file that belongs to a project is checked with that project; a snippet or a file outside any project is only type-checked. `platform` checks for another OS (e.g. windows-x64) without linking. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
 	@Timeout(30000)
 {
 	String bad = exclusive_args(code, path);
 	if (bad.len > 0) return bad;
-	if (!valid_target(target)) return BAD_TARGET_NAME;
+	if (!valid_target(target) || !valid_target(platform)) return BAD_TARGET_NAME;
 	if (path.len > 0)
 	{
 		if (path.ends_with(".c3")) { context::note_file(path); }
 		else { outline::note_project(path); }
-		return check_path(path, target);
+		return check_path(path, target, platform);
 	}
 	context::note_source(code);
 	// No @pool here: the result lives in the caller's temp memory (a nested pool would free it on return).
@@ -581,13 +597,15 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	defer (void)path::rmtree(dir);
 	String file = string::tformat("%s/snippet.c3", (String)dir);
 	if (catch file::save(file, code)) return "cannot write the snippet";
-	return compile_only(file, (String)dir, "<code>");
+	return compile_only(file, (String)dir, "<code>", platform);
 }
 
 // Type-check one file: nothing is emitted or run. `hide` is cut from the paths in the output.
-fn String compile_only(String file, String hide, String replacement)
+fn String compile_only(String file, String hide, String replacement, String platform = "")
 {
-	String[] argv = { c3c_binary(), "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", file };
+	String[] plain = { c3c_binary(), "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", file };
+	String[] cross = { c3c_binary(), "--trust=none", "--no-obj", "--no-entry", "-q", "--target", platform, "compile-only", file };
+	String[] argv = platform.len > 0 ? cross : plain;
 	int status = 0;
 	bool timed_out = false;
 	String? out = run_capped(argv, &status, &timed_out);
@@ -596,7 +614,7 @@ fn String compile_only(String file, String hide, String replacement)
 	return string::tformat("%s%s", shown, after_compile(shown));
 }
 
-fn String check_path(String target_path, String target)
+fn String check_path(String target_path, String target, String platform = "")
 {
 	bool is_dir;
 	String? where = resolve_target(target_path, &is_dir);
@@ -611,22 +629,31 @@ fn String check_path(String target_path, String target)
 		Args m;
 		m.add("build");
 		if (target.len > 0) m.add(target);
+		if (platform.len > 0)
+		{
+			// another platform cannot be linked here (no SDK): lex, parse and check only
+			m.add("--target");
+			m.add(platform);
+			m.add("-C");
+		}
 		return run_c3c(m.list(), base, "", scratch, true, where, "OK: no errors", PROJECT_CHECK_MS);
 	}
-	String shown = compile_only(where, base, "");
-	return shown.contains("No module named") ? string::tformat("%s%s", shown, project_note(where)) : shown;
+	// A file checked on its own cannot see the other modules or the dependencies of its project: check the project
+	String project = project_dir(where);
+	if (project.len > 0)
+	{
+		return string::tformat("(this file belongs to the project in %s: the whole project is checked)\n%s", project, check_path(project, target));
+	}
+	return compile_only(where, base, "", platform);
 }
 
-// A file checked on its own cannot see its project's other modules. Say where the project is.
-fn String project_note(String file)
+// The directory of the project.json above a file, "" when the file belongs to no project.
+fn String project_dir(String file)
 {
 	String dir = file[:file.rindex_of("/") ?? 0];
 	for (int up = 0; up < 6 && dir.len > 1; up++)
 	{
-		if (file::exists(string::tformat("%s/project.json", dir)))
-		{
-			return string::tformat("\n\nnote: this file was compiled alone. It belongs to the project in %s: give that directory as path to compile all its modules together.\n", dir);
-		}
+		if (file::exists(string::tformat("%s/project.json", dir))) return dir;
 		dir = dir[:dir.rindex_of("/") ?? 0];
 	}
 	return "";
