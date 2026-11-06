@@ -6,81 +6,78 @@ Models learned C3 0.6 and 0.7. C3 0.8 changed the language. So they write code t
 
 c3-guide-mcp gives your assistant the real C3: your compiler, the standard library, the manual. One small binary. Any MCP client: Claude Code, Claude Desktop, Cursor, VS Code.
 
-## Three things that change the result
+## Six tools
+
+| Tool | Use it for |
+|---|---|
+| `c3_lookup` | Any name, wherever it lives: your project, its libraries, the standard library. |
+| `c3_check` | Check a snippet, a file or a whole project with the real compiler. |
+| `c3_test` | Run the `@test` functions of a project or file; only the failures come back. |
+| `c3_run` | Build and run a program, with arguments and stdin. |
+| `c3_refs` | Where a name is used, before you change or delete it. |
+| `c3_search` | How to do something: the manual, tested example programs, release notes, the compiler's exact lists. |
+
+All of them take `query`, `code` or `path`, and every argument has a default: a call with a missing argument gets a sentence that names the argument to give, not a protocol error.
 
 ### 1. Code is checked by the real compiler
 
 The assistant runs `c3_check` before it shows you code. It gets the compiler's own errors, plus a hint that names the fix.
 
 ```
-fn void main() { int n = int.sizeof; }
+fn void main() { int n = int.sizeof; isz x = 3; }
 
-error: 'int' does not have a member or method 'sizeof'.
+error: Expected a type here.
 Hints:
-  Type properties are written with `::` since 0.8 (`int::size`, `Foo::name`, `int::max`),
-  not `.sizeof`. `c3_fix` rewrites this.
+  `isz` is `sz` since 0.8 (`usz` is unchanged). `c3_check` rewrites it.
+
+0.7 syntax found: 2 mechanical rewrite(s) (.sizeof -> ::size, isz -> sz). The rewritten code:
+fn void main() { int n = int::size; sz x = 3; }
+--- c3_check of the rewritten code ---
+OK: no errors
 ```
 
 (Output shortened.)
 
-It checks a snippet, a file or a whole project. Nothing is run. Nothing is written to your tree.
+It checks a snippet, a file or a whole project, for this platform or another (`platform: "windows-x64"`, no linking). A snippet can bring helper files along (`files`). Nothing is run. Nothing is written to your tree. Old 0.7 syntax is rewritten with the official C3 tree-sitter grammar, so `int.max` (the type) is told from your variable `x.max`.
 
-Old code? `c3_fix` converts 0.7 syntax to 0.8 and compiles the result. It reads code with the official C3 tree-sitter grammar, so it tells the type `int.max` from your variable `x.max`.
+`c3_test` and `c3_run` build in a scratch directory and return only what matters: the failing assertions with file and line, or the program's output. `c3_run` takes `args` (one per line), `input` for stdin, `files` for more sources and `opt` for the optimization level.
 
-### 2. The standard library, exactly
+### 2. A name is looked up once, wherever it lives
 
-`c3_symbol` returns the exact signature and source location. No guessing.
-
-Ask for something that does not exist, and it says so. Then it says where it went:
+`c3_lookup("allocator::free")` answers for the standard library, your project and its libraries in one call. For the standard library it returns the exact signature, source location, a working example, and with `source: true` the implementation:
 
 ```
-c3_symbol("allocator::free")
+c3_lookup("bits::ctz")
 
-'allocator::free' does not exist in the standard library of c3c 0.8.5_1.
-Similar names:
-  std::core::mem::alloc::free
-  libc::free
-  ...
+'bits::ctz' does not exist in the standard library of c3c 0.8.6.
+'ctz' is a method, called on a value (`x.ctz(...)`), not a function of a module.
+It exists on 20 types: char, char[<*>], ichar, ichar[<*>], int, ...
+  macro int ctz(char self)  (lib/std/bits.c3:126:16)
 ```
 
-(Output shortened. When a release renamed the name, the release-note line is shown too.)
+A name that does not exist says so, and says where it went: another module, a method of a type, a compiler builtin, or a release-note line about the rename. Do not know the name? Describe it: `c3_lookup("get environment variable")`. A description that matches little says so, instead of returning the nearest unrelated names. A type or module (`List`, `std::io::path`) lists its methods or functions.
 
-Do not know the name? Describe it: `c3_symbol("get environment variable")`. A description that matches little says so, instead of returning the nearest unrelated names. Give a type or module (`List`, `std::io::path`) and it lists its methods or functions.
-
-Also: `c3_examples` (working code for a function), `c3_search` (the manual, tested example programs and the standard library, by what you want to do), `c3_changes` (what changed between releases).
-
-### 3. A whole project in one call
-
-`c3_outline` lists every function, type, macro and constant in a project, with file and line. The assistant sees what is there before it reads a single file. Third-party libraries are not a blind spot.
+For your own code give `path` (or just call `c3_check` on the project first and the session remembers it):
 
 ```
-c3_outline("lib/std/collections/hashmap.c3")
+c3_lookup("new_server", path="/work/app")
 
-  21   struct Entry
-  29   struct HashMap (Printable)
-  48   fn HashMap* HashMap.init(&self, Allocator allocator, sz capacity = ..., float load_factor = ...)
-  166  fn bool HashMap.is_empty(&map) @inline
-  171  fn sz HashMap.len(&map) @inline
-  176  fn Value*? HashMap.get_ref(&map, Key key)
+In /work/app (1 match):
+  deps/mcp.c3l!/src/mcp/types.c3:59  fn Server new_server(String name, String version)
 ```
 
-It reads your dependencies too. Point it at `deps` and filter with `match`:
+The project's `src`, its libraries (`dependency-search-paths`, else `deps`) and `.c3l` archives are read with the C3 grammar; nothing is compiled. The whole standard library (364 files) takes 0.3 seconds. A file the parser cannot fully read is marked incomplete. `c3_lookup(path="src")` with no query lists the declarations of a project, one line each with file and line.
 
-```
-c3_outline("deps", match="new_server")
+`c3_refs("new_server")` finds every use, read with the grammar so comments and strings are not uses, with the declaration marked. `stdlib: true` searches the installed standard library: how the library itself calls `is_dir`.
 
-mcp.c3l!/src/mcp/types.c3
-  59   fn Server new_server(String name, String version)
-```
+### 3. Up to date with the compiler you run
 
-It uses the official C3 tree-sitter grammar and compiles nothing. The whole standard library (364 files) takes 0.3 seconds. A file the parser cannot fully read is marked incomplete.
-
-Two more tools are off until you enable them (below): `c3_test` runs your `@test` functions and returns only the failures. `c3_run` builds and runs a program, at any optimization level, with a time limit.
+Library signatures, source locations and the lists of attributes, builtins, keywords and type properties are read from your own `c3c`. The manual, the example programs and the release notes are a snapshot of c3c 0.8.5; when your compiler is another release, every manual or release-note reply says so, and the compiler has the last word.
 
 ## Install
 
 1. Download the binary for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases): Linux x64, macOS arm64 or Windows x64. Unpack it. On macOS, allow it once: `xattr -d com.apple.quarantine ./c3-guide-mcp`. The Linux binary needs glibc 2.34 or newer (Ubuntu 22.04, Debian 12 and later).
-2. Install [c3c](https://github.com/c3lang/c3c/releases). Built and tested with **0.8.5**. If you run another version (a newer release or the pre-release), the server reads the standard library signatures from your own `c3c` on the first lookup (about 0.2 s, once), so `c3_symbol` matches the compiler you build with. The manual and release notes stay at 0.8.5.
+2. Install [c3c](https://github.com/c3lang/c3c/releases). Built and tested with **0.8.5**. If you run another version (a newer release or the pre-release), the server reads the standard library signatures from your own `c3c` on the first lookup (about 0.2 s, once), so `c3_lookup` matches the compiler you build with, and so do the syntax lists of `c3_search`. The manual and release notes stay at 0.8.5.
 
 The server finds `c3c` on your `PATH` and in the usual install folders. If your editor uses a short `PATH`, set `C3C=/path/to/c3c`. The search tools work without it.
 
@@ -113,21 +110,15 @@ The server already asks. Two steps make it reliable:
 - **Rules.** Paste [these lines](integrations/claude-code/CLAUDE.md) into `CLAUDE.md`, or into `AGENTS.md`, Cursor rules or `.github/copilot-instructions.md`.
 - **Hook (Claude Code).** When the assistant types `c3c test`, `c3c run`, `c3c compile-run`, `c3c compile-only` or `c3c compile-test`, the hook stops it and names the right tool. `c3c build` still works. It is a nudge, not a lock: wrappers like `time c3c test` get through. Setup steps: [integrations/claude-code](integrations/claude-code).
 
-### Switch on `c3_test` and `c3_run`
+### What `c3_test` and `c3_run` execute
 
-They run the code they build, so they are off by default. Start the server with `C3_GUIDE_ALLOW_RUN=1`:
-
-```
-claude mcp add c3-guide -e C3C=/path/to/c3c -e C3_GUIDE_ALLOW_RUN=1 -- /path/to/c3-guide-mcp
-```
-
-A run is stopped after the time limit you set (up to 120 s). This is not a sandbox: a program you run can touch anything your user can. Use it on your own code. `c3_check` never runs anything.
+They run the code they build, in a scratch directory, with a time limit you can set (up to 120 s). This is not a sandbox: a program you run can touch anything your user can. Use it on your own code. `c3_check` never runs anything.
 
 ## Good to know
 
 - Signatures come from your `c3c`. If anything still disagrees with the compiler, trust the compiler.
 - The tools are for checking, testing and running code. Anything that needs a shell (creating a project, `c3c build` for the binary, running the built app with its own input or working directory) is done with `c3c` directly, and the hook allows it.
-- Search matches words, not meaning. `c3_search` also looks in the standard library, so "tcp server socket listen accept" finds `std::net::tcp`; for one function, ask `c3_symbol` by name.
+- Search matches words, not meaning. `c3_search` also looks in the standard library, so "tcp server socket listen accept" finds `std::net::tcp`; for one function, ask `c3_lookup` by name.
 - Tested by hand on Linux x64. CI builds and smoke-tests Linux, macOS and Windows.
 
 ## Build from source

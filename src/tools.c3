@@ -1,7 +1,7 @@
 module c3guide::tools;
 import mcp, std::core::string;
-import c3guide::corpus, c3guide::context, c3guide::search, c3guide::util, c3guide::hints, c3guide::check, c3guide::live;
-import std::sort, std::math, std::collections::list;
+import c3guide::corpus, c3guide::context, c3guide::search, c3guide::util, c3guide::hints, c3guide::check, c3guide::live, c3guide::outline;
+import std::sort, std::math, std::collections::list, std::io::file, libc;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
 const sz MAX_REPLY = 3200;
@@ -63,13 +63,13 @@ fn String matching_lines(String body, String[] terms, bool all)
 // Names from C3 0.6/0.7 that a model still writes. They are not in the standard library or the keyword
 // lists of 0.8, so a plain "does not exist" would send it searching; say what replaced them.
 const String[2][*] LEGACY = {
-	{ "$sizeof", "`$sizeof(T)` is `T::size` since 0.8 (`$alignof(T)` is `T::alignment`). c3_fix rewrites it; c3_syntax type-properties lists the properties." },
-	{ "$alignof", "`$alignof(T)` is `T::alignment` since 0.8. c3_fix rewrites it." },
+	{ "$sizeof", "`$sizeof(T)` is `T::size` since 0.8 (`$alignof(T)` is `T::alignment`). c3_check rewrites it; c3_search scope=syntax type-properties lists them." },
+	{ "$alignof", "`$alignof(T)` is `T::alignment` since 0.8. c3_check rewrites it when it gets the code as `code`." },
 	{ "$typeof", "`$typeof(x)` is spelled `$Typeof(x)` where a type is expected (`$Typeof(x) y = 4;`)." },
-	{ "$vacount", "`$vacount` is `$vaarg.len` since 0.8. c3_fix rewrites it." },
-	{ "$vasplat", "`$vasplat` is `...$vaarg` since 0.8. c3_fix rewrites it." },
-	{ "isz", "`isz` is `sz` since 0.8 (`usz` is unchanged). c3_fix rewrites it." },
-	{ "fault", "`fault E { A, B }` is `faultdef A, B;` since 0.8. c3_changes faultdef has the notes." },
+	{ "$vacount", "`$vacount` is `$vaarg.len` since 0.8. c3_check rewrites it when it gets the code as `code`." },
+	{ "$vasplat", "`$vasplat` is `...$vaarg` since 0.8. c3_check rewrites it when it gets the code as `code`." },
+	{ "isz", "`isz` is `sz` since 0.8 (`usz` is unchanged). c3_check rewrites it when it gets the code as `code`." },
+	{ "fault", "`fault E { A, B }` is `faultdef A, B;` since 0.8. c3_search scope=changes faultdef has the notes." },
 	{ "def", "`def Foo = int;` is `alias Foo = int;` since 0.7." },
 };
 
@@ -83,11 +83,48 @@ fn String strip_prefix(String s, String prefix) => s.starts_with(prefix) ? s[pre
 
 fn int clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
 
-fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach with index', 'defer catch'"),
+const String SEARCH_HELP = "give query: what you want to know ('foreach with index', 'defer catch'). scope=changes searches the release notes (what was renamed or removed), scope=syntax the exact lists (attributes, builtins, keywords, type-properties, operators, precedence).";
+
+fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach with index', 'defer catch'; with scope=syntax a list name or a word to find in the lists") = "",
+	String scope @Desc("all (default): manual, recipes and standard library names. changes: the release notes, newest first (use it when old syntax or an old name fails). syntax: the compiler's exact lists of attributes, builtins, keywords, type-properties, operators, precedence") = "",
 	int limit @Desc("number of results (1..5)") = 3,
 	String file @Desc("the C3 file you are editing, if any: the standard library modules it imports narrow the library names") = "")
-	@Desc("Start here for any 'how do I' question about C3: searches the language manual (the snapshot embedded in this server, see c3_symbol for its version), the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...) and the standard library names that fit the words ('tcp server' gives std::net::tcp). Use c3_symbol when you already know the name.")
+	@Desc("Start here for any 'how do I' question about C3: searches the language manual, the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...) and the standard library names that fit the words ('tcp server' gives std::net::tcp). scope=changes finds what changed between releases, scope=syntax gives the compiler's exact lists. Use c3_lookup when you already know the name.")
 	@ReadOnly
+{
+	String q = query.trim(" \t\n");
+	String sc = scope.trim(" \t\n");
+	if (sc == "syntax") return syntax_reply(q);
+	if (q.len == 0) return SEARCH_HELP;
+	if (sc == "changes") return string::tformat("%s%s", changes_reply(q, limit), manual_note());
+	if (sc.len > 0 && sc != "all" && sc != "manual") return "scope must be all, changes or syntax";
+	String reply = search_all(q, limit, file);
+	// a question about what changed is answered by the release notes too
+	if (asks_about_change(q))
+	{
+		String notes = changes_reply(q, 2);
+		if (!notes.starts_with("nothing in the release notes")) reply = string::tformat("%s\nRelease notes:\n%s", reply, notes);
+	}
+	return string::tformat("%s%s", reply, manual_note());
+}
+
+fn bool asks_about_change(String q)
+{
+	String low = q.to_lower_tcopy();
+	String[*] marks = { "renam", "remov", "deprecat", "0.6", "0.7", "migrat", "no longer", "changed", "old syntax", "used to" };
+	foreach (m : marks) if (low.contains(m)) return true;
+	return false;
+}
+
+// The manual, the recipes and the release notes are one release's snapshot: say so when the compiler in use is another.
+fn String manual_note()
+{
+	String have = check::compiler_version();
+	if (have.len == 0 || have == corpus::snapshot_version) return "";
+	return string::tformat("\n(manual, recipes and release notes: c3c %s snapshot; your c3c is %s. Library signatures and the syntax lists come from your compiler, and c3_check has the last word.)\n", corpus::snapshot_version, have);
+}
+
+fn String search_all(String query, int limit, String file)
 {
 	int n = clamp(limit, 1, 5);
 	if (file.len > 0) context::note_file(file);
@@ -109,13 +146,13 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 		library = math::max(library, words);
 		library_context = math::max(library_context, words + (context::boost(corpus::entries[h.idx].title) > 1.0f ? 1 : 0));
 	}
-	if (hits.len == 0 && syms.len == 0) return "no match in the manual; try other words or c3_symbol for a stdlib name";
+	if (hits.len == 0 && syms.len == 0) return "no match in the manual; try other words or c3_lookup for a stdlib name";
 	bool show_library = syms.len > 0 && (hits.len == 0 || (library >= 2 && (library_context >= manual || manual * 2 < (int)terms.len)));
 	bool library_first = show_library && library_context > manual;
 	DString out = dstring::temp();
 	if (library_first)
 	{
-		out.append(hits.len == 0 ? "not in the manual; closest standard library names:\n" : "Standard library (c3_symbol has the full signature):\n");
+		out.append(hits.len == 0 ? "not in the manual; closest standard library names:\n" : "Standard library (c3_lookup has the full signature):\n");
 		foreach (h : syms) out.append(brief(&corpus::entries[h.idx]));
 	}
 	// A manual section with under half of the words only got in through one of them ("accept" in the attributes):
@@ -138,16 +175,13 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 	}
 	if (show_library && !library_first)
 	{
-		out.append("\nStandard library (c3_symbol has the full signature):\n");
+		out.append("\nStandard library (c3_lookup has the full signature):\n");
 		foreach (h : syms) out.append(brief(&corpus::entries[h.idx]));
 	}
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
-fn String c3_changes(String topic @Desc("keyword, e.g. 'foreach', 'faultdef', 'type properties'"),
-	int limit @Desc("number of release-note sections (1..5)") = 3)
-	@Desc("Search the release notes (0.3.0 to the snapshot's version) for what changed or broke, newest first. Use it when old C3 syntax from memory fails.")
-	@ReadOnly
+fn String changes_reply(String topic, int limit = 3)
 {
 	String words = search::code_words(topic);   // `int.sizeof`, `String.split`, `0.8.0`: the punctuation is not part of a word
 	String[] terms = search::query_terms(words);
@@ -183,29 +217,64 @@ fn String c3_changes(String topic @Desc("keyword, e.g. 'foreach', 'faultdef', 't
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
+const String[*] SYNTAX_LISTS = { "attributes", "builtins", "keywords", "type-properties", "operators", "precedence" };
 const String SYNTAX_TOPICS = "lists: attributes, builtins, keywords, type-properties, operators, precedence; or give a word to find in them";
+const sz MAX_LIST = 48 * 1024;
 
-fn String c3_syntax(String topic @Desc("one of: attributes, builtins, keywords, type-properties, operators, precedence; or a word to find in them") = "")
-	@Desc("Exact lists from the compiler: attributes, builtins, keywords, type properties, operators, precedence.")
-	@ReadOnly
+String[6] live_lists;
+
+// A copy that lives as long as the server (not tracked by the allocator: the lists are read once).
+fn String keep(String s)
 {
-	if (topic.trim(" \t\n").len == 0) return SYNTAX_TOPICS;
-	DString out = dstring::temp();
-	foreach (&e : corpus::entries)
+	char* p = libc::malloc(s.len + 1);
+	mem::copy(p, s.ptr, s.len);
+	return (String)p[:s.len];
+}
+bool live_lists_read;
+
+// The body of one list: from the c3c in use when it is another release than the snapshot, else the snapshot's.
+fn String syntax_list(String name)
+{
+	String have = check::compiler_version();
+	if (have.len > 0 && have != corpus::snapshot_version)
 	{
-		if (e.kind != "list") continue;
-		if (e.title == topic) return util::clip(e.body, MAX_REPLY);
-		foreach (line : e.body.tsplit("\n"))
+		if (!live_lists_read)
 		{
-			if (line.contains(topic)) out.appendf("%s: %s\n", e.title, line);
+			live_lists_read = true;
+			foreach (i, l : SYNTAX_LISTS)
+			{
+				String[] argv = { check::c3c_binary(), string::tformat("--list-%s", l) };
+				int status = 0;
+				bool timed_out = false;
+				String? out = check::run_capped(argv, &status, &timed_out, 3000, MAX_LIST);
+				if (try out) { if (status == 0 && !timed_out && out.len > 0) live_lists[i] = keep(out.trim()); }
+			}
+		}
+		foreach (i, l : SYNTAX_LISTS) if (l == name && live_lists[i].len > 0) return live_lists[i];
+	}
+	foreach (&e : corpus::entries) if (e.kind == "list" && e.title == name) return e.body;
+	return "";
+}
+
+fn String syntax_reply(String topic)
+{
+	String t = topic.trim(" \t\n");
+	if (t.len == 0) return SYNTAX_TOPICS;
+	foreach (l : SYNTAX_LISTS) if (l == t) return util::clip(syntax_list(l), MAX_REPLY);
+	DString out = dstring::temp();
+	foreach (l : SYNTAX_LISTS)
+	{
+		foreach (line : syntax_list(l).tsplit("\n"))
+		{
+			if (line.contains(t)) out.appendf("%s: %s\n", l, line);
 		}
 	}
 	if (out.len() == 0)
 	{
-		String old = legacy_note(topic.trim(" \t\n"));
+		String old = legacy_note(t);
 		if (old.len > 0) return old;
+		return "no such list or entry; lists: attributes, builtins, keywords, type-properties, operators, precedence. A standard library name (a macro like @pool) is c3_lookup.";
 	}
-	if (out.len() == 0) return "no such list or entry; lists: attributes, builtins, keywords, type-properties, operators, precedence";
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
@@ -243,7 +312,7 @@ fn String brief(Entry* e)
 }
 
 // Words instead of a name: rank symbols by their name and doc comment.
-fn String describe(String query)
+fn String describe(String query, bool strict = false)
 {
 	Hit[] hits = search::search(query, SYMBOL_KINDS[..], 5, true);
 	if (hits.len == 0) return string::tformat("no symbol matches '%s'; try other words", query);
@@ -258,6 +327,8 @@ fn String describe(String query)
 		int n = words_in(&corpus::entries[h.idx], terms);
 		if (n > best) best = n;
 	}
+	// a name that was not found (`outline_source`) is not described by a symbol that has only one of its two words
+	if (strict && terms.len == 2 && best < 2) return string::tformat("no symbol matches '%s'; try other words", query);
 	if (terms.len >= 3 && best * 2 < (int)terms.len)
 	{
 		out.appendf("Weak matches: no symbol below has more than %d of your %d words. The standard library may not have this; libc:: and os::posix:: hold the raw system calls, or declare an extern.\n", best, (int)terms.len);
@@ -322,13 +393,153 @@ fn String rename_notes(String word)
 	return string::tformat("Release notes:\n%s%s", best, second);
 }
 
-fn String c3_symbol(String name @Desc("a stdlib name ('printfn', 'io::printfn', 'String.split', 'talloc_array') or, when you do not know the name, what it does ('read a line from a file', 'trim whitespace')") = "",
-	String symbol @Desc("same as name (c3_examples calls it symbol)") = "")
-	@Desc("Exact signature, docs and source location of a C3 standard library function, macro, method or type; or, given a description, the functions that do it. A type name or a module (`List`, `std::io::path`) lists its methods or functions. Standard library only: for project or dependency code use c3_outline. Never guess a signature, look it up.")
+const String LOOKUP_HELP = "give query: a name (printfn, String.split, HashMap, std::io::path) or what you want to do ('read a line from stdin'). With path (a project directory, a .c3 file, a .c3l library, deps) the project's code and its libraries are searched too; path alone lists its declarations.";
+
+fn String c3_lookup(String query @Desc("a name ('printfn', 'io::printfn', 'String.split', 'HashMap', 'std::io::path') or, when you do not know the name, what it does ('read a line from a file', 'trim whitespace')") = "",
+	String path @Desc("where your code is: a project directory (its src and libraries are searched), a .c3 file, a .c3l library or a directory of libraries. Default: the project you last gave to c3_check, c3_test or c3_run. Without a query it lists the declarations there") = "",
+	int examples @Desc("working code that calls a library name (0..3, default 1)") = 1,
+	bool source @Desc("also show the implementation of a library function or macro") = false)
+	@Desc("Look up a name wherever it lives: your project, its libraries (deps) or the C3 standard library. A standard library name gives the exact signature, docs, source location and a working example; a description ('read a line from stdin') gives the functions that do it; a type or module (`List`, `std::io::path`) lists its methods or functions; a name that does not exist says what it became (renamed, a method, a compiler builtin). Never guess a signature, look it up.")
 	@ReadOnly
 {
-	String reply = symbol_reply(name.len > 0 ? name : symbol);
-	return string::tformat("%s%s", reply, check::version_note(reply.contains("does not exist")));
+	String q = query.trim(" \t\n");
+	if (path.len > 0) outline::note_project(path);
+	if (q.len == 0)
+	{
+		if (path.len > 0) return outline::outline_path(path);
+		return LOOKUP_HELP;
+	}
+	int pcount = 0;
+	String pscope = "";
+	String proj = outline::project_lookup(path, q, 10, &pcount, &pscope);
+	bool found_std = false;
+	int exact = 0;
+	String std = symbol_reply(q, &found_std, &exact);
+	DString out = dstring::temp();
+	if (pcount > 0)
+	{
+		out.appendf("In %s (%d match%s):\n%s", pscope, pcount, pcount == 1 ? "" : "es", proj);
+		if (found_std && exact > 2)
+		{
+			// your own declaration is the answer; the library has many names that end the same: say so in a line
+			out.appendf("\nThe standard library has %d names ending in '%s' (c3_lookup 'module::%s' for one), e.g.", exact, util::clip(q, 40), util::clip(q, 40));
+			int shown = 0;
+			foreach (&e : corpus::entries)
+			{
+				if (shown >= 3) break;
+				if (is_symbol(e.kind) && uid_matches(e.title, q)) out.appendf("%s %s", shown++ > 0 ? "," : "", e.title);
+			}
+			out.append("\n");
+		}
+		else if (found_std) { out.appendf("\nStandard library:\n%s", std); }
+	}
+	else
+	{
+		out.append(std);
+		if (!found_std)
+		{
+			if (pscope.len > 0) { out.appendf("(Also searched %s and its libraries: nothing declares '%s'.)\n", pscope, util::clip(q, 60)); }
+			else { out.append("(No project to search: give path to look in your own code and its libraries.)\n"); }
+		}
+	}
+	if (found_std && exact > 1 && source && !q.contains(" ")) out.appendf("\n(source and examples are shown for one name: %d match this, qualify it, e.g. %s)\n", exact, short_uid(first_symbol(q).title));
+	if (found_std && exact == 1 && !q.contains(" "))
+	{
+		Entry* e = first_symbol(q);
+		if (e != null)
+		{
+			if (source) out.append(source_excerpt(e));
+			if (examples > 0) out.append(examples_for(q, clamp(examples, 0, 3), 18));
+		}
+	}
+	String reply = out.str_view();
+	return string::tformat("%s%s", util::clip(reply, source ? 5200 : 4000), check::version_note(reply.contains("does not exist")));
+}
+
+// `std::collections::map::HashMap.init` -> `HashMap.init`; `std::io::printfn` -> `io::printfn`
+fn String short_uid(String uid)
+{
+	if (uid.contains(".")) return uid[((uid.rindex_of("::") ?? -2) + 2)..];
+	sz last = uid.rindex_of("::") ?? -1;
+	sz prev = last > 0 ? (uid[:last].rindex_of("::") ?? -2) : -2;
+	return uid[(prev + 2)..];
+}
+
+fn String c3_refs(String query @Desc("the name whose uses you want: an identifier, or Type.name / module::name (the last part is searched)") = "",
+	String path @Desc("a project directory or a .c3 file; its libraries (deps) are included. Default: the project you last gave to c3_check, c3_test, c3_run or c3_lookup") = "",
+	bool stdlib @Desc("search the C3 standard library of your c3c instead of a project") = false,
+	int limit @Desc("number of uses shown (1..100)") = 30)
+	@Desc("Where a name is used: file, line and the line itself, with the declaration marked. Read with the C3 grammar, so comments and strings are not uses. Use it before changing or deleting a function, to see who calls it, or with stdlib=true to see how the standard library itself uses a function.")
+	@ReadOnly
+{
+	if (query.trim().len == 0) return "give query: the name to find, e.g. 'new_server' or 'HashMap.init'";
+	if (path.len > 0) outline::note_project(path);
+	return util::clip(outline::refs_reply(query, path, stdlib, clamp(limit, 1, 100)), 6000);
+}
+
+// The first symbol entry whose name is `name`.
+fn Entry* first_symbol(String name)
+{
+	foreach (&e : corpus::entries) if (is_symbol(e.kind) && uid_matches(e.title, name)) return e;
+	return null;
+}
+
+// The implementation of a standard library function, macro or type: its lines in the installed library, cut at the end of
+// the declaration or after 40 lines.
+fn String source_excerpt(Entry* e)
+{
+	String loc = e.loc;
+	sz c1 = loc.rindex_of(":") ?? -1;
+	if (c1 <= 0) return "";
+	sz c2 = loc[:c1].rindex_of(":") ?? -1;
+	if (c2 <= 0) return "";
+	int? row = loc[c2 + 1:c1 - c2 - 1].to_int();
+	if (catch row) return "";
+	String root = check::stdlib_root();
+	if (root.len == 0 || row < 1) return "";
+	char[]? data = file::load_temp(string::tformat("%s/%s", root, loc[:c2]));
+	if (catch data) return "";
+	String[] lines = ((String)data).tsplit("\n");
+	DString out = dstring::temp();
+	int depth = 0;
+	bool opened = false;
+	for (int i = row - 1; i < (int)lines.len && i < row - 1 + 40; i++)
+	{
+		String l = lines[i];
+		out.appendf("%d: %s\n", i + 1, util::clip(util::sanitize_utf8(l), 160));
+		String code = l[:l.index_of("//") ?? l.len];
+		foreach (c : code)
+		{
+			if (c == '{') { depth++; opened = true; }
+			if (c == '}') depth--;
+		}
+		if (opened && depth <= 0) break;
+		if (!opened && code.trim().ends_with(";")) break;
+		if (!opened && code.contains("=>") && code.trim().ends_with(";")) break;
+	}
+	return string::tformat("\nSource (%s):\n%s", e.loc, out.str_view());
+}
+
+// `ctz` is a method of many types: one line with the types that have it, and one signature. `owner`: only the modules whose
+// last part is this (empty: any).
+fn String method_summary(String word, String owner)
+{
+	String w = word.to_lower_tcopy();
+	DString types = dstring::temp();
+	String sample = "";
+	String sample_loc = "";
+	int count = 0;
+	foreach (&e : corpus::entries)
+	{
+		if (!(e.kind == "method" || e.kind == "mmethod") || last_segment(e.title).to_lower_tcopy() != w) continue;
+		if (owner.len > 0 && !e.title.to_lower_tcopy().contains(string::tformat("::%s::", owner))) continue;
+		String receiver = e.title[(e.title.rindex_of("::") ?? -2) + 2..];
+		receiver = receiver[:receiver.rindex_of(".") ?? receiver.len];
+		if (count++ < 14) types.appendf("%s%s", count > 1 ? ", " : "", receiver);
+		if (sample.len == 0) { sample = e.body.tsplit("\n")[0]; sample_loc = e.loc; }
+	}
+	if (count == 0) return "";
+	return string::tformat("'%s' is a method, called on a value (`x.%s(...)`), not a function of a module. It exists on %d type%s: %s%s\n  %s  (%s)\n  c3_lookup 'Type.%s' for one of them.\n", word, word, count, count == 1 ? "" : "s", types.str_view(), count > 14 ? ", ..." : "", util::clip(sample, 160), sample_loc, word);
 }
 
 // A name without its underscores, in lowercase: `readLine`, `read_line` and `readline` are one key.
@@ -365,7 +576,7 @@ fn String members_of(String prefix, bool methods)
 		names.append(rest);
 	}
 	if (count == 0) return "";
-	return string::tformat("%s (%d): %s\n  c3_symbol %s%sNAME for one signature.\n", methods ? "Methods" : "Functions and types", count, util::clip(names.str_view(), 1400), last_segment(prefix), methods ? "." : "::");
+	return string::tformat("%s (%d): %s\n  c3_lookup %s%sNAME for one signature.\n", methods ? "Methods" : "Functions and types", count, util::clip(names.str_view(), 1400), last_segment(prefix), methods ? "." : "::");
 }
 
 // "distinct type TcpSocket = inline std::net::Socket": the methods of Socket are TcpSocket's too.
@@ -395,13 +606,19 @@ fn String module_listing(String n)
 	return string::tformat("%s\n%s", full, members_of(full, false));
 }
 
-fn String symbol_reply(String name)
+fn String symbol_reply(String name, bool* found_out = null, int* exact_out = null)
 {
+	if (found_out) *found_out = false;
 	live::ensure();
 	String n = name.trim(" \t\n");
 	if (n.len == 0) return "give a symbol name, e.g. printfn or String.split";
 	DString out = dstring::temp();
-	if (n.contains(" ") || n.contains("\n") || n.contains("\t")) return describe(n);   // several words: a description, not a name
+	if (n.contains(" ") || n.contains("\n") || n.contains("\t"))   // several words: a description, not a name
+	{
+		String d = describe(n);
+		if (found_out) *found_out = !d.starts_with("no symbol");
+		return d;
+	}
 	int found = 0;
 	foreach (&e : corpus::entries)
 	{
@@ -409,9 +626,11 @@ fn String symbol_reply(String name)
 		if (found++ < 6) out.append(hit_text(e, MAX_SNIPPET, string::tformat("  [c3c %s]", corpus::symbols_version)));   // the version is on every signature: a note said once is missed
 		if (found == 1) context::note_symbol(e.title);
 	}
+	if (found_out && found > 0) *found_out = true;
+	if (exact_out) *exact_out = found;
 	if (found > 0)
 	{
-		if (found > 6) out.appendf("[%d more matches; qualify the name, e.g. io::%s]\n", found - 6, n);
+		if (found > 6) out.appendf("[%d more matches; qualify the name, e.g. %s]\n", found - 6, short_uid(first_symbol(n).title));
 		foreach (&e : corpus::entries)
 		{
 			if (e.kind != "type" || !uid_matches(e.title, n)) continue;
@@ -421,10 +640,25 @@ fn String symbol_reply(String name)
 		return util::clip(out.str_view(), MAX_REPLY);
 	}
 	String module_members = module_listing(n);
-	if (module_members.len > 0) return module_members;
+	if (module_members.len > 0)
+	{
+		if (found_out) *found_out = true;
+		return module_members;
+	}
+	if (n.starts_with("$$"))
+	{
+		String inner = n[2..];
+		String builtin = string::tformat("'%s' is a compiler builtin (c3_search scope=syntax topic builtins lists them); the standard library wraps many of them as methods.\n", n);
+		if (syntax_list("builtins").contains(n))
+		{
+			if (found_out) *found_out = true;
+			String wrapped = inner.len > 1 ? method_summary(inner, "") : "";
+			return string::tformat("%s%s", builtin, wrapped);
+		}
+	}
 	// not found: say so (a model must not assume a guessed API exists), then offer close names
 	out.append(legacy_note(n));
-	out.appendf("'%s' does not exist in the standard library of c3c %s. (Project or library code: c3_outline with a path and match.)\n", n, corpus::symbols_version);
+	out.appendf("'%s' does not exist in the standard library of c3c %s. (Your own or library code: give path.)\n", n, corpus::symbols_version);
 	// `allocator::free` is asked for by its old module: the same name in another module is the likely answer
 	String q = last_segment(n).to_lower_tcopy();
 	String module_hint = "";
@@ -456,9 +690,23 @@ fn String symbol_reply(String name)
 			out.appendf("  %s\n", e.title);
 		}
 	}
+	// `bits::ctz`: the module has it, but as a method of a type (`x.ctz()`), not as a function of the module
+	bool as_method = false;
+	if (n.contains("::"))
+	{
+		String owner = n[:n.rindex_of("::") ?? 0].to_lower_tcopy();
+		owner = owner[(owner.rindex_of("::") ?? -2) + 2..];
+		String summary = method_summary(last_segment(n), owner);
+		if (summary.len > 0)
+		{
+			as_method = true;
+			if (found_out) *found_out = false;
+			out.append(summary);
+		}
+	}
 	out.append(rename_notes(last_segment(n)));
 	// a wrong name usually has the right words in it (`File.read_line`, `tnew_array`)
-	String words = describe(n);
+	String words = as_method ? "" : describe(n, true);
 	if (!words.starts_with("no symbol")) out.append(words);
 	return util::clip(out.str_view(), MAX_REPLY);
 }
@@ -489,17 +737,14 @@ fn bool looks_like_use(String line, String word)
 	return line.contains(string::tformat("%s(", word)) || line.contains(string::tformat("::%s", word));
 }
 
-fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'HashMap', 'String.split', 'sort::quicksort'") = "",
-	int limit @Desc("number of examples (1..5)") = 3,
-	String name @Desc("same as symbol (c3_symbol calls it name)") = "")
-	@Desc("Working code that uses a standard library function or type: the verified recipes and the manual's examples, with the lines around each use. Use it after c3_symbol when the signature is not enough to see how it is called.")
-	@ReadOnly
+// Working code that calls the library name `n`: the verified recipes first, then the manual's examples, each cut to
+// `max_lines` lines. "" when nothing uses it.
+fn String examples_for(String n, int limit, sz max_lines)
 {
-	String n = (symbol.len > 0 ? symbol : name).trim(" \t\n");
-	if (n.len == 0) return "give a stdlib name, e.g. HashMap or readline";
 	String word = last_segment(n);
-	if (word.len < 2) return "give a stdlib name with at least two letters, e.g. HashMap or readline";
-	int max = clamp(limit, 1, 5);
+	if (word.len < 2) return "";
+	int max = clamp(limit, 0, 5);
+	if (max == 0) return "";
 	DString out = dstring::temp();
 	int shown = 0;
 	for (int pass = 0; pass < 2 && shown < max; pass++)
@@ -514,36 +759,24 @@ fn String c3_examples(String symbol @Desc("a stdlib name, e.g. 'readline', 'Hash
 				if (line.trim(" \t").starts_with("//")) continue;   // a comment that mentions the word is not a use of it
 				if (!(e.kind == "recipe" ? has_word(line, word, true) : looks_like_use(line, word))) continue;
 				// a few lines before and after the first use; a recipe is short, so show it all when it is
-				sz from = e.kind == "recipe" && lines.len <= 24 ? 0 : (i > 3 ? i - 3 : 0);
-				sz to = e.kind == "recipe" && lines.len <= 24 ? lines.len : (i + 6 < lines.len ? i + 6 : lines.len);
-				out.appendf("### %s\n", util::clip(e.title, 100));
+				bool whole = e.kind == "recipe" && lines.len <= max_lines;
+				sz from = whole ? 0 : (i > 3 ? i - 3 : 0);
+				sz to = whole ? lines.len : (i + 6 < lines.len ? i + 6 : lines.len);
+				if (to - from > max_lines) to = from + max_lines;
+				out.appendf("### Example: %s\n", util::clip(e.title, 100));
 				foreach (l : lines[from:to - from]) out.appendf("%s\n", util::clip(l, 160));
 				shown++;
 				break;
 			}
 		}
 	}
-	if (shown == 0)
-	{
-		// "no example" means two different things: the name is real and nothing shows it, or there is no such name
-		live::ensure();
-		foreach (&e : corpus::entries)
-		{
-			if (!is_symbol(e.kind) || !uid_matches(e.title, n)) continue;
-			bool documented = e.body.contains("\n");
-			return string::tformat("'%s' is in the standard library (%s, %s) but no recipe or manual example uses it. c3_symbol '%s' gives the signature%s.",
-				e.title, e.loc, documented ? "documented" : "no doc comment", util::clip(n, 80), e.loc.len > 0 ? string::tformat("; the source at that path is the reference") : "");
-		}
-		return string::tformat("'%s' is not a standard library name, so there is no example. c3_symbol '%s' lists similar names.", util::clip(n, 80), util::clip(n, 80));
-	}
-	return util::clip(out.str_view(), MAX_REPLY);
+	if (shown == 0) return "";
+	return string::tformat("\n%s", out.str_view());
 }
 
 fn void register(mcp::Server* s)
 {
-	s.@tool(c3_examples);
+	s.@tool(c3_lookup);
 	s.@tool(c3_search);
-	s.@tool(c3_symbol);
-	s.@tool(c3_changes);
-	s.@tool(c3_syntax);
+	s.@tool(c3_refs);
 }

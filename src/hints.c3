@@ -26,7 +26,7 @@ const StaticHint[*] STATIC_HINTS = {
 	{ "'@private' modifiers are ignored for method declarations", "", "`@private` has no effect on a method: it is visible wherever its type is. For module-private code use a free function, `fn int helper(Cat* c) @private`." },
 	{ "must use '{ }'", "", "C3 0.8: an `if` with an `else` needs braces on both branches: `if (c) { a(); } else { b(); }`." },
 	{ "This doesn't seem to be a valid literal", "", "C3 0.8 removed the `i64`/`u8` style literal suffixes: use `5L`, `5UL` or a cast, `(long)5`." },
-	{ "Expected a type here", "isz", "`isz` is `sz` since 0.8 (`usz` is unchanged). `c3_fix` applies this." },
+	{ "Expected a type here", "isz", "`isz` is `sz` since 0.8 (`usz` is unchanged). `c3_check` rewrites it when it gets the code as `code`." },
 	{ "Expected ';'", "$typeof(", "`$typeof(x)` is spelled `$Typeof(x)` where a type is expected (`$Typeof(x) y = 4;`)." },
 	{ "A type name was expected here", "!", "Optionals are written `int?` (not `int!`) since 0.8: `fn int? f()`, `int? x = f();`." },
 	{ "did you forget 'const'", "fault ", "Fault declarations are `faultdef A, B;` since 0.8 (`fault E { A }` is gone). Use them as `A?` or `return A~;`." },
@@ -103,7 +103,7 @@ fn String hint_for(String msg, String output)
 		{
 			bool fixable = false;
 			foreach (pair : PROPERTY_RENAMES) if (pair[0] == name) fixable = true;
-			return string::tformat("  Type properties are written with `::` since 0.8 (`int::size`, `Foo::name`, `int::max`, `double::inf`), not `.%s`.%s c3_syntax type-properties lists them.\n", name, fixable ? " `c3_fix` rewrites this." : "");
+			return string::tformat("  Type properties are written with `::` since 0.8 (`int::size`, `Foo::name`, `int::max`, `double::inf`), not `.%s`.%s c3_search scope=syntax lists them (type-properties).\n", name, fixable ? " `c3_check` rewrites it when it gets the code as `code`." : "");
 		}
 	}
 	// 'x' could not be found / has no member 'x': the name is often a guessed stdlib function
@@ -116,10 +116,10 @@ fn String hint_for(String msg, String output)
 	if (!name.contains("::") && tools::exact_matches(name) > 3) return "";
 	// when the compiler itself proposes a name, the signature of that name is the useful answer
 	String proposed = quoted_after(msg, "perhaps want '");
-	String s = tools::symbol_reply(is_name(proposed) ? proposed : name);   // the reply itself, without the notes c3_symbol adds
+	String s = tools::symbol_reply(is_name(proposed) ? proposed : name);   // the reply itself, without the notes c3_lookup adds
 	// a name that is not in the stdlib and has no close name is the user's own: say nothing
 	if (s.contains("does not exist") && !s.contains("Similar names") && !s.contains("Symbols matching")) return "";
-	return string::tformat("  c3_symbol '%s':\n%s\n", is_name(proposed) ? proposed : name, compact(s));
+	return string::tformat("  c3_lookup '%s':\n%s\n", is_name(proposed) ? proposed : name, compact(s));
 }
 
 // The word between the quotes right after `marker`, "" when the marker is absent.
@@ -132,7 +132,7 @@ fn String quoted_after(String msg, String marker)
 
 const int HINT_ENTRIES = 3;
 
-// What a hint needs from a c3_symbol reply: where the name went (similar names, a rename in the release notes)
+// What a hint needs from a c3_lookup reply: where the name went (similar names, a rename in the release notes)
 // and the first signatures. Not the doc comments, and not the sentence repeating the question.
 fn String compact(String reply)
 {

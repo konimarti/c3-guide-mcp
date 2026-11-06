@@ -261,7 +261,7 @@ fn void bad_paths_and_argument_mixes_are_refused() @test
 fn void old_property_error_gets_a_hint() @test
 {
 	String t = check::c3_check("fn void f() { int a = int.sizeof; }");
-	assert(has(t, "Hints:") && has(t, "int::size") && has(t, "c3_fix"), "%s", t);
+	assert(has(t, "Hints:") && has(t, "Type properties are written with `::`") && has(t, "`c3_check` rewrites it"), "%s", t);
 }
 
 fn void guessed_stdlib_name_gets_a_signature_hint() @test
@@ -275,10 +275,10 @@ fn void valid_code_has_no_hints() @test
 	assert(!has(check::c3_check("fn void f() {}"), "Hints"));
 }
 
-fn void fix_rewrites_old_syntax_and_verifies() @test
+fn void check_rewrites_old_syntax_and_verifies() @test
 {
-	String t = check::c3_fix("import std::io;\nstruct Foo { int x; }\nfn void f(isz z) { int a = int.sizeof; usz n = $sizeof(Foo); io::printn(a); }\n");
-	assert(has(t, "int::size") && has(t, "Foo::size") && has(t, "sz z") && has(t, "OK: no errors"), "%s", t);
+	String t = check::c3_check("import std::io;\nstruct Foo { int x; }\nfn void f(isz z) { int a = int.sizeof; usz n = $sizeof(Foo); io::printn(a); }\n");
+	assert(has(t, "0.7 syntax found") && has(t, "int::size") && has(t, "Foo::size") && has(t, "sz z") && has(t, "OK: no errors"), "%s", t);
 }
 
 fn void fix_leaves_strings_comments_and_variables_alone() @test
@@ -289,10 +289,10 @@ fn void fix_leaves_strings_comments_and_variables_alone() @test
 	assert(q.code == "fn int g() { return int::max + Foo::min; }" && q.count == 2, "%s", q.code);
 }
 
-fn void fix_reports_when_nothing_applies() @test
+fn void check_without_old_syntax_adds_no_rewrite() @test
 {
-	String t = check::c3_fix("fn void f() {}");
-	assert(has(t, "no mechanical") && has(t, "OK"), "%s", t);
+	assert(!has(check::c3_check("fn void f() {}"), "0.7 syntax"));
+	assert(!has(check::c3_check("fn void f() { undefined_name(); }"), "0.7 syntax"), "an error that is not old syntax is not rewritten");
 }
 
 fn void test_tool_reports_failures_without_noise() @test
@@ -323,28 +323,6 @@ fn void run_tool_runs_snippet_and_project() @test
 fn void run_tool_rejects_embed_in_snippets() @test
 {
 	assert(has(check::c3_run("module m; const char[*] X = $embed(\"x\");"), "rejected"));
-}
-
-fn void run_tools_need_the_environment_switch() @test
-{
-	String saved = env::tget_var("C3_GUIDE_ALLOW_RUN") ?? "";
-	defer
-	{
-		if (saved.len > 0)
-		{
-			env::set_var("C3_GUIDE_ALLOW_RUN", saved);
-		}
-		else
-		{
-			env::clear_var("C3_GUIDE_ALLOW_RUN");
-		}
-	}
-	env::clear_var("C3_GUIDE_ALLOW_RUN");
-	assert(!check::run_allowed());
-	env::set_var("C3_GUIDE_ALLOW_RUN", "0");
-	assert(!check::run_allowed());
-	env::set_var("C3_GUIDE_ALLOW_RUN", "1");
-	assert(check::run_allowed());
 }
 
 // A compiler report as c3_check shows it: the echoed source line, then the error.
@@ -471,7 +449,7 @@ fn void a_hung_program_is_stopped_and_leaves_nothing_running() @test
 	assert(check::deadline_for(0) == 120000 && check::deadline_for(5) == 5000 && check::deadline_for(120) == 120000 && check::deadline_for(-3) == 120000 && check::deadline_for(999) == 120000);
 	int before = count_procs(SCRATCH_PROC);
 	Clock t = clock::now();
-	String r = check::c3_run("import std::thread;\nfn void main() { thread::sleep_ms(600000); }", "", "", "", 3);
+	String r = check::c3_run("import std::thread;\nfn void main() { thread::sleep_ms(600000); }", timeout_s: 3);
 	long ms = (long)t.to_now() / 1_000_000;
 	assert(r.contains("timeout") && ms < 15000, "%s (%d ms)", r, (int)ms);
 	assert(count_procs(SCRATCH_PROC) <= before, "processes left behind");
@@ -482,7 +460,7 @@ fn void a_program_that_leaves_a_background_process_cannot_hang_the_server() @tes
 	// `sleep 301 &` keeps the output pipe open and its command line does not name the scratch directory
 	Clock t = clock::now();
 	String r = check::c3_run(`import libc;
-fn void main() { libc::system("sleep 301 &"); }`, "", "", "", 3);
+fn void main() { libc::system("sleep 301 &"); }`, timeout_s: 3);
 	long ms = (long)t.to_now() / 1_000_000;
 	support::sh("pkill -f '[s]leep 301'; true");
 	assert(ms < 20000, "the call took %d ms: %s", (int)ms, r);
@@ -495,7 +473,7 @@ fn void regex_characters_in_the_scratch_path_do_not_defeat_the_sweep() @test
 	env::set_var("TMPDIR", base);
 	int before = count_procs("sleep 600000|x.\\(b");
 	Clock t = clock::now();
-	String r = check::c3_run("import std::thread;\nfn void main() { thread::sleep_ms(600000); }", "", "", "", 3);
+	String r = check::c3_run("import std::thread;\nfn void main() { thread::sleep_ms(600000); }", timeout_s: 3);
 	long ms = (long)t.to_now() / 1_000_000;
 	if (try s = saved) { env::set_var("TMPDIR", s); } else { env::clear_var("TMPDIR"); }
 	support::sh(string::tformat("pkill -9 -f '%s/c3guide'; rm -rf \"$(dirname '%s')\"; true", "x.\\(b", base));
@@ -512,7 +490,7 @@ fn void main()
 {
 	for (int i = 0; i < 20000; i++) io::printn("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
 	thread::sleep_ms(600000);
-}`, "", "", "", 20);
+}`, timeout_s: 20);
 	long ms = (long)t.to_now() / 1_000_000;
 	assert(ms < 15000 && r.len > 1000, "%d ms, %d bytes", (int)ms, (int)r.len);
 	assert(count_procs(SCRATCH_PROC) <= before, "the program kept running after the cap");
@@ -536,7 +514,7 @@ fn void a_file_of_a_project_is_checked_with_its_project() @test
 	// and a platform given with the file reaches the project check
 	String w = string::tformat("%s/src/w.c3", root);
 	file::save(w, "module w;\nfn void g() { $if env::WIN32: int x = \"not an int\"; $endif }\n")!!;
-	assert(check::c3_check("", w, "", "windows-x64").contains("error"), "the platform applies to a file of a project");
+	assert(check::c3_check("", w, platform: "windows-x64").contains("error"), "the platform applies to a file of a project");
 	// a file outside any project is still compiled by itself
 	String lone = string::tformat("%s/lone.c3", root[:root.rindex_of("/") ?? 0]);
 	assert(check::project_dir("/tmp/none/x.c3").len == 0 && lone.len > 0);
@@ -581,7 +559,7 @@ const String WIN_ONLY_ERROR = "fn void main() { $if env::WIN32: int x = \"not an
 fn void a_snippet_can_be_checked_for_another_platform() @test
 {
 	assert(check::c3_check(WIN_ONLY_ERROR).starts_with("OK"), "fine here, the branch is for Windows");
-	String r = check::c3_check(WIN_ONLY_ERROR, "", "", "windows-x64");
+	String r = check::c3_check(WIN_ONLY_ERROR, platform: "windows-x64");
 	assert(r.contains("error"), "%s", r);
 	assert(check::c3_check("fn void main() {}", "", "", "--trust=full").contains("not an option"), "a platform is a name, never a flag");
 }
@@ -595,7 +573,7 @@ fn void a_project_can_be_checked_for_another_platform() @test
 	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
 	file::save(string::tformat("%s/src/a.c3", root), WIN_ONLY_ERROR)!!;
 	assert(check::c3_check("", root).contains("OK"), "the project builds for this platform");
-	assert(check::c3_check("", root, "", "windows-x64").contains("error"), "and not for Windows");
+	assert(check::c3_check("", root, platform: "windows-x64").contains("error"), "and not for Windows");
 }
 
 fn void manifest_warnings_of_a_library_are_left_out() @test
@@ -626,4 +604,55 @@ fn void a_property_written_with_a_dot_points_to_the_colons() @test
 	assert(t.contains("not `.inf`") && t.contains("double::inf"), "%s", t);
 	String ok = check::c3_check("fn void main() { double x = double::inf; }");
 	assert(ok.starts_with("OK"), "%s", ok);
+}
+
+fn void run_passes_arguments_and_stdin_to_the_program() @test
+{
+	String code = "import std::io;\nfn void main(String[] a) { String? l = io::treadline(); io::printfn(\"in=%s n=%d first=%s\", l!!, a.len, a[1]); }";
+	String t = check::c3_run(code, args: "alpha\nbeta gamma", input: "abc\n");
+	assert(has(t, "in=abc n=3 first=alpha"), "%s", t);
+	assert(has(check::c3_run("fn void main() {}", args: "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq"), "at most 16"));
+}
+
+fn void a_program_that_reads_stdin_sees_the_end_of_it() @test
+{
+	String t = check::c3_run("import std::io;\nfn void main() { String? l = io::treadline(); io::printfn(\"%s\", l ? \"line\" : \"eof\"); }");
+	assert(has(t, "eof"), "%s", t);
+}
+
+fn void check_and_run_take_extra_source_files() @test
+{
+	Path dir = support::make_temp_dir("c3guide-files");
+	defer (void)path::rmtree(dir);
+	String helper = string::tformat("%s/helper.c3", (String)dir);
+	file::save(helper, "module helper;\nfn int twice(int x) => x * 2;\n")!!;
+	String code = "import helper;\nimport std::io;\nfn void main() { io::printfn(\"%d\", helper::twice(21)); }";
+	assert(has(check::c3_check(code), "error"), "the helper is not known without files");
+	assert(has(check::c3_check(code, files: helper), "OK: no errors"));
+	assert(has(check::c3_run(code, files: helper), "42"));
+	assert(has(check::c3_check(code, files: "/nonexistent/x.c3"), "does not exist"));
+	assert(has(check::c3_check(code, files: "x.txt"), "not a .c3 file"));
+}
+
+fn void test_tool_checks_tests_for_another_platform() @test
+{
+	Path dir = make_project(PROJECT_OK);
+	defer (void)path::rmtree(dir);
+	String t = check::c3_test((String)dir, platform: "windows-x64");
+	assert(has(t, "type-check") || has(t, "OK"), "%s", t);
+	assert(!has(t, "error"), "%s", t);
+}
+
+fn void test_tool_platform_check_finds_an_error_of_that_platform() @test
+{
+	Path dir = check::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
+	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/src/a.c3", root), string::tformat("%s\nfn void t() @test {}\n", WIN_ONLY_ERROR))!!;
+	String here = check::c3_test(root);
+	assert(!has(here, "error") && has(here, "passed"), "the tests run on this platform: %s", here);
+	String win = check::c3_test(root, platform: "windows-x64");
+	assert(has(win, "error"), "and the Windows type-check sees the error: %s", win);
 }

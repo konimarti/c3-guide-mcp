@@ -73,7 +73,7 @@ fn void tasks_find_their_answer() @test
 	int hits = 0;
 	foreach (c : TASKS)
 	{
-		if (found(tools::c3_search(c.ask, 3), c.want)) { hits++; continue; }
+		if (found(tools::c3_search(c.ask, limit: 3), c.want)) { hits++; continue; }
 		io::printfn("MISS %-52s want '%s'", c.ask, c.want);
 	}
 	io::printfn("tasks found: %d of %d", hits, TASKS.len);
@@ -86,7 +86,7 @@ fn void manual_questions_stay_in_the_manual() @test
 	int hits = 0;
 	foreach (c : MANUAL)
 	{
-		String reply = tools::c3_search(c.ask, 3);
+		String reply = tools::c3_search(c.ask, limit: 3);
 		if (found(reply, c.want) && !support::contains_ci(reply, "Standard library (")) { hits++; continue; }
 		io::printfn("MISS %-52s want '%s' and no library names", c.ask, c.want);
 	}
@@ -98,7 +98,7 @@ fn void manual_questions_stay_in_the_manual() @test
 fn void a_good_answer_is_not_followed_by_manual_noise() @test
 {
 	context::clear();
-	String reply = tools::c3_search("tcp server socket listen accept", 3);
+	String reply = tools::c3_search("tcp server socket listen accept", limit: 3);
 	assert(support::contains_ci(reply, "Recipe: tcp server"), "%s", reply);
 	assert(!support::contains_ci(reply, "Attribute syntax") && !support::contains_ci(reply, "$defined"), "%s", reply);
 }

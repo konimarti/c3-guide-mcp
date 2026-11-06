@@ -114,4 +114,4 @@ jobs:
           pre=""; case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" c3-guide-mcp-* SHA256SUMS --repo "$GITHUB_REPOSITORY" $pre \
             --title "$GITHUB_REF_NAME (c3c 0.8.5)" \
-            --notes "Prebuilt c3-guide-mcp for c3c 0.8.5 (Linux x64, macOS arm64, Windows x64). Unpack, point your MCP client at the binary, set C3C to your c3c if it is not on PATH (c3_check, c3_fix, c3_test and c3_run need it; the docs tools do not). Verify with SHA256SUMS."
+            --notes "Prebuilt c3-guide-mcp for c3c 0.8.5 (Linux x64, macOS arm64, Windows x64). Unpack, point your MCP client at the binary, set C3C to your c3c if it is not on PATH (c3_check, c3_test and c3_run need it; c3_lookup and c3_search work without). Verify with SHA256SUMS."

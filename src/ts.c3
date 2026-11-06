@@ -25,6 +25,8 @@ extern fn uint ts_node_end_byte(TSNode node);
 extern fn TSPoint ts_node_start_point(TSNode node);
 extern fn bool ts_node_is_null(TSNode node);
 extern fn bool ts_node_has_error(TSNode node);
+extern fn uint ts_node_child_count(TSNode node);
+extern fn TSNode ts_node_child(TSNode node, uint index);
 
 // Small helpers every user of the tree needs.
 fn String type_of(TSNode n) => ts_node_type(n).str_view();

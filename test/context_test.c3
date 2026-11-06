@@ -27,10 +27,10 @@ fn void the_imported_module_wins_a_tie() @test
 	String ask = "check whether a path is a directory";
 	context::clear();
 	context::note_source("import std::io::file;");
-	String with_file = tools::c3_symbol(ask);
+	String with_file = tools::symbol_reply(ask);
 	context::clear();
 	context::note_source("import std::io::path;");
-	String with_path = tools::c3_symbol(ask);
+	String with_path = tools::symbol_reply(ask);
 	context::clear();
 	assert((with_file.index_of("std::io::file::is_dir") ?? 99999) < (with_file.index_of("std::io::path::is_dir") ?? 99999), "%s", with_file);
 	assert((with_path.index_of("std::io::path::is_dir") ?? 99999) < (with_path.index_of("std::io::file::is_dir") ?? 99999), "%s", with_path);
@@ -43,10 +43,10 @@ fn void a_checked_file_and_a_looked_up_name_are_context() @test
 	String f = string::tformat("%s/a.c3", (String)dir);
 	file::save(f, "import std::net;\nfn void main() {}\n")!!;
 	context::clear();
-	tools::c3_search("defer", 1, f);
+	tools::c3_search("defer", limit: 1, file: f);
 	assert(context::count == 1 && context::name_at(0) == "std::net", "the file parameter");
 	context::clear();
-	tools::c3_symbol("String.split");
+	tools::symbol_reply("String.split");
 	assert(context::count == 1 && context::name_at(0) == "std::core::string", "a name looked up");
 	context::clear();
 }

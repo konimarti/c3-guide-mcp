@@ -8,8 +8,8 @@ init = {"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolV
 def peak_rss_kb(n):
     reqs = [init]
     for i in range(n):
-        name, args = [("c3_search", {"query": "foreach with index"}), ("c3_symbol", {"name": "String.split"}),
-                      ("c3_changes", {"topic": "faultdef"}), ("c3_syntax", {"topic": "attributes"})][i % 4]
+        name, args = [("c3_search", {"query": "foreach with index"}), ("c3_lookup", {"query": "String.split"}),
+                      ("c3_search", {"query": "faultdef", "scope": "changes"}), ("c3_search", {"query": "attributes", "scope": "syntax"})][i % 4]
         reqs.append({"jsonrpc": "2.0", "id": i + 1, "method": "tools/call", "params": {"name": name, "arguments": args}})
     p = subprocess.Popen([BIN], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     out, _ = p.communicate("\n".join(map(json.dumps, reqs)).encode() + b"\n")

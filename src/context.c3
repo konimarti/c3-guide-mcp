@@ -22,7 +22,22 @@ sz count;
 
 fn String name_at(sz i) => (String)slots[i].text[:slots[i].len];
 
-fn void clear() { count = 0; }
+fn void clear() { count = 0; project_len = 0; }
+
+// The project the session works on: the last project directory a tool was given (c3_check, c3_test, c3_run,
+// c3_lookup, c3_refs). c3_lookup and c3_refs search it when no path is given.
+const sz MAX_PROJECT = 1024;
+char[MAX_PROJECT] project_buf;
+sz project_len;
+
+fn String project() => (String)project_buf[:project_len];
+
+fn void note_project_dir(String dir)
+{
+	if (dir.len == 0 || dir.len > MAX_PROJECT) return;
+	project_buf[:dir.len] = dir[..];
+	project_len = dir.len;
+}
 
 // Make the module `name` the newest. Only the standard library matters: the symbols searched are its.
 fn void note_module(String name)

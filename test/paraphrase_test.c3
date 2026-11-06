@@ -55,7 +55,7 @@ fn void paraphrases_find_their_function() @test
 	int hits = 0;
 	foreach (c : CASES)
 	{
-		if (found(tools::c3_symbol(c.ask), c.want)) { hits++; continue; }
+		if (found(tools::symbol_reply(c.ask), c.want)) { hits++; continue; }
 		io::printfn("MISS %-44s want '%s'", c.ask, c.want);
 	}
 	io::printfn("paraphrases found: %d of %d", hits, CASES.len);

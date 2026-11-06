@@ -22,11 +22,11 @@ const Case[*] CASES = {
 	{ "c3_search", "enum associated values", "ssociated" },
 	{ "c3_search", "bitstruct", "itstruct" },
 	{ "c3_search", "generic module type parameters", "eneric" },
-	{ "c3_symbol", "String.split", "String.split" },
-	{ "c3_symbol", "printfn", "std::io::printfn" },
-	{ "c3_symbol", "talloc_array", "talloc_array" },
-	{ "c3_symbol", "HashMap", "HashMap" },
-	{ "c3_symbol", "tnew_array", "does not exist" },
+	{ "lookup", "String.split", "String.split" },
+	{ "lookup", "printfn", "std::io::printfn" },
+	{ "lookup", "talloc_array", "talloc_array" },
+	{ "lookup", "HashMap", "HashMap" },
+	{ "lookup", "tnew_array", "does not exist" },
 	{ "c3_search", "create a directory mkdir", "Recipe: create a directory" },
 	{ "c3_search", "read a file line by line", "Recipe: read a file line by line" },
 	{ "c3_search", "hashmap word count", "Recipe: HashMap" },
@@ -48,25 +48,25 @@ const Case[*] CASES = {
 	{ "c3_search", "weekday of a date", "Recipe: calendar date" },
 	{ "c3_search", "DateTime day of week", "Recipe: calendar date" },
 	{ "c3_search", "read lines from stdin", "Recipe: read lines from standard input" },
-	{ "c3_symbol", "tmem", "alias tmem = current_temp" },
-	{ "c3_symbol", "mem", "alias mem = thread_allocator" },
-	{ "c3_symbol", "read line", "std::io::readline" },
-	{ "c3_symbol", "File.read_line", "std::io::readline" },
-	{ "c3_symbol", "sort array", "std::sort::quicksort" },
-	{ "c3_symbol", "get environment variable", "std::os::env::get_var" },
-	{ "c3_symbol", "check if file exists", "std::io::file::exists" },
-	{ "c3_symbol", "trim whitespace", "String.trim" },
-	{ "c3_symbol", "split string", "String.split" },
-	{ "c3_symbol", "concatenate strings", "String.concat" },
-	{ "c3_symbol", "string to int", "String.to_int" },
-	{ "c3_symbol", "sleep milliseconds", "thread::sleep_ms" },
-	{ "c3_symbol", "parse json", "json::parse" },
-	{ "c3_symbol", "format string", "string::format" },
-	{ "c3_changes", "faultdef", "faultdef" },
-	{ "c3_changes", "foreach", "foreach" },
-	{ "c3_changes", "type properties", "propert" },
-	{ "c3_changes", "void! main", "main" },
-	{ "c3_syntax", "attributes", "@noreturn" },
+	{ "lookup", "tmem", "alias tmem = current_temp" },
+	{ "lookup", "mem", "alias mem = thread_allocator" },
+	{ "lookup", "read line", "std::io::readline" },
+	{ "lookup", "File.read_line", "std::io::readline" },
+	{ "lookup", "sort array", "std::sort::quicksort" },
+	{ "lookup", "get environment variable", "std::os::env::get_var" },
+	{ "lookup", "check if file exists", "std::io::file::exists" },
+	{ "lookup", "trim whitespace", "String.trim" },
+	{ "lookup", "split string", "String.split" },
+	{ "lookup", "concatenate strings", "String.concat" },
+	{ "lookup", "string to int", "String.to_int" },
+	{ "lookup", "sleep milliseconds", "thread::sleep_ms" },
+	{ "lookup", "parse json", "json::parse" },
+	{ "lookup", "format string", "string::format" },
+	{ "changes", "faultdef", "faultdef" },
+	{ "changes", "foreach", "foreach" },
+	{ "changes", "type properties", "propert" },
+	{ "changes", "void! main", "main" },
+	{ "syntax", "attributes", "@noreturn" },
 	{ "c3_search", "@require", "@require" },
 	{ "c3_search", "$for", "$for" },
 };
@@ -75,10 +75,10 @@ fn String ask(Case c)
 {
 	switch (c.tool)
 	{
-		case "c3_search": return tools::c3_search(c.arg, 3);
-		case "c3_symbol": return tools::c3_symbol(c.arg);
-		case "c3_changes": return tools::c3_changes(c.arg, 3);
-		case "c3_syntax": return tools::c3_syntax(c.arg);
+		case "c3_search": return tools::c3_search(c.arg, limit: 3);
+		case "lookup": return tools::symbol_reply(c.arg);
+		case "changes": return tools::changes_reply(c.arg, 3);
+		case "syntax": return tools::syntax_reply(c.arg);
 		default: unreachable("unknown tool");
 	}
 }
