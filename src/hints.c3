@@ -1,6 +1,6 @@
 module c3guide::hints;
 import std::core::string;
-import c3guide::tools, c3guide::util, c3guide::ts;
+import c3guide::tools, c3guide::util, c3guide::ts, c3guide::corpus;
 import std::collections::list;
 
 // Two things the compiler's message alone does not give a model:
@@ -72,6 +72,17 @@ fn String static_hint(String msg, String output)
 	return "";
 }
 
+// Is `name` in the compiler's own list of type properties (`size`, `max`, `inf`, `nan`, `len`...)?
+fn bool is_type_property(String name)
+{
+	foreach (&e : corpus::entries)
+	{
+		if (e.kind != "list" || e.title != "type-properties") continue;
+		foreach (line : e.body.tsplit("\n")) if (line == name) return true;
+	}
+	return false;
+}
+
 fn String hint_for(String msg, String output)
 {
 	String fixed = static_hint(msg, output);
@@ -85,12 +96,14 @@ fn String hint_for(String msg, String output)
 	if (m < msg.len)
 	{
 		name = quoted(msg[m + marker.len - 1..]);   // the member, not the type before it
-		foreach (p : OLD_PROPERTIES)
+		// an old property name, or one the compiler lists today (`double.inf` is `double::inf`)
+		bool property = is_type_property(name);
+		foreach (p : OLD_PROPERTIES) if (name == p) property = true;
+		if (property)
 		{
-			if (name != p) continue;
 			bool fixable = false;
-			foreach (pair : PROPERTY_RENAMES) if (pair[0] == p) fixable = true;
-			return string::tformat("  Type properties are written with `::` since 0.8 (`int::size`, `Foo::name`, `int::max`), not `.%s`.%s c3_syntax type-properties lists them.\n", p, fixable ? " `c3_fix` rewrites this." : "");
+			foreach (pair : PROPERTY_RENAMES) if (pair[0] == name) fixable = true;
+			return string::tformat("  Type properties are written with `::` since 0.8 (`int::size`, `Foo::name`, `int::max`, `double::inf`), not `.%s`.%s c3_syntax type-properties lists them.\n", name, fixable ? " `c3_fix` rewrites this." : "");
 		}
 	}
 	// 'x' could not be found / has no member 'x': the name is often a guessed stdlib function

@@ -530,7 +530,13 @@ fn void a_file_of_a_project_is_checked_with_its_project() @test
 	file::save(string::tformat("%s/src/b.c3", root), "module b;\nfn void hello() {}\n")!!;
 	// alone, a.c3 does not know module b; with its project it compiles
 	String r = check::c3_check("", f);
-	assert(r.contains("belongs to the project in") && r.contains("OK"), "%s", r);
+	assert(r.contains("belongs to the project in") && r.contains("OK: no errors (type-checked, not linked)"), "%s", r);
+	// the directory is built and linked
+	assert(check::c3_check("", root).starts_with("OK: no errors") && !check::c3_check("", root).contains("not linked"));
+	// and a platform given with the file reaches the project check
+	String w = string::tformat("%s/src/w.c3", root);
+	file::save(w, "module w;\nfn void g() { $if env::WIN32: int x = \"not an int\"; $endif }\n")!!;
+	assert(check::c3_check("", w, "", "windows-x64").contains("error"), "the platform applies to a file of a project");
 	// a file outside any project is still compiled by itself
 	String lone = string::tformat("%s/lone.c3", root[:root.rindex_of("/") ?? 0]);
 	assert(check::project_dir("/tmp/none/x.c3").len == 0 && lone.len > 0);
@@ -612,4 +618,12 @@ fn void the_rules_that_fail_late_get_a_hint() @test
 	assert(c.contains("has no effect on a method"), "a warning gets its hint: %s", c);
 	String plain = check::c3_check("fn void main() { int x = ; }");
 	assert(!plain.contains("cannot be combined") && !plain.contains("has no effect on a method"), "%s", plain);
+}
+
+fn void a_property_written_with_a_dot_points_to_the_colons() @test
+{
+	String t = check::c3_check("fn void main() { double x = double.inf; }");
+	assert(t.contains("not `.inf`") && t.contains("double::inf"), "%s", t);
+	String ok = check::c3_check("fn void main() { double x = double::inf; }");
+	assert(ok.starts_with("OK"), "%s", ok);
 }

@@ -9,10 +9,10 @@ const sz MAX_SNIPPET = 900;
 const sz MAX_RECIPE = 1800;
 const String[*] SYMBOL_KINDS = { "fn", "macro", "method", "mmethod", "type", "var" };
 
-fn String hit_text(Entry* e, sz snippet)
+fn String hit_text(Entry* e, sz snippet, String tag = "")
 {
 	String loc = e.loc.len > 0 ? string::tformat("  (%s)", e.loc) : "";
-	return string::tformat("### %s%s\n%s\n", e.title, loc, util::clip(e.body, snippet));
+	return string::tformat("### %s%s%s\n%s\n", e.title, loc, tag, util::clip(e.body, snippet));
 }
 
 fn String format_hits(Hit[] hits, sz snippet)
@@ -406,7 +406,7 @@ fn String symbol_reply(String name)
 	foreach (&e : corpus::entries)
 	{
 		if (!is_symbol(e.kind) || !uid_matches(e.title, n)) continue;
-		if (found++ < 6) out.append(hit_text(e, MAX_SNIPPET));
+		if (found++ < 6) out.append(hit_text(e, MAX_SNIPPET, string::tformat("  [c3c %s]", corpus::symbols_version)));   // the version is on every signature: a note said once is missed
 		if (found == 1) context::note_symbol(e.title);
 	}
 	if (found > 0)

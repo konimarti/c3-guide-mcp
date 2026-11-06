@@ -614,7 +614,7 @@ fn String compile_only(String file, String hide, String replacement, String plat
 	return string::tformat("%s%s", shown, after_compile(shown));
 }
 
-fn String check_path(String target_path, String target, String platform = "")
+fn String check_path(String target_path, String target, String platform = "", bool linked = true)
 {
 	bool is_dir;
 	String? where = resolve_target(target_path, &is_dir);
@@ -629,20 +629,22 @@ fn String check_path(String target_path, String target, String platform = "")
 		Args m;
 		m.add("build");
 		if (target.len > 0) m.add(target);
+		// another platform cannot be linked here (no SDK), and an edit loop does not need the link: lex, parse and
+		// check only (0.2 s where the build takes 2.6 s)
 		if (platform.len > 0)
 		{
-			// another platform cannot be linked here (no SDK): lex, parse and check only
 			m.add("--target");
 			m.add(platform);
-			m.add("-C");
 		}
-		return run_c3c(m.list(), base, "", scratch, true, where, "OK: no errors", PROJECT_CHECK_MS);
+		if (platform.len > 0 || !linked) m.add("-C");
+		String ok = platform.len > 0 || !linked ? "OK: no errors (type-checked, not linked)" : "OK: no errors";
+		return run_c3c(m.list(), base, "", scratch, true, where, ok, PROJECT_CHECK_MS);
 	}
 	// A file checked on its own cannot see the other modules or the dependencies of its project: check the project
 	String project = project_dir(where);
 	if (project.len > 0)
 	{
-		return string::tformat("(this file belongs to the project in %s: the whole project is checked)\n%s", project, check_path(project, target));
+		return string::tformat("(this file belongs to the project in %s: the whole project is type-checked; give the directory to build and link it)\n%s", project, check_path(project, target, platform, false));
 	}
 	return compile_only(where, base, "", platform);
 }

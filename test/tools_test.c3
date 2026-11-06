@@ -287,3 +287,9 @@ fn void symbol_and_name_are_the_same_argument() @test
 	assert(tools::c3_examples("", 3, "HashMap").contains("HashMap"), "c3_examples accepts name");
 	assert(tools::c3_examples("HashMap", 3).contains("HashMap"));
 }
+
+fn void every_signature_names_the_compiler_it_came_from() @test
+{
+	String r = tools::c3_symbol("String.split");
+	assert(r.contains("[c3c "), "%s", r);
+}
