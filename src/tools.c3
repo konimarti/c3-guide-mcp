@@ -457,7 +457,7 @@ fn String lookup_one(String q, String path, int examples, bool source)
 	DString out = dstring::temp();
 	if (pcount > 0)
 	{
-		out.appendf("In %s (%d match%s):\n%s", pscope, pcount, pcount == 1 ? "" : "es", proj);
+		out.appendf("In %s%s (%d match%s):\n%s", pscope, path.len == 0 ? " (the project you last used; give path for another)" : "", pcount, pcount == 1 ? "" : "es", proj);
 		if (found_std && exact > 2)
 		{
 			// your own declaration is the answer; the library has many names that end the same: say so in a line
@@ -477,7 +477,7 @@ fn String lookup_one(String q, String path, int examples, bool source)
 		out.append(std);
 		if (!found_std)
 		{
-			if (pscope.len > 0) { out.appendf("(Also searched %s and its libraries: nothing declares '%s'.)\n", pscope, util::clip(q, 60)); }
+			if (pscope.len > 0) { out.appendf("(Also searched %s%s and its libraries: nothing declares '%s'.)\n", pscope, path.len == 0 ? ", the project you last used (give path for another)," : "", util::clip(q, 60)); }
 			else { out.append("(No project to search: give path to look in your own code and its libraries.)\n"); }
 		}
 	}
@@ -507,7 +507,7 @@ fn String c3_refs(String query @Desc("the name whose uses you want: an identifie
 	String path @Desc("a project directory or a .c3 file; its libraries (deps) are included. Default: the project you last gave to c3_check, c3_test, c3_run or c3_lookup") = "",
 	bool stdlib @Desc("search the C3 standard library of your c3c instead of a project") = false,
 	int limit @Desc("number of uses shown (1..100)") = 30)
-	@Desc("Where a name is used: file, line and the line itself, with the declaration marked. Read with the C3 grammar, so comments and strings are not uses. Use it before changing or deleting a function, to see who calls it, or with stdlib=true to see how the standard library itself uses a function.")
+	@Desc("Where a name is used: file, line and the line itself, with the declaration marked. Read with the C3 grammar, so comments and strings are not uses. Use it instead of grep and sed before you rename, move or delete a function, type or module: it matches whole identifiers only, so `Server` does not match `TcpServerSocket`, and comments and strings are not uses. With stdlib=true it shows how the standard library itself uses a name.")
 	@ReadOnly
 {
 	if (query.trim().len == 0) return "give query: the name to find, e.g. 'new_server' or 'HashMap.init'";

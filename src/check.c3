@@ -327,8 +327,24 @@ fn long ms_since(Clock t) => (long)(t.to_now() / 1_000_000);
 // Run argv (no shell), capture stdout+stderr up to max_output, kill the child past that or past the deadline.
 // *code gets the exit status (0 when we killed it ourselves), *timed_out says whether the deadline fired. A reader
 // thread does the blocking read, so this call always returns: with the output so far if something keeps the pipe open.
-fn String? run_capped(String[] cmd, int* code, bool* timed_out, ulong deadline_ms = DEADLINE_MS, sz max_output = MAX_OUTPUT, String sweep = "", String input = "")
+// `cwd`: the directory the child runs in. c3c treats every `*.c3l` in its working directory as a library, so a snippet
+// must not run in the directory the client was started in (a library being synced there breaks every call).
+fn String? run_capped(String[] cmd_in, int* code, bool* timed_out, ulong deadline_ms = DEADLINE_MS, sz max_output = MAX_OUTPUT, String sweep = "", String input = "", String cwd = "")
 {
+	String[] cmd = cmd_in;
+	$if !env::WIN32:
+		if (cwd.len > 0)
+		{
+			String[] wrapped = mem::talloc_array(String, cmd_in.len + 5);
+			wrapped[0] = "/bin/sh";
+			wrapped[1] = "-c";
+			wrapped[2] = "cd \"$1\" || exit 125; shift; exec \"$@\"";
+			wrapped[3] = "sh";
+			wrapped[4] = cwd;
+			foreach (i, c : cmd_in) wrapped[5 + i] = c;
+			cmd = wrapped;
+		}
+	$endif
 	Process spawned = process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT | process::SpawnOptions.INHERIT_ENV)!;
 	Process* proc = libc::calloc(1, Process::size);
 	*proc = spawned;
@@ -559,7 +575,7 @@ fn String? resolve_target(String target, bool* is_dir)
 		*is_dir = true;
 		return s;
 	}
-	if (!file::exists(s) || !s.ends_with(".c3")) return BAD_TARGET~;
+	if (!file::exists(s) || !outline::is_c3_file(s)) return BAD_TARGET~;
 	*is_dir = false;
 	return s;
 }
@@ -568,7 +584,7 @@ fn String? resolve_target(String target, bool* is_dir)
 fn String dir_of(String where, bool is_dir) => is_dir ? string::tformat("%s/", where) : string::tformat("%s", where[:(where.rindex_of("/") ?? 0) + 1]);
 
 // Shown for the faults above, so the model knows what to give.
-const String BAD_TARGET_TEXT = "path must be a project directory (containing project.json) or a .c3 file that exists";
+const String BAD_TARGET_TEXT = "path must be a project directory (containing project.json) or a .c3 or .c3i file that exists";
 
 // A build target is a name, never a flag: `build --trust=full` would undo the fixed --trust=none.
 fn bool valid_target(String t)
@@ -584,6 +600,10 @@ fn bool valid_target(String t)
 }
 
 const String NO_C3C = "could not start c3c: set the C3C environment variable to its path or put c3c on PATH";
+const String BAD_SANITIZE = "sanitize must be address, memory or thread (or empty for none)";
+
+fn bool valid_sanitize(String x) => x == "" || x == "address" || x == "memory" || x == "thread";
+
 const String BAD_OPT = "opt must be one of O0 O1 O2 O3 O4 O5 Os Oz (or empty for the default)";
 
 fn bool valid_opt(String o)
@@ -658,7 +678,7 @@ fn String parse_files(String files, FileList* out)
 		String t = line.trim(" \t\r");
 		if (t.len == 0) continue;
 		if (out.n >= MAX_EXTRA_FILES) return "files: at most 8 files";
-		if (t.len > 4096 || t[0] == '-' || !t.ends_with(".c3")) return string::tformat("files: '%s' is not a .c3 file", util::clip(t, 80));
+		if (t.len > 4096 || t[0] == '-' || !outline::is_c3_file(t)) return string::tformat("files: '%s' is not a .c3 or .c3i file", util::clip(t, 80));
 		Path? p = path::new(tmem, t);
 		if (catch p) return "files: invalid path";
 		Path? abs = p.absolute(tmem);
@@ -686,11 +706,11 @@ fn String parse_args(String args, Args* a)
 }
 
 fn String c3_check(String code @Desc("a C3 snippet or file content; a main function is not required") = "",
-	String path @Desc("instead of code: a project directory (with project.json) or a .c3 file on disk; a project is built (not run) in a scratch directory, nothing is written to it") = "",
-	String files @Desc("with code or a single .c3 path: more .c3 files compiled together with it, one path per line (a helper, a library's source)") = "",
+	String path @Desc("instead of code: a project directory (with project.json) or a .c3 / .c3i file on disk; a project is built (not run) in a scratch directory, nothing is written to it") = "",
+	String files @Desc("with code or a single .c3 / .c3i path: more .c3 or .c3i files compiled together with it, one path per line (a helper, an FFI binding, a library's source)") = "",
 	String target @Desc("with a project path: the build target, default the first") = "",
 	String platform @Desc("check for another platform without linking, e.g. 'windows-x64', 'macos-aarch64', 'linux-x64' (c3c --list-targets lists them)") = "")
-	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. Code in old 0.6/0.7 syntax that fails is rewritten mechanically (`int.sizeof` -> `int::size`, `isz` -> `sz`...) and the rewritten code is checked too. A project (path) is built through the link; a file that belongs to a project is checked with that project; a snippet or a file outside any project is only type-checked. `platform` checks for another OS without linking. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
+	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. Code in old 0.6/0.7 syntax that fails is rewritten mechanically (`int.sizeof` -> `int::size`, `isz` -> `sz`...) and the rewritten code is checked too. A project (path) is built through the link; a file that belongs to a project is checked with that project; a snippet or a file outside any project is only type-checked. `platform` checks for another OS without linking. It type-checks only: a clean result says nothing about leaks, double frees or use-after-free; run those with c3_test or c3_run and sanitize=address. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
 	@Timeout(30000)
 {
 	String bad = exclusive_args(code, path);
@@ -701,7 +721,7 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	if (err.len > 0) return err;
 	if (path.len > 0)
 	{
-		if (path.ends_with(".c3")) { context::note_file(path); }
+		if (outline::is_c3_file(path)) { context::note_file(path); }
 		else { outline::note_project(path); }
 		return check_path(path, target, platform, true, extra.list());
 	}
@@ -742,8 +762,12 @@ fn String compile_only(String file, String hide, String replacement, String plat
 	foreach (e : extra) a.add(e);
 	int status = 0;
 	bool timed_out = false;
-	String? out = run_capped(a.list(), &status, &timed_out);
+	Path? cwd = scratch_dir();
+	if (catch cwd) return "cannot create a temp directory";
+	defer (void)path::rmtree(cwd);
+	String? out = run_capped(a.list(), &status, &timed_out, DEADLINE_MS, MAX_OUTPUT, "", "", (String)cwd);
 	if (catch out) return NO_C3C;
+	if (status == 126 || status == 127) return NO_C3C;   // the shell that sets the working directory could not start c3c
 	String shown = report(out, status, timed_out, hide, replacement, "OK: no errors", DEADLINE_MS);
 	return string::tformat("%s%s", shown, after_compile(shown));
 }
@@ -823,8 +847,9 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	bool timed_out = false;
 	// capture more than is shown: the [PASS] lines are dropped below, and they must not push the
 	// failures and the summary line past the cap
-	String? out = run_capped(argv, &status, &timed_out, deadline_ms, MAX_RUN_CAPTURE, sd, input);
+	String? out = run_capped(argv, &status, &timed_out, deadline_ms, MAX_RUN_CAPTURE, sd, input, sd);
 	if (catch out) return NO_C3C;
+	if (status == 126 || status == 127) return NO_C3C;
 	String shown = drop_runtime_frames(report(out, status, timed_out, hide, replacement, ok, deadline_ms));
 	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
 	return string::tformat("%s%s", shown, after_compile(shown));
@@ -833,13 +858,15 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 fn String c3_test(String path @Desc("a project directory (with project.json) or a .c3 file with @test functions") = "",
 	String filter @Desc("run only the tests whose name matches") = "",
 	String platform @Desc("type-check the tests for another platform, e.g. 'windows-x64' (they cannot run here)") = "",
-	int timeout_s @Desc("give up after this many seconds (1..120, default 120); a test stuck in a loop is killed") = 0)
+	int timeout_s @Desc("give up after this many seconds (1..120, default 120); a test stuck in a loop is killed") = 0,
+	String sanitize @Desc("run under a sanitizer: address (memory errors and leaks), memory or thread; empty for none") = "")
 	@Desc("USE THIS INSTEAD OF running `c3c test` yourself. Builds the project or file in a scratch directory, runs its @test functions and returns the failures only, with the failing assertion and file:line, and the summary line; compile errors come with hints. Nothing is written to your tree. 120 s limit.")
 	@Timeout(150000)
 {
 	if (path.len == 0) return "give path: a project directory (with project.json) or a .c3 file with @test functions";
 	if (filter.len > 0 && filter[0] == '-') return "filter must be a test name, not an option";
 	if (!valid_target(platform)) return BAD_TARGET_NAME;
+	if (!valid_sanitize(sanitize)) return BAD_SANITIZE;
 	bool is_dir;
 	String? where = resolve_target(path, &is_dir);
 	if (catch where) return BAD_TARGET_TEXT;
@@ -849,6 +876,7 @@ fn String c3_test(String path @Desc("a project directory (with project.json) or 
 	defer (void)path::rmtree(scratch);
 	String base = dir_of(where, is_dir);
 	Args m;
+	if (sanitize.len > 0) m.add(string::tformat("--sanitize=%s", sanitize));
 	if (filter.len > 0)
 	{
 		m.add("--test-filter");
@@ -874,7 +902,8 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	String files @Desc("with code or a single .c3 path: more .c3 files compiled into the program, one path per line") = "",
 	String target @Desc("with a project path: the target to run") = "",
 	String opt @Desc("optimization level: O0 O1 O2 O3 O4 O5 Os Oz; default is the compiler's (use it to compare speed)") = "",
-	int timeout_s @Desc("give up after this many seconds (1..120, default 120); a program stuck in a loop is killed") = 0)
+	int timeout_s @Desc("give up after this many seconds (1..120, default 120); a program stuck in a loop is killed") = 0,
+	String sanitize @Desc("run under a sanitizer: address (memory errors and leaks), memory or thread; empty for none") = "")
 	@Desc("USE THIS INSTEAD OF `c3c compile-run` or `c3c run`. Builds in a scratch directory and runs the program (arguments, stdin and extra source files can be given; 120 s limit), returning its output or the compile errors with hints. A program that needs its own working directory or files next to it: `c3c build` and run it in the shell.")
 	@Timeout(150000)
 {
@@ -882,6 +911,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	if (bad.len > 0) return bad;
 	if (!valid_target(target)) return BAD_TARGET_NAME;
 	if (!valid_opt(opt)) return BAD_OPT;
+	if (!valid_sanitize(sanitize)) return BAD_SANITIZE;
 	if (input.len > MAX_STDIN) return "input: at most 16384 bytes";
 	FileList extra;
 	String err = parse_files(files, &extra);
@@ -894,6 +924,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	defer (void)path::rmtree(scratch);
 	Args m;
 	if (opt.len > 0) m.add(string::tformat("-%s", opt));
+	if (sanitize.len > 0) m.add(string::tformat("--sanitize=%s", sanitize));
 	String hide;
 	String replacement = "";
 	String where = "";

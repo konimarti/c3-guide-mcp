@@ -1,6 +1,7 @@
 module c3guide::test::check;
 import c3guide::check, c3guide::util, c3guide::hints, c3guide::test::support;
 import std::core::string, std::io, std::io::file, std::io::path, std::os::env, std::time, std::time::clock;
+import std::os::posix;
 
 const String[*] TOKENS = { "$include", "$exec", "$embed" };
 const String[*] FLAGS = { "--trust=none", "--no-obj", "--no-entry", "compile-only" };
@@ -631,7 +632,7 @@ fn void check_and_run_take_extra_source_files() @test
 	assert(has(check::c3_check(code, files: helper), "OK: no errors"));
 	assert(has(check::c3_run(code, files: helper), "42"));
 	assert(has(check::c3_check(code, files: "/nonexistent/x.c3"), "does not exist"));
-	assert(has(check::c3_check(code, files: "x.txt"), "not a .c3 file"));
+	assert(has(check::c3_check(code, files: "x.txt"), "not a .c3"));
 }
 
 fn void test_tool_checks_tests_for_another_platform() @test
@@ -655,4 +656,42 @@ fn void test_tool_platform_check_finds_an_error_of_that_platform() @test
 	assert(!has(here, "error") && has(here, "passed"), "the tests run on this platform: %s", here);
 	String win = check::c3_test(root, platform: "windows-x64");
 	assert(has(win, "error"), "and the Windows type-check sees the error: %s", win);
+}
+
+// c3c reads every `*.c3l` in its working directory: a broken library next to the server must not break a snippet
+fn void a_broken_library_in_the_servers_directory_does_not_break_a_snippet() @test
+{
+	Path base = path::temp_directory(tmem)!!;
+	Path dir = base.tappend(string::tformat("c3guide-cwd-%d", (long)clock::now()))!!;
+	path::mkdir(dir.tappend("broken.c3l")!!, recursive: true)!!;
+	Path back = path::tcwd()!!;
+	assert(posix::chdir(((String)dir).zstr_tcopy()) == 0);
+	String r = check::c3_check("fn void main() {}");
+	String s = check::c3_run("import std::io; fn void main() { io::printn(\"hi\"); }");
+	assert(posix::chdir(((String)back).zstr_tcopy()) == 0);
+	(void)path::rmtree(dir);
+	assert(r.starts_with("OK"), "%s", r);
+	assert(s.contains("hi"), "%s", s);
+}
+
+fn void a_sanitizer_finds_a_memory_error() @test
+{
+	String code = "import std::io;\nfn void main()\n{\n\tint* a = mem::alloc_array(int, 4);\n\ta[5] = 1;\n\tio::printn(a[5]);\n}";
+	String refused = check::c3_run(code, sanitize: "bogus");
+	assert(refused.contains("sanitize must be"), "%s", refused);
+	String bad = check::c3_run(code, sanitize: "address");
+	assert(bad.contains("AddressSanitizer"), "%s", bad);
+}
+
+fn void a_c3i_file_is_checked_alone_and_with_a_snippet() @test
+{
+	Path dir = path::temp_directory(tmem)!!.tappend(string::tformat("c3guide-c3i-%d", (long)clock::now()))!!;
+	path::mkdir(dir)!!;
+	defer (void)path::rmtree(dir);
+	String f = string::tformat("%s/b.c3i", (String)dir);
+	file::save(f, "module b;\nextern fn int abs(int x);\n")!!;
+	String alone = check::c3_check(path: f);
+	assert(alone.starts_with("OK"), "%s", alone);
+	String together = check::c3_check("import b;\nfn void main() { int x = b::abs(-1); }", files: f);
+	assert(together.starts_with("OK"), "%s", together);
 }

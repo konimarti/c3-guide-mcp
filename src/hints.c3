@@ -325,6 +325,71 @@ fn Rewrite rewrite_once(String code, DString* notes)
  `isz` is not a type in 0.8, so code that uses it does not parse as a whole: it goes first, then the rest is
  read from the tree of the repaired code.
 *>
+// `return io::EOF?;` -> `return io::EOF~;` (0.8 creates an optional with `~`). Only the exact shape `return`, a name, `?`, `;`
+// outside strings, characters and comments: `return a ? b : c;` never has `?` straight after the name and before `;`.
+fn String fault_returns(String code, int* count)
+{
+	DString out = dstring::temp();
+	sz i = 0;
+	while (i < code.len)
+	{
+		char c = code[i];
+		if (c == '"' || c == '\'')   // string or character literal: copied as it is
+		{
+			sz j = i + 1;
+			while (j < code.len && code[j] != c) j += code[j] == '\\' ? 2 : 1;
+			j = j < code.len ? j + 1 : code.len;
+			out.append(code[i:j - i]);
+			i = j;
+			continue;
+		}
+		if (c == '/' && i + 1 < code.len && code[i + 1] == '/')
+		{
+			sz j = i;
+			while (j < code.len && code[j] != '\n') j++;
+			out.append(code[i:j - i]);
+			i = j;
+			continue;
+		}
+		if ((c == '/' && i + 1 < code.len && code[i + 1] == '*') || (c == '<' && i + 1 < code.len && code[i + 1] == '*'))
+		{
+			String close = c == '/' ? "*/" : "*>";
+			sz j = i + 2;
+			while (j + 1 < code.len && code[j:2] != close) j++;
+			j = j + 1 < code.len ? j + 2 : code.len;
+			out.append(code[i:j - i]);
+			i = j;
+			continue;
+		}
+		bool word_start = (c.is_alpha() || c == '_') && (i == 0 || !(code[i - 1].is_alnum() || code[i - 1] == '_' || code[i - 1] == '$' || code[i - 1] == '@'));
+		if (word_start && code[i..].starts_with("return") && i + 6 < code.len && (code[i + 6] == ' ' || code[i + 6] == '\t'))
+		{
+			sz j = i + 6;
+			while (j < code.len && (code[j] == ' ' || code[j] == '\t')) j++;
+			sz name = j;
+			while (j < code.len && (code[j].is_alnum() || code[j] == '_' || code[j] == ':')) j++;
+			sz q = j;
+			while (q < code.len && (code[q] == ' ' || code[q] == '\t')) q++;
+			if (j > name && code[j - 1] != ':' && j < code.len && code[j] == '?' && j + 1 < code.len)
+			{
+				sz e = j + 1;
+				while (e < code.len && (code[e] == ' ' || code[e] == '\t')) e++;
+				if (e < code.len && code[e] == ';')
+				{
+					out.append(code[i:j - i]);
+					out.append("~");
+					*count += 1;
+					i = j + 1;
+					continue;
+				}
+			}
+		}
+		out.append(c);
+		i++;
+	}
+	return out.str_view();
+}
+
 fn Rewrite rewrite(String code)
 {
 	if (rewrite_nesting >= MAX_REWRITE_NESTING) return { code, 0, "" };   // `$sizeof($sizeof($sizeof(...` re-enters this function
@@ -332,6 +397,14 @@ fn Rewrite rewrite(String code)
 	defer rewrite_nesting--;
 	DString notes = dstring::temp();
 	int total = 0;
+	// `return FAULT?;` does not parse in 0.8 (the tree has no node for it): a text pass, before the tree is read
+	int faults = 0;
+	code = fault_returns(code, &faults);
+	if (faults > 0)
+	{
+		note(&notes, "return FAULT?; -> return FAULT~;");
+		total += faults;
+	}
 	for (int pass = 0; pass < 3; pass++)
 	{
 		Rewrite r = rewrite_once(code, &notes);

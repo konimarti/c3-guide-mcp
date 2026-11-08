@@ -61,6 +61,19 @@ def chunk_md(text, min_level=1):
 
 CWD = os.getcwd()
 
+# Statements of the manual that the compiler contradicts, checked by hand. (old text, corrected text). A correction
+# whose old text is gone (the manual was fixed) is reported, then dropped from this list.
+ERRATA = [('* Every other module whose path shares the same top-level component as the current module. Within a module `foo::abc`, the modules `foo`, `foo::cde`, and so on are implicitly imported.',
+           '* The parent modules of the current module, used with their module name: within `foo::abc::x`, `foo::f()` and `abc::g()` need no `import`. Sibling modules (`foo::cde`) are not implicitly imported ("lateral implicit imports removed" in the release notes): import them. [Corrected by c3-guide-mcp: the c3c 0.8.5 manual says every module under the same top-level component is imported; c3c 0.8.6 rejects a call into a sibling module without `import`.]')]
+
+def apply_errata(text):
+    for old, new in ERRATA:
+        if old in text:
+            text = text.replace(old, new)
+        else:
+            print("errata no longer needed (the manual changed): " + old[:60])
+    return text
+
 def clean(s):
     # docgen evaluates $$PROJECT_PATH and similar: keep the machine's paths out of the snapshot
     return s.replace(RS, " ").replace(US, " ").replace(CWD, "<project>")
@@ -166,7 +179,7 @@ def main():
     ver = subprocess.run([os.path.join(c3, "c3c"), "--version"], capture_output=True, text=True).stdout
     ver = re.search(r"Version:\s*(\S+)", ver).group(1)
     recs = []
-    manual = chunk_md(open(os.path.join(c3, "MANUAL.md"), encoding="utf-8").read())
+    manual = chunk_md(apply_errata(open(os.path.join(c3, "MANUAL.md"), encoding="utf-8").read()))
     seen = {p for p, _ in manual}
     manual = [(p, b) for p, b in manual if not p.lower().endswith("table of contents") and "Table of Contents" not in p]
     recs += [rec("doc", p, b) for p, b in manual]

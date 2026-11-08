@@ -7,8 +7,8 @@ const String INSTRUCTIONS = `Your memory of C3 is probably outdated (most traini
 Do not write C3 from memory. To check, test or run code use these tools and not "c3c compile", "c3c test" or "c3c run" typed by hand: they run the real compiler and add what its messages lack. Use c3c directly when you need a shell: "c3c build" for a binary, creating a project, running the built app in its own directory.
 - c3_lookup before you use any name: one call for your project, its libraries and the standard library. A name gives the exact signature, docs, location and an example, or says it does not exist and what it became. Describe what you need ("read line from stdin") when you do not know the name. A path alone lists the declarations of a project.
 - c3_check on every snippet before you show it, and on a project or file with path. Old 0.7 syntax is rewritten for you.
-- c3_test runs the @test functions of a project or file and returns the failures; c3_run builds and runs a program (arguments, stdin).
-- c3_refs for where a name is used, before you change or delete it.
+- c3_test runs the @test functions of a project or file and returns the failures; c3_run builds and runs a program (arguments, stdin). Both take sanitize=address|memory|thread.
+- c3_refs for where a name is used: before you rename, move or delete one, use it instead of grep and sed (whole identifiers only; comments and strings are not uses).
 - c3_search for how to do something (manual, recipes); scope=changes when old syntax or an old name fails; scope=syntax for the exact lists of attributes, builtins, keywords and type properties.
 Trust the compiler over this documentation when they disagree.`;
 

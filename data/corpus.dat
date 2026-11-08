@@ -12936,7 +12936,7 @@ It is a compile-time error if the compiler cannot locate an imported module, or 
 Every section implicitly imports:
 
 * The standard-library module `std::core` and its submodules. The names declared there are available without any explicit `import`.
-* Every other module whose path shares the same top-level component as the current module. Within a module `foo::abc`, the modules `foo`, `foo::cde`, and so on are implicitly imported.
+* The parent modules of the current module, used with their module name: within `foo::abc::x`, `foo::f()` and `abc::g()` need no `import`. Sibling modules (`foo::cde`) are not implicitly imported ("lateral implicit imports removed" in the release notes): import them. [Corrected by c3-guide-mcp: the c3c 0.8.5 manual says every module under the same top-level component is imported; c3c 0.8.6 rejects a call into a sibling module without `import`.]
 
 Implicit imports may be supplemented with explicit ones; an explicit `import` of an implicitly-imported module is permitted and harmless.doc11_2 Specification > C3 Specification > 11_2_19 Modules > Name resolution#### Name resolution
 
