@@ -1,4 +1,5 @@
 module c3guide::test::tools;
+import c3guide::compiler;
 import c3guide::tools, c3guide::util, c3guide::search, c3guide::check, c3guide::test::support;
 import std::core::string, std::time::clock;
 
@@ -290,7 +291,7 @@ fn void a_lookup_shows_one_example_and_the_source_on_request() @test
 	String none = tools::c3_lookup("String.split", "", 0, false);
 	assert(!none.contains("### Example:"), "%s", none);
 	String src = tools::c3_lookup("io::printfn", "", 0, true);
-	assert(src.contains("Source (") || check::stdlib_root().len == 0, "%s", src);
+	assert(src.contains("Source (") || compiler::stdlib_root().len == 0, "%s", src);
 }
 
 fn void a_name_that_is_a_method_or_a_builtin_says_so() @test

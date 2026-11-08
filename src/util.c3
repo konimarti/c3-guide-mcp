@@ -105,3 +105,20 @@ fn String canonical(String p)
 
 // True when `target` is `root` or below it (both canonical).
 fn bool inside(String root, String target) => target == root || (target.len > root.len && target.starts_with(root) && target[root.len] == '/');
+
+// Replace every `needle` in `s` by `replacement`. (std String.replace returned corrupted bytes for a 4 KB
+// string without a match in c3c 0.8.5, hence the small loop.)
+fn String redact(String s, String needle, String replacement)
+{
+	DString out = dstring::temp();
+	while (true)
+	{
+		sz? at = s.index_of(needle);
+		if (catch at) break;
+		out.append(s[:at]);
+		out.append(replacement);
+		s = s[at + needle.len..];
+	}
+	out.append(s);
+	return out.str_view();
+}

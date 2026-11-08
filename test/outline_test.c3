@@ -1,4 +1,5 @@
 module c3guide::test::outline;
+import c3guide::compiler, c3guide::proc;
 import c3guide::outline, c3guide::tools, c3guide::check, c3guide::util, c3guide::test::support;
 import std::core::string, std::os::env, std::io, std::io::file, std::io::path, std::time::clock;
 
@@ -45,7 +46,7 @@ fn void outlines_a_project_and_a_file() @test
 	assert(outline::outline_path("src").len <= 6 * 1024 + 128, "capped");
 }
 
-fn Path project_dir() @local => check::scratch_dir()!!;
+fn Path project_dir() @local => proc::scratch_dir()!!;
 
 fn void a_long_project_is_cut_and_says_so() @test
 {
@@ -186,7 +187,7 @@ fn void main() { io::printn("add"); }
 
 fn Path lookup_project()
 {
-	Path dir = check::scratch_dir()!!;
+	Path dir = proc::scratch_dir()!!;
 	String root = (String)dir;
 	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
 	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
@@ -270,7 +271,7 @@ fn void refs_are_uses_in_code_not_in_strings_or_comments() @test
 
 fn void refs_search_the_installed_standard_library() @test
 {
-	if (check::stdlib_root().len == 0) return;
+	if (compiler::stdlib_root().len == 0) return;
 	String r = outline::refs_reply("is_dir", "", true, 5);
 	assert(r.contains("use(s) of 'is_dir'") && r.contains("io/path.c3"), "%s", r);
 }
@@ -290,7 +291,7 @@ fn void refs_search_the_library_archives_too() @test
 
 fn void a_rename_is_a_plan_of_exact_edits_and_writes_nothing() @test
 {
-	Path dir = check::scratch_dir()!!;
+	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
 	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
@@ -310,7 +311,7 @@ fn void a_rename_is_a_plan_of_exact_edits_and_writes_nothing() @test
 
 fn void a_search_path_that_leaves_the_project_and_its_parent_is_not_read() @test
 {
-	Path dir = check::scratch_dir()!!;
+	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
 	path::mkdir(path::new(tmem, string::tformat("%s/a/proj/src", root))!!, recursive: true)!!;

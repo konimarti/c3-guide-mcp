@@ -1,4 +1,5 @@
 module c3guide::live;
+import c3guide::compiler, c3guide::proc, c3guide::util;
 import std::core::string, std::collections::list, std::collections::object, std::encoding::json, std::io::file, std::io::path;
 import c3guide::corpus, c3guide::check;
 
@@ -180,7 +181,7 @@ fn void add_module(Object* mod, String cwd, List{Entry}* out)
 			String doc = doc_text(it);
 			String body = doc.len > 0 ? string::tformat("%s\n%s", signature(it), doc) : signature(it);
 			// `env::PROJECT_PATH` evaluates to the directory docgen ran in: keep that machine's path out of the answers
-			if (cwd.len > 1) body = check::redact(body, cwd, "<project>");
+			if (cwd.len > 1) body = util::redact(body, cwd, "<project>");
 			// docgen prints the path relative to where the server runs, or absolute, or through a symlink: every
 			// standard library file lives under lib/std, so keep the path from there
 			String file = text(it, "file");
@@ -223,9 +224,9 @@ fn void ensure()
 // Returns true when it did. Any failure leaves the snapshot as it was.
 fn bool overlay()
 {
-	String have = check::compiler_version();
+	String have = compiler::compiler_version();
 	if (have.len == 0 || have == corpus::snapshot_version) return false;
-	return overlay_from(check::c3c_binary(), have);
+	return overlay_from(compiler::c3c_binary(), have);
 }
 
 extern fn CInt malloc_trim(usz pad) @feat(LINUX);   // glibc: give the memory freed after parsing 2.8 MB of JSON back to the system
@@ -244,7 +245,7 @@ fn bool overlay_from(String binary, String version)
 // The symbols of the standard library of the compiler at `binary`, as read by `c3c docgen`.
 fn Entry[]? read_live(String binary)
 {
-	String install = check::install_dir(binary);
+	String install = compiler::install_dir(binary);
 	if (install.len == 0) return NO_STDLIB~;
 	// A release keeps the library in <install>/lib/std. A build tree keeps a copy there and the real one next to it,
 	// and docgen of the copy fails ("would shadow a previous declaration": the compiler also loads its own). So: the
@@ -264,7 +265,7 @@ fn Entry[]? docgen_entries(String binary, String libstd) => @pool()
 	String[] argv = { binary, "--trust=none", "docgen", libstd, "--json" };
 	int status = 0;
 	bool timed_out = false;
-	String? out = check::run_capped(argv, &status, &timed_out, DOCGEN_MS, MAX_DOCGEN, "", "", check::neutral_cwd());
+	String? out = proc::run_capped(argv, &status, &timed_out, { .deadline_ms = DOCGEN_MS, .max_output = MAX_DOCGEN });
 	if (catch out) return NO_STDLIB~;
 	if (timed_out || status != 0 || out.len == 0) return NO_STDLIB~;
 	Entry[] live = entries_from_json(out)!;

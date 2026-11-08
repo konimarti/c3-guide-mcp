@@ -1,4 +1,5 @@
 module c3guide::outline;
+import c3guide::compiler;
 import std::core::string, std::io, std::io::file, std::io::path, std::collections::list, std::sort, std::compression::zip;
 import std::encoding::json, std::collections::object;
 import c3guide::ts, c3guide::util, c3guide::context, c3guide::check;
@@ -685,7 +686,7 @@ fn String refs_reply(String query, String root_arg, bool stdlib, int limit, Stri
 	String label;
 	if (stdlib)
 	{
-		String root = check::stdlib_root();
+		String root = compiler::stdlib_root();
 		if (root.len == 0) return "cannot find the standard library sources of the installed c3c";
 		base = string::tformat("%s/lib/std", root);
 		label = "the standard library";

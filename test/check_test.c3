@@ -1,4 +1,6 @@
 module c3guide::test::check;
+import c3guide::format;
+import c3guide::compiler, c3guide::proc;
 import c3guide::check, c3guide::util, c3guide::hints, c3guide::test::support;
 import std::core::string, std::io, std::io::file, std::io::path, std::os::env, std::time, std::time::clock;
 import std::os::posix;
@@ -140,7 +142,7 @@ fn void a_compiler_that_closes_its_output_but_keeps_running_still_gets_the_deadl
 	int code = 0;
 	bool timed_out = false;
 	Clock t = clock::now();
-	String? out = check::run_capped(argv, &code, &timed_out, 1500);
+	String? out = proc::run_capped(argv, &code, &timed_out, { .deadline_ms = 1500 });
 	long ms = (long)t.to_now() / 1_000_000;
 	assert(@ok(out) && timed_out && ms < 6000, "%d ms, timed out %s", (int)ms, timed_out ? "yes" : "no");
 }
@@ -423,16 +425,16 @@ fn void run_takes_an_optimization_level() @test
 
 fn void c3c_is_found_in_path_and_the_version_is_read() @test
 {
-	Path dir = check::scratch_dir()!!;
+	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
-	String fake = string::tformat("%s/%s", (String)dir, check::EXE);
+	String fake = string::tformat("%s/%s", (String)dir, compiler::EXE);
 	file::save(fake, "x")!!;
-	String list = string::tformat("/nonexistent%s%s", check::PATH_SEP, (String)dir);
-	String? hit = check::which(check::EXE, list);
+	String list = string::tformat("/nonexistent%s%s", compiler::PATH_SEP, (String)dir);
+	String? hit = compiler::which(compiler::EXE, list);
 	if (catch hit) assert(false, "not found in PATH");
 	assert(hit == fake, "path lookup: %s", hit);
-	assert(@catch(check::which(check::EXE, "/nonexistent")) == check::NOT_FOUND);
-	assert(check::compiler_version().len > 0, "c3c --version is readable");
+	assert(@catch(compiler::which(compiler::EXE, "/nonexistent")) == compiler::NOT_FOUND);
+	assert(compiler::compiler_version().len > 0, "c3c --version is readable");
 }
 
 fn void ambiguous_names_get_no_hint_list() @test
@@ -500,7 +502,7 @@ fn void main()
 
 fn void a_file_of_a_project_is_checked_with_its_project() @test
 {
-	Path dir = check::scratch_dir()!!;
+	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
 	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
@@ -539,8 +541,8 @@ fn void hints_are_complete_and_short() @test
 
 fn void the_version_note_is_said_once() @test
 {
-	(void)check::version_note();
-	assert(check::version_note() == "", "a second reply stays quiet");
+	(void)compiler::version_note();
+	assert(compiler::version_note() == "", "a second reply stays quiet");
 }
 
 fn void a_library_manifest_without_targets_is_explained() @test
@@ -568,7 +570,7 @@ fn void a_snippet_can_be_checked_for_another_platform() @test
 
 fn void a_project_can_be_checked_for_another_platform() @test
 {
-	Path dir = check::scratch_dir()!!;
+	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
 	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
@@ -647,7 +649,7 @@ fn void test_tool_checks_tests_for_another_platform() @test
 
 fn void test_tool_platform_check_finds_an_error_of_that_platform() @test
 {
-	Path dir = check::scratch_dir()!!;
+	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
 	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
@@ -699,7 +701,7 @@ fn void a_c3i_file_is_checked_alone_and_with_a_snippet() @test
 
 fn void format_returns_the_formatted_snippet() @test
 {
-	String? f = check::find_c3f();
+	String? f = format::find_c3f();
 	if (catch f) { io::printn("skipped: c3f is not installed"); return; }
 	String r = check::c3_check("module a;\nfn int  f(int x){return x+1;}\n", format: true);
 	assert(has(r, "OK") && has(r, "c3f: formatted code") && has(r, "{ return x + 1; }"), "%s", r);
@@ -723,7 +725,7 @@ fn void a_program_does_not_see_the_clients_secrets() @test
 // $embed reads any file at compile time and $echo prints it: not for code that reaches the compiler by path or files
 fn void a_file_or_project_that_reads_outside_itself_is_refused() @test
 {
-	Path dir = check::scratch_dir()!!;
+	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
 	path::mkdir(path::new(tmem, string::tformat("%s/proj/src", root))!!, recursive: true)!!;
@@ -757,7 +759,7 @@ fn void a_file_or_project_that_reads_outside_itself_is_refused() @test
 // cflags and c-sources of a project are code (cc runs them): a check never reaches cc
 fn void a_project_check_never_runs_the_c_compiler() @test
 {
-	Path dir = check::scratch_dir()!!;
+	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
 	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;

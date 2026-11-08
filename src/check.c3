@@ -1,6 +1,6 @@
 module c3guide::check;
 import mcp, libc, std::os::posix, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
-import c3guide::guard, c3guide::util, c3guide::hints, c3guide::corpus, c3guide::context, c3guide::outline, std::time;
+import c3guide::guard, c3guide::proc, c3guide::compiler, c3guide::format, c3guide::util, c3guide::hints, c3guide::corpus, c3guide::context, c3guide::outline, std::time;
 
 // Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
 // fresh temp dir and compiled with a FIXED command line:
@@ -17,8 +17,6 @@ import c3guide::guard, c3guide::util, c3guide::hints, c3guide::corpus, c3guide::
 // linker. Do not run the server as a user that can read secrets regardless.
 const sz MAX_CODE = 32 * 1024;
 const sz MAX_FIX = 12 * 1024;
-const sz MAX_OUTPUT = 4 * 1024;
-const ulong DEADLINE_MS = 10000;
 const ulong PROJECT_CHECK_MS = 25000;   // c3_check of a project: under the tool's 30 s limit, so our own message is what the caller sees
 const ulong RUN_DEADLINE_MS = 120000;   // c3_test / c3_run: the program has to build and run (the most a caller may ask for)
 
@@ -28,505 +26,11 @@ const sz MAX_RUN_OUTPUT = 6 * 1024;
 const sz MAX_RUN_CAPTURE = 64 * 1024;
 const String[*] FORBIDDEN = { "$embed", "$include", "$exec" };
 
-faultdef NOT_FOUND;
-
-const String EXE = env::WIN32 ? "c3c.exe" : "c3c";   // CreateProcess finds a program on PATH only with its extension
-const String PATH_SEP = env::WIN32 ? ";" : ":";
-
-// The first `name` found in the directories of `path_var`.
-fn String? which(String name, String path_var)
-{
-	foreach (dir : path_var.tsplit(PATH_SEP))
-	{
-		if (dir.len == 0) continue;
-		String p = string::tformat("%s/%s", dir, name);
-		if (file::is_file(p)) return p;
-	}
-	return NOT_FOUND~;
-}
-
-// Editors start the server with a thin environment (a GUI launcher on macOS has no /opt/homebrew/bin in PATH),
-// so after $C3C and PATH, look where c3c is usually installed.
-fn String? find_c3c()
-{
-	String? p = env::tget_var("PATH");
-	if (try p) { String? f = which(EXE, p); if (try f) return f; }
-	String home = env::tget_var("HOME") ?? env::tget_var("USERPROFILE") ?? "";
-	String local = env::tget_var("LOCALAPPDATA") ?? "";
-	String[*] common = { "/usr/local/bin", "/opt/homebrew/bin", "/opt/c3" };
-	foreach (d : common) { String? f = which(EXE, d); if (try f) return f; }
-	String[*] under_home = { ".local/bin", "bin", "c3" };
-	if (home.len > 0) foreach (d : under_home) { String? f = which(EXE, string::tformat("%s/%s", home, d)); if (try f) return f; }
-	if (local.len > 0) { String? f = which(EXE, string::tformat("%s/c3", local)); if (try f) return f; }
-	return NOT_FOUND~;
-}
-
-char[1024] c3c_buf;   // the cached answer lives here: temp memory is reset between calls
-String found_c3c;
-
-fn String c3c_binary()
-{
-	String? v = env::tget_var("C3C");
-	if (try v) { if (v.len > 0) return v; }
-	if (found_c3c.len > 0) return found_c3c;
-	String? f = find_c3c();
-	if (catch f) return EXE;   // not found: let the spawn fail with the usual message (and look again next time)
-	if (f.len >= c3c_buf.len) return f;
-	c3c_buf[:f.len] = f[..];
-	found_c3c = (String)c3c_buf[:f.len];
-	return found_c3c;
-}
-
-const ulong VERSION_MS = 3000;   // `c3c --version` answers at once; one that does not is not worth waiting for
-
-// The text after the colon of the `c3c --version` line holding `label`, "" when absent or c3c cannot run.
-// Temp memory: copy it to keep it.
-fn String version_field(String binary, String label)
-{
-	String[] argv = { binary, "--version" };
-	int status = 0;
-	bool timed_out = false;
-	String? out = run_capped(argv, &status, &timed_out, VERSION_MS);
-	if (catch out) return "";
-	foreach (line : out.tsplit("\n"))
-	{
-		if (!line.contains(label)) continue;
-		sz colon = line.index_of(":") ?? 0;
-		return line[colon..].trim(" :\t\r");
-	}
-	return "";
-}
-
-// The release a compiler reports: "0.8.5_1", or "0.8.6" for "0.8.6 (Pre-release, Nov  2 2026 15:21:29)".
-fn String version_of(String binary)
-{
-	String v = version_field(binary, "Compiler Version:");
-	return v[:v.index_of(" ") ?? v.len];
-}
-
-// The directory the compiler is installed in, "" when unknown.
-fn String install_dir(String binary) => version_field(binary, "Installed directory:");
-
-// The directory the standard library sources are under (lib/std/... inside it), "" when it cannot be found. A release
-// keeps lib/ in the install directory; a build tree keeps the real one next to it.
-char[1024] stdlib_buf;
-String stdlib_dir_found;
-
-fn String stdlib_root()
-{
-	if (stdlib_dir_found.len > 0) return stdlib_dir_found;
-	String install = install_dir(c3c_binary());
-	if (install.len == 0) return "";
-	String[2] candidates = { string::tformat("%s", install), string::tformat("%s/..", install) };
-	foreach (c : candidates)
-	{
-		if (!file::exists(string::tformat("%s/lib/std", c)) || c.len >= stdlib_buf.len) continue;
-		stdlib_buf[:c.len] = c[..];
-		stdlib_dir_found = (String)stdlib_buf[:c.len];
-		return stdlib_dir_found;
-	}
-	return "";
-}
-
-// The version of the compiler the tools run, asked once. Kept in a fixed buffer: temp memory is reset between calls.
-char[64] version_buf;
-String installed_version;
-bool version_asked;
-
-fn String compiler_version()
-{
-	if (installed_version.len > 0 || version_asked) return installed_version;
-	version_asked = true;   // a c3c that cannot run is asked once, not on every reply
-	String v = version_of(c3c_binary());
-	if (v.len == 0 || v.len >= version_buf.len) return "";
-	version_buf[:v.len] = v[..];
-	installed_version = (String)version_buf[:v.len];
-	return installed_version;
-}
-
-// The version of the `c3c` a developer gets by typing `c3c`, when that is a different program than the one
-// the tools run (C3C points elsewhere). "" when they are the same program or none is on PATH.
-char[64] path_version_buf;
-String path_version;
-bool path_version_asked;
-
-fn String path_c3c_version()
-{
-	if (path_version_asked) return path_version;
-	String? p = env::tget_var("PATH");
-	if (catch p) return "";
-	String? f = which(EXE, p);
-	if (catch f) return "";
-	path_version_asked = true;
-	if (f == c3c_binary()) return "";
-	String v = version_of(f);
-	if (v.len == 0 || v.len >= path_version_buf.len) return "";
-	path_version_buf[:v.len] = v[..];
-	path_version = (String)path_version_buf[:v.len];
-	return path_version;
-}
-
-// The docs are a snapshot of one c3c release. When the installed compiler is another one, say so: a signature
-// may have changed, and the compiler is right.
-// Said on every failing compile: the code may behave differently under the compiler a developer types as `c3c`.
-// "" when the tools run that same compiler (or the other one cannot be found).
-fn String path_mismatch_note()
-{
-	String have = compiler_version();
-	String other = path_c3c_version();
-	if (have.len == 0 || other.len == 0 || other == have) return "";
-	return string::tformat("\nnote: the tools run c3c %s (%s), but `c3c` on your PATH is %s. The same code can compile differently there (a stricter or looser check): set C3C to the compiler you build with.\n", have, c3c_binary(), other);
-}
-
 // The hints and, when the compile failed and the compilers differ, the note above.
 fn String after_compile(String shown)
 {
-	String note = shown.contains("error:") ? path_mismatch_note() : "";
+	String note = shown.contains("error:") ? compiler::path_mismatch_note() : "";
 	return string::tformat("%s%s", hints::diagnostics(shown), note);
-}
-
-bool version_noted;
-
-// Said once per session, and again when a name was not found (that is when a version difference matters).
-fn String version_note(bool relevant = false)
-{
-	String have = compiler_version();
-	if (have.len == 0 || (version_noted && !relevant)) return "";
-	if (corpus::symbols_live)
-	{
-		// the signatures were read from this compiler: only the manual and the release notes come from the snapshot
-		if (version_noted) return "";
-		version_noted = true;
-		return string::tformat("\nnote: standard library signatures are read from your c3c %s. The manual and release notes describe c3c %s.\n", have, corpus::snapshot_version);
-	}
-	if (have != corpus::symbols_version)
-	{
-		version_noted = true;
-		return string::tformat("\nnote: these docs describe c3c %s, but the tools run c3c %s. A signature that fails to compile may have changed: trust the compiler, and c3_search scope=changes lists renames.\n", corpus::symbols_version, have);
-	}
-	String other = path_c3c_version();
-	if (other.len > 0 && other != have && !version_noted)
-	{
-		version_noted = true;
-		return string::tformat("\nnote: the tools run c3c %s (%s), but `c3c` on your PATH is %s. These docs describe %s; if you build with %s, a signature may differ (c3_search scope=changes lists renames). Set C3C to the one you mean.\n", have, c3c_binary(), other, have, other);
-	}
-	return "";
-}
-faultdef WATCHDOG_FAILED;
-
-// Everything the reader thread shares with the caller. It is allocated with libc and, if the reader cannot be
-// stopped (something outside our reach holds the pipe open), deliberately left behind: a stuck thread is a
-// smaller harm than a server that never answers again.
-struct Capture
-{
-	Mutex mutex;
-	ConditionVariable cond;
-	Process* proc;
-	char* buf;
-	sz max;
-	sz len;
-	bool finished;
-	bool capped;
-}
-
-// The input of a program, written to its stdin by a detached thread that owns the pipe and everything it uses. If the
-// child is killed the write fails and the thread ends.
-struct Feed
-{
-	CFile file;
-	char* data;
-	sz len;
-}
-
-fn int write_input(void* arg) @private
-{
-	Feed* f = (Feed*)arg;
-	libc::fwrite(f.data, 1, (usz)f.len, f.file);
-	libc::fflush(f.file);
-	libc::fclose(f.file);
-	libc::free(f.data);
-	libc::free(f);
-	return 0;
-}
-
-fn int read_pipe(void* arg) @private
-{
-	Capture* c = (Capture*)arg;
-	char[2048] tmp;
-	while (true)
-	{
-		sz? n = c.proc.read_stdout(&tmp, tmp.len);
-		if (catch n) break;
-		if (n == 0) break;
-		(void)c.mutex.lock();
-		sz room = c.max + 1 - c.len;   // one byte more than the cap: output of exactly `max` bytes is not cut
-		sz take = n > room ? room : n;
-		if (take > 0)
-		{
-			mem::copy(c.buf + c.len, &tmp, take);
-			c.len += take;
-		}
-		bool stop = c.len > c.max;
-		if (stop) c.capped = true;
-		c.mutex.unlock();
-		if (stop) break;
-	}
-	(void)c.mutex.lock();
-	c.finished = true;
-	c.cond.signal();
-	c.mutex.unlock();
-	return 0;
-}
-
-// Killing c3c leaves the program it started running, and that program holds the output pipe open. Everything
-// c3_test and c3_run start lives under the scratch directory, whose name is unique, so a pattern kill on that
-// name reaches those processes. pkill is on Linux and macOS and reads an extended regex: the path is escaped and
-// anchored on the '/' that follows the directory name, so `c3guide-12` never matches `c3guide-123`.
-fn void kill_matching(String dir)
-{
-	$if !env::WIN32:
-		DString pattern = dstring::temp();
-		foreach (c : dir)
-		{
-			if (c == '.' || c == '^' || c == '$' || c == '*' || c == '+' || c == '?' || c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' || c == '|' || c == '\\') pattern.append_char('\\');
-			pattern.append_char(c);
-		}
-		pattern.append("/");
-		String[] argv = { "pkill", "-9", "-f", "--", pattern.str_view() };
-		Process? p = process::spawn(argv, process::SpawnOptions.INHERIT_ENV);
-		if (catch p) return;
-		(void)p.join();
-		(void)p.destroy();
-	$endif
-}
-
-const ulong DRAIN_MS = 1000;     // c3c has exited but the pipe is still open: wait this long for the output, then move on
-const ulong REAP_MS = 2000;      // after a kill: wait this long for the reader to see the pipe close
-
-// Has the child exited? If so, *status is its exit code. Process.is_running() cannot be used for this: it reaps the
-// child and then calls join(), which has no status left to read, so the code it keeps is garbage.
-fn bool child_exited(Process* p, int* status)
-{
-	$if env::WIN32:
-		bool? alive = p.is_running();
-		if (catch alive) return false;
-		if (alive) return false;
-		CInt? code = p.join();   // the exit code is read from the handle, which stays valid after the process ended
-		*status = code ?? 1;
-		return true;
-	$else
-		CInt raw = 0;
-		CInt reaped = posix::waitpid(p.child, &raw, posix::WNOHANG);
-		if (reaped == 0) return false;
-		*status = (reaped < 0 || !posix::wIFEXITED(raw)) ? 1 : posix::wEXITSTATUS(raw);
-		p.child = 0;   // reaped: nothing left to wait for or to signal
-		return true;
-	$endif
-}
-
-fn long ms_since(Clock t) => (long)(t.to_now() / 1_000_000);
-
-// What c3c and the C toolchain it calls read (c3c's own getenv calls, plus the loader, locale and sanitizer settings).
-// Everything else of the client's environment (tokens, API keys) is not handed to a compiler or to a program a snippet builds.
-const String[*] KEEP_ENV = {
-	"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "TEMPDIR", "XDG_CACHE_HOME", "LANG", "LC_ALL", "LC_CTYPE",
-	"C3C_LIB", "C3C_CC", "C3C_AR", "CC", "AR", "SDKROOT", "DEVELOPER_DIR", "LD_LIBRARY_PATH", "ANDROID_NDK",
-	"ASAN_OPTIONS", "UBSAN_OPTIONS", "MSAN_OPTIONS", "TSAN_OPTIONS"
-};
-
-fn Process? spawn_clean(String[] cmd)
-{
-	$if env::WIN32:
-		return process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT | process::SpawnOptions.INHERIT_ENV);   // the loader needs SystemRoot and more
-	$else
-		String[] kept = mem::talloc_array(String, KEEP_ENV.len);
-		int n = 0;
-		foreach (k : KEEP_ENV)
-		{
-			String? v = env::tget_var(k);
-			if (try v) kept[n++] = string::tformat("%s=%s", k, v);
-		}
-		return process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT, kept[:n]);
-	$endif
-}
-
-// Run argv, capture stdout+stderr up to max_output, kill the child past that or past the deadline.
-// *code gets the exit status (0 when we killed it ourselves), *timed_out says whether the deadline fired. A reader
-// thread does the blocking read, so this call always returns: with the output so far if something keeps the pipe open.
-// `cwd`: the directory the child runs in (Linux and macOS: through `sh -c 'cd "$1" && exec "$@"'`; argv is still never
-// parsed by a shell; on Windows the child keeps our directory). c3c treats every `*.c3l` in its working directory as a library, so a snippet
-// must not run in the directory the client was started in (a library being synced there breaks every call).
-fn String? run_capped(String[] cmd_in, int* code, bool* timed_out, ulong deadline_ms = DEADLINE_MS, sz max_output = MAX_OUTPUT, String sweep = "", String input = "", String cwd = "")
-{
-	String[] cmd = cmd_in;
-	$if !env::WIN32:
-		if (cwd.len > 0)
-		{
-			String[] wrapped = mem::talloc_array(String, cmd_in.len + 5);
-			wrapped[0] = "/bin/sh";
-			wrapped[1] = "-c";
-			wrapped[2] = "cd \"$1\" || exit 125; shift; exec \"$@\"";
-			wrapped[3] = "sh";
-			wrapped[4] = cwd;
-			foreach (i, c : cmd_in) wrapped[5 + i] = c;
-			cmd = wrapped;
-		}
-	$endif
-	Process spawned = spawn_clean(cmd)!;
-	Process* proc = libc::calloc(1, Process::size);
-	*proc = spawned;
-	// What the program reads from stdin, then end of input: a program that reads stdin must see EOF, not wait for the
-	// deadline. The input is written from a thread of its own: c3c compiles for seconds before the program reads, and a
-	// write larger than the pipe buffer must not stop the deadline below from being watched.
-	if (proc.stdin_file)
-	{
-		CFile in = proc.stdin_file;
-		proc.stdin_file = null;   // the writer owns the pipe now
-		if (input.len == 0)
-		{
-			libc::fclose(in);
-		}
-		else
-		{
-			Feed* f = libc::calloc(1, Feed::size);
-			f.file = in;
-			f.len = input.len;
-			f.data = libc::malloc(input.len);
-			mem::copy(f.data, input.ptr, input.len);
-			Thread writer;
-			if (catch writer.create(&write_input, f))
-			{
-				libc::fclose(in);
-				libc::free(f.data);
-				libc::free(f);
-			}
-			else
-			{
-				(void)writer.detach();
-			}
-		}
-	}
-	Capture* c = libc::calloc(1, Capture::size);
-	c.proc = proc;
-	c.max = max_output;
-	c.buf = libc::malloc((usz)max_output + 1);
-	(void)c.mutex.init();
-	(void)c.cond.init();
-	Thread th;
-	if (catch th.create(&read_pipe, c))
-	{
-		(void)proc.terminate();
-		(void)proc.join();
-		(void)proc.destroy();
-		libc::free(c.buf);
-		libc::free(c);
-		libc::free(proc);
-		return WATCHDOG_FAILED~;
-	}
-
-	Clock start = clock::now();
-	bool fired = false;
-	bool exited = false;
-	int exit_status = 0;
-	long exited_at = 0;
-	(void)c.mutex.lock();
-	while (!c.finished)
-	{
-		long now = ms_since(start);
-		if (now >= (long)deadline_ms) { fired = true; break; }
-		if (!exited)
-		{
-			if (child_exited(proc, &exit_status)) { exited = true; exited_at = now; }
-		}
-		else if (now - exited_at > (long)DRAIN_MS)
-		{
-			break;   // a descendant outlived c3c and holds the pipe
-		}
-		long left = (long)deadline_ms - now;
-		(void)c.cond.wait_timeout(&c.mutex, (ulong)(left < 100 ? left : 100));
-	}
-	bool capped = c.capped;
-	bool stray = !c.finished;
-	c.mutex.unlock();
-
-	// the pipe closed but c3c may still be running (it closed its output and went on): the deadline still applies
-	while (!exited && !fired && !capped && !child_exited(proc, &exit_status))
-	{
-		if (ms_since(start) >= (long)deadline_ms) { fired = true; break; }
-		thread::sleep_ms(10);
-	}
-	if (!fired && !capped) exited = true;
-	if ((fired || capped) && !exited) (void)proc.terminate();
-	bool killed = fired || capped || (sweep.len > 0 && stray);
-	if (sweep.len > 0 && (fired || capped || stray)) kill_matching(sweep);
-
-	// after a kill the pipe should close: let the reader see it
-	Clock reap = clock::now();
-	(void)c.mutex.lock();
-	while (killed && !c.finished && ms_since(reap) < (long)REAP_MS) (void)c.cond.wait_timeout(&c.mutex, 100);
-	bool finished = c.finished;
-	DString out = dstring::temp();
-	out.append((String)c.buf[:(c.len > c.max ? c.max : c.len)]);
-	c.mutex.unlock();
-
-	int status = 0;
-	if (exited) { status = exit_status; }
-	else { CInt? j = proc.join(); status = j ?? 1; }
-	*timed_out = fired;
-	*code = (fired || capped) ? 0 : status;
-
-	if (finished)
-	{
-		(void)th.join();
-		(void)proc.destroy();
-		(void)c.mutex.destroy();
-		(void)c.cond.destroy();
-		libc::free(c.buf);
-		libc::free(c);
-		libc::free(proc);
-	}
-	else
-	{
-		(void)th.detach();   // still blocked on a pipe we cannot close: leave it (and what it uses) alone
-	}
-	String s = out.str_view();
-	if (capped) return string::tformat("%s\n[output cut]", s[:util::cut_utf8(s)]);
-	return s;
-}
-
-// Replace every `needle` in `s` by `replacement`. (std String.replace returned corrupted bytes for a 4 KB
-// string without a match in c3c 0.8.5, hence the small loop.)
-fn String redact(String s, String needle, String replacement)
-{
-	DString out = dstring::temp();
-	while (true)
-	{
-		sz? at = s.index_of(needle);
-		if (catch at) break;
-		out.append(s[:at]);
-		out.append(replacement);
-		s = s[at + needle.len..];
-	}
-	out.append(s);
-	return out.str_view();
-}
-
-// A killed server cannot run its `defer`, so it leaves c3guide-* behind: remove those older than an hour.
-fn void sweep_stale(Path tmp)
-{
-	PathList? list = path::ls(tmem, tmp, no_dirs: false, relative: true);
-	if (catch list) return;
-	foreach (entry : list)
-	{
-		String name = entry.basename();
-		if (!name.starts_with("c3guide-")) continue;
-		Path? full = tmp.tappend(name);
-		if (catch full) continue;
-		if (path::is_link(full)) continue;   // never follow a planted symlink into someone else's files
-		Time? mt = file::last_modified((String)full);
-		if (catch mt) continue;
-		if ((long)time::now() - (long)mt > 3600L * (long)time::SEC) (void)path::rmtree(full);
-	}
 }
 
 // c3c prints colour codes for tests; a model reads them as noise.
@@ -562,17 +66,6 @@ fn String drop_runtime_frames(String s)
 		out.appendf("%s\n", line);
 	}
 	return out.str_view();
-}
-
-// A scratch directory for the snippet and (with run) every build artifact. Remove it with rmtree.
-fn Path? scratch_dir()
-{
-	Path tmp = path::temp_directory(tmem)!;
-	sweep_stale(tmp);
-	// nanosecond clock: two servers (or two calls) never share a directory
-	Path dir = tmp.tappend(string::tformat("c3guide-%d", (long)clock::now()))!;
-	path::mkdir(dir)!;
-	return dir;
 }
 
 faultdef BAD_TARGET;
@@ -674,7 +167,7 @@ fn String without_manifest_warnings(String text, int* dropped)
 fn String report(String out, int status, bool timed_out, String hide, String replacement, String ok, ulong deadline_ms)
 {
 	int dropped = 0;
-	String shown = without_manifest_warnings(strip_ansi(redact(out, hide, replacement)), &dropped).trim_right();
+	String shown = without_manifest_warnings(strip_ansi(util::redact(out, hide, replacement)), &dropped).trim_right();
 	if (dropped > 0 && shown.trim().len > 0) shown = string::tformat("%s\n\n(%d warning(s) about unknown keys in a library manifest left out: not your code)", shown, dropped);
 	if (timed_out) shown = string::tformat("%s\n[timeout: longer than %d s]", shown, (int)(deadline_ms / 1000));
 	if (shown.trim().len == 0 && !timed_out)
@@ -743,7 +236,16 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	@Timeout(30000)
 {
 	String reply = check_any(code, path, files, target, platform);
-	return format ? string::tformat("%s%s", reply, format_report(code, path)) : reply;
+	if (!format) return reply;
+	String where = "";
+	if (path.len > 0)
+	{
+		bool is_dir;
+		String? w = resolve_target(path, &is_dir);
+		if (catch w) return reply;
+		where = w;
+	}
+	return string::tformat("%s%s", reply, format::report(code, where));
 }
 
 fn String check_any(String code, String path, String files, String target, String platform)
@@ -762,7 +264,7 @@ fn String check_any(String code, String path, String files, String target, Strin
 	}
 	context::note_source(code);
 	// No @pool here: the result lives in the caller's temp memory (a nested pool would free it on return).
-	Path? dir = scratch_dir();
+	Path? dir = proc::scratch_dir();
 	if (catch dir) return "cannot create a temp directory";
 	defer (void)path::rmtree(dir);
 	String file = string::tformat("%s/snippet.c3", (String)dir);
@@ -778,86 +280,11 @@ fn String check_any(String code, String path, String files, String target, Strin
 	return string::tformat("%s\n\n0.7 syntax found: %d mechanical rewrite(s) (%s). The rewritten code:\n--- code ---\n%s\n--- c3_check of the rewritten code ---\n%s", first, r.count, r.notes, r.code, second);
 }
 
-// An empty directory to run c3c in when it needs no files of its own (c3c reads every `*.c3l` in its working directory).
-// One per process, made on first use and made again if the stale-directory sweep removed it.
-char[512] cwd_buf;
-String neutral_cwd_path;
-
-fn String neutral_cwd()
-{
-	if (neutral_cwd_path.len > 0 && file::is_dir(neutral_cwd_path)) return neutral_cwd_path;
-	Path? p = scratch_dir();
-	if (catch p) return "";
-	String s = (String)p;
-	if (s.len >= cwd_buf.len) return "";
-	cwd_buf[:s.len] = s[..];
-	neutral_cwd_path = (String)cwd_buf[:s.len];
-	return neutral_cwd_path;
-}
-
-// The exit codes of the shell that sets the working directory when it cannot start c3c (125 cd failed, 126/127 exec failed).
-fn bool could_not_start(int status) => status == 125 || status == 126 || status == 127;
-
-const sz MAX_FORMAT_INPUT = 60000;
-
-// c3f, the C3 formatter, when it is installed ($C3F or on PATH).
-fn String? find_c3f()
-{
-	String? v = env::tget_var("C3F");
-	if (try v) { if (v.len > 0) return v; }
-	String? dirs = env::tget_var("PATH");
-	if (catch dirs) return NOT_FOUND~;
-	return which(env::WIN32 ? "c3f.exe" : "c3f", dirs);
-}
-
-// What c3f would change, appended to the check: the formatted snippet, or a diff for a file or project. Writes nothing.
-fn String format_report(String code, String path)
-{
-	String? bin = find_c3f();
-	if (catch bin) return "\n(format: c3f is not installed; put it on PATH or set C3F)";
-	return path.len > 0 ? format_path(bin, path) : format_snippet(bin, code);
-}
-
-fn String format_path(String bin, String path)
-{
-	bool is_dir;
-	String? where = resolve_target(path, &is_dir);
-	if (catch where) return "";
-	int status = 0;
-	bool timed_out = false;
-	String? out = run_capped({ bin, "--diff", where }, &status, &timed_out, DEADLINE_MS, 8192, "", "", neutral_cwd());
-	if (catch out) return "\n(format: c3f could not run)";
-	if (timed_out || could_not_start(status)) return "\n(format: c3f did not finish)";
-	return out.trim().len == 0 ? "\n(format: c3f has nothing to change)" : string::tformat("\n--- c3f would change ---\n%s", util::clip(redact(out, where, ""), 3000));
-}
-
-fn String format_snippet(String bin, String code)
-{
-	if (code.len > MAX_FORMAT_INPUT) return "\n(format: the snippet is too large for c3f here)";
-	int status = 0;
-	bool timed_out = false;
-	String? out = run_capped({ bin, "--stdin-filename", "snippet.c3", "-" }, &status, &timed_out, DEADLINE_MS, MAX_FORMAT_INPUT * 2, "", code, neutral_cwd());
-	if (catch out) return "\n(format: c3f could not run)";
-	if (timed_out || could_not_start(status)) return "\n(format: c3f did not finish)";
-	// c3f says what it could not format as "<stdin>:LINE: ..." lines: they are notes, not code
-	DString formatted = dstring::temp();
-	DString notes = dstring::temp();
-	foreach (line : out.tsplit("\n"))
-	{
-		if (line.starts_with("<stdin>:")) { notes.appendf("%s\n", line); }
-		else { formatted.appendf("%s\n", line); }
-	}
-	String f = formatted.str_view().trim_right();
-	String note = notes.len() > 0 ? string::tformat("\n(c3f: %s)", notes.str_view().trim()) : "";
-	if (f.trim() == code.trim()) return string::tformat("\n(format: already formatted)%s", note);
-	return string::tformat("\n--- c3f: formatted code ---\n%s%s", f, note);
-}
-
 // Type-check one file: nothing is emitted or run. `hide` is cut from the paths in the output.
 fn String compile_only(String file, String hide, String replacement, String platform = "", String[] extra = {})
 {
 	Args a;
-	a.add(c3c_binary());
+	a.add(compiler::c3c_binary());
 	a.add("--trust=none");
 	a.add("--no-obj");
 	a.add("--no-entry");
@@ -872,10 +299,10 @@ fn String compile_only(String file, String hide, String replacement, String plat
 	foreach (e : extra) a.add(e);
 	int status = 0;
 	bool timed_out = false;
-	String? out = run_capped(a.list(), &status, &timed_out, DEADLINE_MS, MAX_OUTPUT, "", "", neutral_cwd());
+	String? out = proc::run_capped(a.list(), &status, &timed_out);
 	if (catch out) return NO_C3C;
-	if (could_not_start(status)) return NO_C3C;
-	String shown = report(out, status, timed_out, hide, replacement, "OK: no errors", DEADLINE_MS);
+	if (proc::could_not_start(status)) return NO_C3C;
+	String shown = report(out, status, timed_out, hide, replacement, "OK: no errors", proc::DEADLINE_MS);
 	return string::tformat("%s%s", shown, after_compile(shown));
 }
 
@@ -891,7 +318,7 @@ fn String check_path(String target_path, String target, String platform = "", St
 		String outside = guard::project_escape(where);
 		if (outside.len > 0) return reads_outside(outside);
 		// `--no-obj` only exists for single files. A project is built (not run) in a scratch directory.
-		Path? scratch = scratch_dir();
+		Path? scratch = proc::scratch_dir();
 		if (catch scratch) return "cannot create a temp directory";
 		defer (void)path::rmtree(scratch);
 		Args m;
@@ -945,7 +372,7 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 {
 	String sd = (String)scratch;
 	Args a;
-	a.add(c3c_binary());
+	a.add(compiler::c3c_binary());
 	a.add("--trust=none");
 	a.add("-q");
 	a.add("--build-dir");
@@ -965,13 +392,13 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	bool timed_out = false;
 	// capture more than is shown: the [PASS] lines are dropped below, and they must not push the
 	// failures and the summary line past the cap
-	String? out = run_capped(argv, &status, &timed_out, deadline_ms, MAX_RUN_CAPTURE, sd, input, sd);
+	String? out = proc::run_capped(argv, &status, &timed_out, { .deadline_ms = deadline_ms, .max_output = MAX_RUN_CAPTURE, .input = input, .cwd = sd, .sweep = sd });
 	if (catch out) return NO_C3C;
-	if (could_not_start(status)) return NO_C3C;
+	if (proc::could_not_start(status)) return NO_C3C;
 	String shown = drop_runtime_frames(report(out, status, timed_out, hide, replacement, ok, deadline_ms));
 	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
 	// where it ran: a path that was defaulted or relative is the one thing a caller cannot see
-	String footer = where.len > 0 ? string::tformat("\n[c3c %s, %s]", compiler_version(), where) : "";
+	String footer = where.len > 0 ? string::tformat("\n[c3c %s, %s]", compiler::compiler_version(), where) : "";
 	return string::tformat("%s%s%s", shown, after_compile(shown), footer);
 }
 
@@ -991,7 +418,7 @@ fn String c3_test(String path @Desc("a project directory (with project.json) or 
 	String? where = resolve_target(path, &is_dir);
 	if (catch where) return BAD_TARGET_TEXT;
 	if (is_dir) { outline::note_project(path); } else { context::note_file(path); }
-	Path? scratch = scratch_dir();
+	Path? scratch = proc::scratch_dir();
 	if (catch scratch) return "cannot create a temp directory";
 	defer (void)path::rmtree(scratch);
 	String base = dir_of(where, is_dir);
@@ -1039,7 +466,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	Args tail;
 	err = parse_args(args, &tail);
 	if (err.len > 0) return err;
-	Path? scratch = scratch_dir();
+	Path? scratch = proc::scratch_dir();
 	if (catch scratch) return "cannot create a temp directory";
 	defer (void)path::rmtree(scratch);
 	Args m;

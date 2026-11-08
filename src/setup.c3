@@ -1,4 +1,5 @@
 module c3guide::setup;
+import c3guide::compiler;
 import c3guide::check, c3guide::corpus, c3guide::util;
 import std::io, std::io::file, std::io::path, std::os::env, std::core::string;
 
@@ -129,11 +130,11 @@ fn int run_doctor(String exe, String version)
 {
 	String cfg = config_dir();
 	io::printfn("c3-guide-mcp %s  (%s)", version, exe);
-	String have = check::compiler_version();
+	String have = compiler::compiler_version();
 	if (have.len == 0) { io::printn("c3c:        NOT FOUND (put c3c on PATH or set C3C)"); }
 	else
 	{
-		io::printfn("c3c:        %s at %s", have, check::c3c_binary());
+		io::printfn("c3c:        %s at %s", have, compiler::c3c_binary());
 		corpus::load();
 		io::printfn("docs:       manual, recipes and release notes from c3c %s%s", corpus::snapshot_version, have != corpus::snapshot_version ? "  (differs from your c3c: replies say so; signatures are read from your c3c)" : "");
 	}
@@ -157,6 +158,6 @@ fn String self_path(String argv0)
 		return argv0;
 	}
 	String? dirs = env::tget_var("PATH");
-	if (try dirs) foreach (d : dirs.tsplit(check::PATH_SEP)) { String? f = check::which(argv0, d); if (try f) return f; }
+	if (try dirs) foreach (d : dirs.tsplit(compiler::PATH_SEP)) { String? f = compiler::which(argv0, d); if (try f) return f; }
 	return argv0;
 }

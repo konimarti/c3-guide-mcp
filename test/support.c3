@@ -1,4 +1,5 @@
 module c3guide::test::support;
+import c3guide::compiler;
 import c3guide::check, c3guide::corpus;
 import std::core::string, std::core::string::conv, std::io, std::io::file, std::io::path, std::os::env, std::os::process, std::time::clock;
 
@@ -28,7 +29,7 @@ fn String sh(String script)
 }
 
 // The compiler the tests use: the one the server itself would find.
-fn String c3c_binary() => check::c3c_binary();
+fn String c3c_binary() => compiler::c3c_binary();
 
 // Is every byte of `s` part of a well-formed UTF-8 character? (A cut inside a character would make the
 // whole JSON-RPC line invalid for the client.)

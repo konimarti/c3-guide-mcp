@@ -1,4 +1,5 @@
 module c3guide::tools;
+import c3guide::compiler, c3guide::proc;
 import mcp, std::core::string;
 import c3guide::corpus, c3guide::context, c3guide::search, c3guide::util, c3guide::hints, c3guide::check, c3guide::live, c3guide::outline;
 import std::sort, std::math, std::collections::list, std::io::file, libc;
@@ -119,7 +120,7 @@ fn bool asks_about_change(String q)
 // The manual, the recipes and the release notes are one release's snapshot: say so when the compiler in use is another.
 fn String manual_note()
 {
-	String have = check::compiler_version();
+	String have = compiler::compiler_version();
 	if (have.len == 0 || have == corpus::snapshot_version) return "";
 	return string::tformat("\n(manual, recipes and release notes: c3c %s snapshot; your c3c is %s. Library signatures and the syntax lists come from your compiler, and c3_check has the last word.)\n", corpus::snapshot_version, have);
 }
@@ -235,7 +236,7 @@ bool live_lists_read;
 // The body of one list: from the c3c in use when it is another release than the snapshot, else the snapshot's.
 fn String syntax_list(String name)
 {
-	String have = check::compiler_version();
+	String have = compiler::compiler_version();
 	if (have.len > 0 && have != corpus::snapshot_version)
 	{
 		if (!live_lists_read)
@@ -243,10 +244,10 @@ fn String syntax_list(String name)
 			live_lists_read = true;
 			foreach (i, l : SYNTAX_LISTS)
 			{
-				String[] argv = { check::c3c_binary(), string::tformat("--list-%s", l) };
+				String[] argv = { compiler::c3c_binary(), string::tformat("--list-%s", l) };
 				int status = 0;
 				bool timed_out = false;
-				String? out = check::run_capped(argv, &status, &timed_out, 3000, MAX_LIST);
+				String? out = proc::run_capped(argv, &status, &timed_out, { .deadline_ms = 3000, .max_output = MAX_LIST });
 				if (try out) { if (status == 0 && !timed_out && out.len > 0) live_lists[i] = keep(out.trim()); }
 			}
 		}
@@ -416,10 +417,10 @@ fn String c3_lookup(String query @Desc("a name ('printfn', 'io::printfn', 'Strin
 		DString many = dstring::temp();
 		foreach (n : names) many.appendf("== %s ==\n%s\n", n, lookup_one(n, path, 0, false));
 		String all = many.str_view();
-		return string::tformat("%s%s", util::clip(all, 5200), check::version_note(all.contains("does not exist")));
+		return string::tformat("%s%s", util::clip(all, 5200), compiler::version_note(all.contains("does not exist")));
 	}
 	String reply = lookup_one(q, path, examples, source);
-	return string::tformat("%s%s", reply, check::version_note(reply.contains("does not exist")));
+	return string::tformat("%s%s", reply, compiler::version_note(reply.contains("does not exist")));
 }
 
 // A query of two to six tokens that all look like names (no plain words) and of which at least one is a standard library
@@ -534,7 +535,7 @@ fn String source_excerpt(Entry* e)
 	if (c2 <= 0) return "";
 	int? row = loc[c2 + 1:c1 - c2 - 1].to_int();
 	if (catch row) return "";
-	String root = check::stdlib_root();
+	String root = compiler::stdlib_root();
 	if (root.len == 0 || row < 1) return "";
 	char[]? data = file::load_temp(string::tformat("%s/%s", root, loc[:c2]));
 	if (catch data) return "";
