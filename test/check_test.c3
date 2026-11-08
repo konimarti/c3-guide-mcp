@@ -1,7 +1,7 @@
 module c3guide::test::check;
 import c3guide::format;
 import c3guide::compiler, c3guide::proc;
-import c3guide::check, c3guide::util, c3guide::hints, c3guide::test::support;
+import c3guide::check, c3guide::util, c3guide::hints, c3guide::guard, c3guide::test::support;
 import libc;
 import std::core::string, std::io, std::io::file, std::io::path, std::os::env, std::time, std::time::clock;
 import std::os::posix;
@@ -827,4 +827,107 @@ fn void the_guard_does_not_miss_odd_spellings_or_odd_places() @test
 	file::save(string::tformat("%s/project.json", ok), manifest)!!;
 	file::save(string::tformat("%s/app/a/b/c/d/e/f/g/h/i/m.c3", ok), "module a;\nfn void main() {}\n")!!;
 	assert(has(check::c3_check(path: ok), "OK: no errors"));
+}
+
+// A doc comment is text only up to its contracts: c3c reads `@require ...` lines as code, and `$embed` there reads a file.
+// `int[<*>]` and `a <<*p` hold no doc comment. Each of these read a file outside with the guard of 0.7.0.
+fn void the_guard_reads_contracts_as_code() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	String secret = string::tformat("%s/secret.txt", root);
+	file::save(secret, "S3CRET")!!;
+	String[] bodies = {
+		// the contracts start on the first line
+		string::tformat("module a;\n<* @require $embed(\"%s\")[0] == 'X' : \"no\" *>\nmacro m() {}\nfn void main() { m(); }\n", secret),
+		// after a description, on a line of their own
+		string::tformat("module a;\n<*\n Some text.\n @require $embed(\"%s\")[0] == 'X' : \"no\"\n*>\nmacro m() {}\nfn void main() { m(); }\n", secret),
+		// `*>` inside a string does not end the contracts
+		string::tformat("module a;\n<*\n @require \"*>\".len == 2 && $embed(\"%s\")[0] == 'X' : \"no\"\n*>\nmacro m() {}\nfn void main() { m(); }\n", secret),
+		// `//` is not a comment in contract lines
+		string::tformat("module a;\n<*\n @require 1 == 1 // $embed(\"%s\")\n*>\nmacro m() {}\nfn void main() { m(); }\n", secret),
+		// `[<` and `<<` come before `<*`
+		string::tformat("module a;\nint[<*>] v = { 1, 2 };\nconst char C = $embed(\"%s\")[0];\n// *>\nfn void main() {}\n", secret),
+		string::tformat("module a;\nint x = 1;\nint* p = &x;\nfn int f() => x <<*p;\nconst char C = $embed(\"%s\")[0];\n// *>\nfn void main() {}\n", secret),
+	};
+	// a file of no project, and the same text as the source of a project whose tree holds the secret's folder
+	String proj = string::tformat("%s/proj", root);
+	path::mkdir(path::new(tmem, string::tformat("%s/src", proj))!!, recursive: true)!!;
+	file::save(string::tformat("%s/project.json", proj), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	String lone = string::tformat("%s/lone.c3", root);
+	foreach (body : bodies)
+	{
+		file::save(lone, body)!!;
+		String r = check::c3_check(path: lone);
+		assert(has(r, "rejected"), "%s: %s", body, r);
+		file::save(string::tformat("%s/src/main.c3", proj), body)!!;
+		r = check::c3_check(path: proj);
+		assert(has(r, "rejected"), "%s: %s", body, r);
+	}
+	// prose about $embed in a description is not a read, and a contract without one is fine
+	file::save(lone, "module a;\n<*\n Wraps $embed(\"/etc/passwd\") for the docs; it's text.\n @require x > 0 : \"positive\"\n*>\nmacro m(int x) { return x; }\nfn void main() { m(1); }\n")!!;
+	String ok = check::c3_check(path: lone);
+	assert(has(ok, "OK: no errors"), "%s", ok);
+}
+
+// A directory library's manifest.json can name sources anywhere: they are compiled with the project, so the guard reads
+// the manifest, and a library whose sources leave its folder (or whose manifest cannot be read) is refused.
+fn void the_guard_reads_library_manifests() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	String proj = string::tformat("%s/proj", root);
+	path::mkdir(path::new(tmem, string::tformat("%s/src", proj))!!, recursive: true)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/lib/evil.c3l/src", proj))!!, recursive: true)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/outside", root))!!)!!;
+	file::save(string::tformat("%s/secret.txt", root), "S3CRET")!!;
+	file::save(string::tformat("%s/project.json", proj), "{ \"sources\": [\"src/**\"], \"dependency-search-paths\": [\"lib\"], \"dependencies\": [\"evil\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/src/main.c3", proj), "module app;\nimport evil;\nfn void main() { evil::probe(); }\n")!!;
+	file::save(string::tformat("%s/outside/evil.c3", root), "module evil;\nmacro probe() { $assert $embed(\"../secret.txt\")[0] == 'X' : \"no\"; }\n")!!;
+	file::save(string::tformat("%s/lib/evil.c3l/src/evil.c3", proj), "module evil;\nmacro probe() {}\n")!!;
+	String manifest = string::tformat("%s/lib/evil.c3l/manifest.json", proj);
+	String[] bad = {
+		"{ \"provides\": \"evil\", \"sources\": [\"../../../outside/**\"], \"targets\": { \"linux-x64\": {}, \"macos-aarch64\": {}, \"macos-x64\": {}, \"windows-x64\": {} } }",
+		string::tformat("{ \"provides\": \"evil\", \"sources\": [\"%s/outside/**\"] }", root),
+		"{ \"provides\": \"evil\", \"targets\": { \"linux-x64\": { \"sources\": [\"../../../outside/**\"] } } }",
+		"{ \"provides\": \"evil\", \"sources\": [\"src/**\" ",   // not JSON
+	};
+	foreach (m : bad)
+	{
+		file::save(manifest, m)!!;
+		String r = check::c3_check(path: proj);
+		assert(has(r, "rejected") && has(r, "manifest.json"), "%s: %s", m, r);
+	}
+	(void)file::delete(manifest);
+	assert(guard::project_escape(proj).len > 0, "a library without a manifest");
+	// a library that keeps to its own folder is read as before
+	file::save(manifest, "{ \"provides\": \"evil\", \"sources\": [\"src/**\"] }")!!;
+	assert(guard::project_escape(proj) == "", "%s", guard::project_escape(proj));
+	// and a library outside the project (a dependency-search-path of its own) is held to the same rule
+	String deps = string::tformat("%s/deps/evil.c3l", root);
+	path::mkdir(path::new(tmem, deps)!!, recursive: true)!!;
+	file::save(string::tformat("%s/manifest.json", deps), "{ \"provides\": \"evil\", \"sources\": [\"../../outside/**\"] }")!!;
+	file::save(string::tformat("%s/project.json", proj), "{ \"sources\": [\"src/**\"], \"dependency-search-paths\": [\"../deps\"], \"dependencies\": [\"evil\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	(void)path::rmtree(path::new(tmem, string::tformat("%s/lib", proj))!!);
+	String r = check::c3_check(path: proj);
+	assert(has(r, "rejected") && has(r, "manifest.json"), "%s", r);
+}
+
+// The guard skipped `.git`, but a project.json may name a folder in it as a source.
+fn void the_guard_reads_git_folders_too() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	String proj = string::tformat("%s/proj", root);
+	path::mkdir(path::new(tmem, string::tformat("%s/src", proj))!!, recursive: true)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/.git/x", proj))!!, recursive: true)!!;
+	file::save(string::tformat("%s/secret.txt", root), "S3CRET")!!;
+	file::save(string::tformat("%s/project.json", proj), "{ \"sources\": [\"src/**\", \".git/x/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/src/main.c3", proj), "module app;\nimport evil;\nfn void main() { evil::probe(); }\n")!!;
+	file::save(string::tformat("%s/.git/x/evil.c3", proj), "module evil;\nmacro probe() { $assert $embed(\"../../../secret.txt\")[0] == 'X' : \"no\"; }\n")!!;
+	String r = check::c3_check(path: proj);
+	assert(has(r, "rejected") && has(r, ".git/x/evil.c3"), "%s", r);
 }

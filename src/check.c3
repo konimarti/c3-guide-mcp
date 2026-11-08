@@ -348,7 +348,7 @@ fn String check_path(String target_path, String target, String platform = "", St
 // $embed, $include and $exec can read any file the server can read, and $echo prints it into the reply: not at check time.
 fn String reads_outside(String file)
 {
-	return string::tformat("rejected: %s cannot be shown to stay inside its project: it reads at compile time ($embed/$include/$exec) with a path that leaves it or one that is computed, or it is a link, an unreadable or oversized file, or a tree too large to check. c3_check does not compile it. If you trust it, build it yourself with `c3c`.", util::clip(file, 200));
+	return string::tformat("rejected: %s cannot be shown to stay inside its project: it reads at compile time ($embed/$include/$exec) with a path that leaves it or one that is computed, or it is a link, an unreadable or oversized file, a tree too large to check, or a library manifest (manifest.json) that is unreadable or names sources outside its library. c3_check does not compile it. If you trust it, build it yourself with `c3c`.", util::clip(file, 200));
 }
 
 // The directory of the project.json above a file, "" when the file belongs to no project.
