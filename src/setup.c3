@@ -1,5 +1,5 @@
 module c3guide::setup;
-import c3guide::check, c3guide::corpus, c3guide::telemetry, c3guide::util;
+import c3guide::check, c3guide::corpus, c3guide::util;
 import std::io, std::io::file, std::io::path, std::os::env, std::core::string;
 
 // `c3-guide-mcp --setup` puts the integration in place for Claude Code, `--doctor` says what is and is not in place.
@@ -137,8 +137,6 @@ fn int run_doctor(String exe, String version)
 		corpus::load();
 		io::printfn("docs:       manual, recipes and release notes from c3c %s%s", corpus::snapshot_version, have != corpus::snapshot_version ? "  (differs from your c3c: replies say so; signatures are read from your c3c)" : "");
 	}
-	String log = telemetry::log_file();
-	io::printfn("usage log:  %s", log.len == 0 ? "off (C3_GUIDE_LOG=off)" : log);
 	io::printfn("config:     %s", cfg);
 	String md = read_or_empty(string::tformat("%s/CLAUDE.md", cfg));
 	io::printfn("  rules:    %s", block_current(md) ? "installed" : (md.contains(BEGIN) ? "OUTDATED (run --setup)" : "missing (run --setup)"));

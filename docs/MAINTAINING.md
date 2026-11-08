@@ -48,15 +48,11 @@ The `@test` functions in `test/*.c3` call the tool functions directly, so no bin
 
 ## Where the advice is written
 
-The same advice appears in four places: each tool's `@Desc` (`src/tools.c3`, `src/check.c3`), `INSTRUCTIONS` in `src/main.c3`, `integrations/claude-code/CLAUDE.md` (also compiled into the binary for `--setup`), and the README. The `@Desc` is canonical: change it first, then bring the other three in line. `src/main.c3` also holds the stdio loop (a copy of the mcp library's, with the usage log around it) and the command line modes handled by `src/setup.c3`.
+The same advice appears in four places: each tool's `@Desc` (`src/tools.c3`, `src/check.c3`), `INSTRUCTIONS` in `src/main.c3`, `integrations/claude-code/CLAUDE.md` (also compiled into the binary for `--setup`), and the README. The `@Desc` is canonical: change it first, then bring the other three in line. `src/main.c3` also dispatches the command line modes handled by `src/setup.c3`.
 
 ## Corpus checks
 
 `scripts/verify_corpus.py` compiles every recipe and every ```c3 block of the manual with the installed c3c. A recipe that fails is a bug (the script exits 1). A manual block that fails is either an illustration or a statement the compiler contradicts (an old keyword, a removed rule); read the list after a c3c release. A real contradiction goes into `ERRATA` in `scripts/gen_corpus.py` (applied when the corpus is generated; the script says when the manual was fixed and the entry can go).
-
-## Usage log and report
-
-`src/telemetry.c3` writes the local usage log described in the README; `scripts/usage_report.py` reads it and the Claude Code transcripts. Read the report after a release or a batch of sessions, and turn a recurring lookup that finds nothing into a synonym (`scripts/synonyms_seed.txt`), a legacy-name note or a hint (`src/hints.c3`). Nothing in the server changes its own corpus or hints.
 
 ## Safety design of the run tools
 

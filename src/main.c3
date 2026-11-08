@@ -1,7 +1,7 @@
 module c3guide;
 import mcp, libc, std::core::string, std::os::env;
-import c3guide::corpus, c3guide::tools, c3guide::check, c3guide::live, c3guide::telemetry, c3guide::setup;
-import std::io, std::time::clock;
+import c3guide::corpus, c3guide::tools, c3guide::check, c3guide::live, c3guide::setup;
+import std::io;
 
 // Sent to the model in `initialize`: this is what makes a model use the tools without being told.
 const String INSTRUCTIONS = `Your memory of C3 is probably outdated (most training data is C3 0.6/0.7; the language changed a lot in 0.8).
@@ -20,7 +20,6 @@ const String USAGE = `c3-guide-mcp %s: C3 knowledge for AI assistants (an MCP se
   c3-guide-mcp --doctor    show the compiler, the docs version and what Claude Code integration is in place
   c3-guide-mcp --setup     install the rules, the hook and the server entry for Claude Code ([--dry-run] shows the plan)
   c3-guide-mcp --version
-usage log: see README (C3_GUIDE_LOG=off turns it off)
 `;
 
 fn int main(String[] args)
@@ -48,37 +47,6 @@ fn int main(String[] args)
 	defer server.free();
 	tools::register(&server);
 	check::register(&server);
-	serve(&server);
+	server.serve_stdio();
 	return 0;
-}
-
-// A copy of `Server.serve_stdio` of the mcp library (deps/mcp.c3l, src/mcp/stdio.c3) with the usage log around each request:
-// the library has no hook for it. When the library is updated, compare this loop with the original.
-fn void serve(mcp::Server* server)
-{
-	while (true)
-	{
-		bool eof = false;
-		@pool()
-		{
-			String? line = io::treadline(io::stdin(), mcp::MAX_LINE);
-			if (catch err = line)
-			{
-				if (err != io::EOF) io::eprintfn("c3-guide-mcp: stdin error: %s", err.description);
-				eof = true;
-			}
-			else if (line.len > 0)
-			{
-				Clock started = clock::now();
-				String response = server.handle(tmem, line);
-				telemetry::record(line, response, check::ms_since(started));
-				if (response.len > 0)
-				{
-					io::printn(response);
-					(void)io::stdout().flush();
-				}
-			}
-		};
-		if (eof) break;
-	}
 }
