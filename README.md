@@ -105,14 +105,28 @@ Claude Code and Hermes are tested in real sessions. The other entries follow eac
 
 ### Make sure the assistant uses it
 
-The server already asks. Two steps make it reliable:
+The server already asks. For Claude Code one command does the rest:
+
+```
+c3-guide-mcp --setup --dry-run   # shows what it would do
+c3-guide-mcp --setup             # rules block in ~/.claude/CLAUDE.md, the hook script, settings.json if it does not exist
+c3-guide-mcp --doctor            # what is in place and what is not (also: your c3c and docs versions)
+```
+
+It is safe to repeat. It edits only a marked block of `CLAUDE.md` and its own hook file, never writes through a symbolic link, and never rewrites an existing `settings.json` (it prints the lines to add, and the `claude mcp add` command). By hand, the same in two steps:
 
 - **Rules.** Paste [these lines](integrations/claude-code/CLAUDE.md) into `CLAUDE.md`, or into `AGENTS.md`, Cursor rules or `.github/copilot-instructions.md`.
 - **Hook (Claude Code).** When the assistant types `c3c test`, `c3c run`, `c3c compile-run`, `c3c compile-only` or `c3c compile-test`, the hook stops it and names the right tool. `c3c build` still works. It is a nudge, not a lock: wrappers like `time c3c test` get through. Setup steps: [integrations/claude-code](integrations/claude-code).
 
 ### What `c3_test` and `c3_run` execute
 
-They run the code they build, in a scratch directory, with a time limit you can set (up to 120 s). This is not a sandbox: a program you run can touch anything your user can. Use it on your own code. `c3_check` never runs anything.
+They run the code they build, in a scratch directory, with a reduced environment on Linux and macOS (`PATH`, `HOME`, the locale and what c3c reads; not your tokens or keys), with a time limit you can set (up to 120 s). This is not a sandbox: a program you run can touch anything your user can. Use it on your own code. `c3_check` never runs anything: it type-checks (a project is not compiled with `cc` or linked), and it refuses a file or project whose `$embed`/`$include` reaches outside the project.
+
+## Usage log
+
+The server keeps a small log on your machine so the tools can be improved: one line per tool call with the time, the tool, the *names* of the arguments given, the duration and the kind of outcome (ok, compile error, not found, timeout...). It never records code, queries, paths or replies, is created readable by you only, and never leaves the machine. It is at `~/.local/state/c3-guide/usage.jsonl` (`$XDG_STATE_HOME`; 1 MB, one older generation kept). `C3_GUIDE_LOG=off` turns it off, `C3_GUIDE_LOG=/some/file` moves it.
+
+`python3 scripts/usage_report.py` turns it, and your Claude Code transcripts, into a report: which tools are used, how often they fail, and which shell commands an assistant typed where a tool exists. The last part lists proposals (lookups that found nothing, for example) for you to read; nothing changes by itself.
 
 ## Good to know
 

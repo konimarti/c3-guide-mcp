@@ -1,5 +1,5 @@
 module c3guide::test::outline;
-import c3guide::outline, c3guide::check, c3guide::util, c3guide::test::support;
+import c3guide::outline, c3guide::tools, c3guide::check, c3guide::util, c3guide::test::support;
 import std::core::string, std::os::env, std::io, std::io::file, std::io::path, std::time::clock;
 
 const String SAMPLE = `module demo::shapes;
@@ -286,4 +286,41 @@ fn void refs_search_the_library_archives_too() @test
 	support::sh(string::tformat("python3 '%s/zip.py' '%s/deps/inner.c3l'", root, root));
 	String r = outline::refs_reply("curl_easy_perform", root, false, 30);
 	assert(r.contains("inner.c3l!/src/lib.c3") && r.contains("2 use(s)"), "%s", r);
+}
+
+fn void a_rename_is_a_plan_of_exact_edits_and_writes_nothing() @test
+{
+	Path dir = check::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
+	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	String src = "module app;\nstruct Server { int fd; }\nstruct TcpServerSocket { Server s; }\n// Server in a comment\nfn Server make() { Server s = {}; return s; }\n";
+	String file = string::tformat("%s/src/a.c3", root);
+	file::save(file, src)!!;
+	String r = tools::c3_refs("Server", root, false, 30, "Srv");
+	assert(r.contains("Rename 'Server' to 'Srv'") && r.contains("- struct Server { int fd; }") && r.contains("+ struct Srv { int fd; }"), "%s", r);
+	assert(r.contains("+ fn Srv make() { Srv s = {}; return s; }"), "%s", r);   // two uses on one line
+	assert(!r.contains("TcpSrvSocket") && !r.contains("comment"), "%s", r);   // a longer name and a comment are not touched
+	assert(file::load_temp(file)!! == src);   // nothing was written
+	assert(tools::c3_refs("Server", root, false, 30, "bad name").contains("one identifier"));
+	assert(tools::c3_refs("Server", root, true, 30, "Srv").contains("your own code"));
+	assert(tools::c3_refs("Server", root, false, 30, "TcpServerSocket").contains("WARNING"));
+}
+
+fn void a_search_path_that_leaves_the_project_and_its_parent_is_not_read() @test
+{
+	Path dir = check::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/a/proj/src", root))!!, recursive: true)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/a/sibling", root))!!)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/elsewhere", root))!!)!!;
+	file::save(string::tformat("%s/a/sibling/s.c3", root), "module s;\nconst int SIBLING_THING = 1;\n")!!;
+	file::save(string::tformat("%s/elsewhere/e.c3", root), "module e;\nconst int ELSEWHERE_THING = 1;\n")!!;
+	file::save(string::tformat("%s/a/proj/src/main.c3", root), "module app;\nfn void main() {}\n")!!;
+	file::save(string::tformat("%s/a/proj/project.json", root), string::tformat("{ \"sources\": [\"src/**\"], \"dependency-search-paths\": [\"../sibling\", \"%s/elsewhere\", \"../../elsewhere\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }", root))!!;
+	String proj = string::tformat("%s/a/proj", root);
+	assert(tools::c3_lookup("SIBLING_THING", proj).contains("SIBLING_THING"));   // a folder next to the project is read
+	assert(!tools::c3_lookup("ELSEWHERE_THING", proj).contains("e.c3"));   // one that leaves it is not
 }

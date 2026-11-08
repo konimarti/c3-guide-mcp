@@ -20,7 +20,12 @@ check 2 'C3C=/x/c3c c3c test'
 check 2 'cd x && c3c compile-only a.c3'
 check 2 'echo hi; c3c test'
 check 2 'c3c.exe test'
+check 2 "sed -i 's/Server/Srv/g' src/net.c3"
+check 2 'cd x && sed -i.bak s/a/b/ lib/a.c3i'
 # allowed
+check 0 "sed -i 's/a/b/' README.md"
+check 0 "sed -n '1,5p' src/main.c3"
+check 0 "C3_GUIDE_ALLOW=1 sed -i 's/a/b/' src/a.c3"
 check 0 'git commit -m "fix c3c test"'
 check 0 'echo c3c test'
 check 0 'c3c compile a.c3 -o run'

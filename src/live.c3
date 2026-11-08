@@ -264,7 +264,7 @@ fn Entry[]? docgen_entries(String binary, String libstd) => @pool()
 	String[] argv = { binary, "--trust=none", "docgen", libstd, "--json" };
 	int status = 0;
 	bool timed_out = false;
-	String? out = check::run_capped(argv, &status, &timed_out, DOCGEN_MS, MAX_DOCGEN, "", "", (String)path::temp_directory(tmem)!);
+	String? out = check::run_capped(argv, &status, &timed_out, DOCGEN_MS, MAX_DOCGEN, "", "", check::neutral_cwd());
 	if (catch out) return NO_STDLIB~;
 	if (timed_out || status != 0 || out.len == 0) return NO_STDLIB~;
 	Entry[] live = entries_from_json(out)!;

@@ -125,7 +125,6 @@ fn int unparsed_files(String dir, DString* names)
 	return bad;
 }
 
-fn bool is_c3_file(String name) => name.ends_with(".c3") || name.ends_with(".c3i");
 fn bool is_archive(String name) => name.ends_with(".c3l");   // a library: a zip file of .c3 sources
 
 // Directories that hold other people's code or build output, not the project's own.
@@ -147,7 +146,7 @@ fn void collect(Path dir, List{String}* files, int depth)
 		{
 			if (!skipped_dir(name)) collect(full, files, depth + 1);
 		}
-		else if (is_c3_file(name) || is_archive(name))
+		else if (util::is_c3_file(name) || is_archive(name))
 		{
 			files.push(string::tformat("%s", (String)full));
 		}
@@ -167,8 +166,8 @@ fn String outline_path(String path, String match = "")
 	DString out = dstring::temp();
 	if (!path::is_dir(abs))
 	{
-		if (!(is_c3_file(root) || is_archive(root)) || !file::exists(root)) return "path must be a project directory, a .c3 file or a .c3l library";
-		if (is_c3_file(root)) context::note_file(root);
+		if (!(util::is_c3_file(root) || is_archive(root)) || !file::exists(root)) return "path must be a project directory, a .c3 file or a .c3l library";
+		if (util::is_c3_file(root)) context::note_file(root);
 		String one = is_archive(root) ? archive_outline(root, root, match) : outline_file(root, root, match);
 		return one.len > 0 ? util::clip(one, MAX_OUTLINE) : "no declarations found";
 	}
@@ -257,7 +256,7 @@ fn String archive_outline(String archive, String shown, String match)
 	{
 		ZipEntry? e = z.stat_at(i);
 		if (catch e) continue;
-		if (e.is_directory || e.is_encrypted || !is_c3_file(e.name) || e.uncompressed_size > (long)MAX_SOURCE) continue;
+		if (e.is_directory || e.is_encrypted || !util::is_c3_file(e.name) || e.uncompressed_size > (long)MAX_SOURCE) continue;
 		bool dup = false;
 		foreach (name : seen) if (name == e.name) dup = true;
 		if (dup) continue;
@@ -435,6 +434,11 @@ fn void scan_roots(String root, List{String}* bases)
 						String d = one.s;
 						if (d.len == 0) continue;
 						String full = d[0] == '/' ? d : string::tformat("%s/%s", root, d);
+						// a project.json can name any directory: read only the project and its sibling folders (libraries next to it)
+						String real = util::canonical(full);
+						String home = util::canonical(root);
+						String parent = home[:home.rindex_of("/") ?? 0];
+						if (real.len == 0 || !(util::inside(home, real) || (parent.len > 1 && util::inside(parent, real) && real != "/"))) continue;
 						if (file::is_dir(full)) { bases.push(full); has_deps = true; }
 					}
 				}
@@ -524,6 +528,7 @@ fn String project_lookup(String root_arg, String query, int max, int* count, Str
 struct Ref
 {
 	uint row;
+	uint col;   // byte offset in the line
 	bool decl;
 }
 
@@ -537,9 +542,8 @@ fn void walk_idents(TSNode n, String src, String name, List{Ref}* out, int depth
 	{
 		if (type.ends_with("ident") && ts::node_text(src, n) == name)
 		{
-			uint row = ts::ts_node_start_point(n).row;
-			bool dup = out.len() > 0 && out.last()!!.row == row;
-			if (!dup) out.push({ row, declares(parent_type) });
+			TSPoint at = ts::ts_node_start_point(n);
+			out.push({ at.row, at.column, declares(parent_type) });
 		}
 		return;
 	}
@@ -566,9 +570,12 @@ struct RefState
 	int total;
 	int shown;
 	int files;
+	String rename_to;   // set: the output is the edits that rename the name, nothing is written
+	int collisions;     // uses of rename_to that already exist in the files read
+	int lines;          // rename: how many lines change
 }
 
-// The uses of `name` in one source, appended to the reply as "file (n)" and one line per use.
+// The uses of `name` in one source, appended to the reply as "file (n)" and one line per line that uses it.
 fn void refs_emit(RefState* st, String shown_name, String src, String name)
 {
 	List{Ref} hits;
@@ -577,14 +584,56 @@ fn void refs_emit(RefState* st, String shown_name, String src, String name)
 	if (hits.len() == 0) return;
 	st.files++;
 	String[] lines = src.tsplit("\n");
-	if (st.shown < st.limit) st.out.appendf("%s (%d)\n", shown_name, (int)hits.len());
+	if (st.rename_to.len > 0)
+	{
+		List{Ref} existing;
+		existing.init(tmem);
+		refs_in(src, st.rename_to, &existing);
+		st.collisions += (int)existing.len();
+		rename_lines(st, shown_name, lines, &hits, name);
+		return;
+	}
+	int rows = 0;
+	foreach (i, h : hits) if (i == 0 || hits[i - 1].row != h.row) rows++;
+	if (st.shown < st.limit) st.out.appendf("%s (%d)\n", shown_name, rows);
+	uint prev = uint::max;
 	foreach (h : hits)
 	{
+		if (h.row == prev) continue;
+		prev = h.row;
 		st.total++;
 		if (st.shown >= st.limit) continue;
 		st.shown++;
 		String text = h.row < lines.len ? lines[h.row].trim() : "";
 		st.out.appendf("  %d: %s%s\n", (int)h.row + 1, util::clip(util::sanitize_utf8(text), 150), h.decl ? "   [declaration]" : "");
+	}
+}
+
+// One "- old line / + new line" pair for each line that uses the name; every use on the line is renamed.
+fn void rename_lines(RefState* st, String shown_name, String[] lines, List{Ref}* hits, String name)
+{
+	if (st.shown < st.limit) st.out.appendf("%s\n", shown_name);
+	sz i = 0;
+	while (i < hits.len())
+	{
+		uint row = (*hits)[i].row;
+		DString fresh = dstring::temp();
+		sz at = 0;
+		String old = row < lines.len ? lines[row] : "";
+		for (; i < hits.len() && (*hits)[i].row == row; i++)
+		{
+			sz col = (*hits)[i].col;
+			if (col < at || col + name.len > old.len || old[col:name.len] != name) continue;
+			fresh.append(old[at:col - at]);
+			fresh.append(st.rename_to);
+			at = col + name.len;
+			st.total++;
+		}
+		fresh.append(old[at..]);
+		st.lines++;
+		if (st.shown >= st.limit) continue;
+		st.shown++;
+		st.out.appendf("  %d:\n    - %s\n    + %s\n", (int)row + 1, util::clip(util::sanitize_utf8(old.trim_right()), 160), util::clip(util::sanitize_utf8(fresh.str_view().trim_right()), 160));
 	}
 }
 
@@ -603,7 +652,7 @@ fn void refs_in_archive(String archive, String shown, String name, RefState* st)
 	{
 		ZipEntry? e = z.stat_at(i);
 		if (catch e) continue;
-		if (e.is_directory || e.is_encrypted || !is_c3_file(e.name) || e.uncompressed_size > (long)MAX_SOURCE) continue;
+		if (e.is_directory || e.is_encrypted || !util::is_c3_file(e.name) || e.uncompressed_size > (long)MAX_SOURCE) continue;
 		used += e.uncompressed_size;
 		if (used > MAX_ARCHIVE_BYTES) return;
 		refs_entry(&z, &e, shown, name, st);
@@ -619,11 +668,17 @@ fn void refs_entry(ZipArchive* z, ZipEntry* e, String shown, String name, RefSta
 
 // Where `query` (an identifier, `Type.name` and `mod::name` search the last part) is used, as the grammar sees it: strings
 // and comments are not uses. `root_arg`: the project (default the session's); stdlib: the installed standard library.
-fn String refs_reply(String query, String root_arg, bool stdlib, int limit)
+fn String refs_reply(String query, String root_arg, bool stdlib, int limit, String rename_to = "")
 {
 	String name = last_part(query.trim());
 	if (name.len == 0) return "give query: the name to find, e.g. 'new_server' or 'HashMap.init'";
 	foreach (c : name) if (!util::ident_char(c)) return "query must be one identifier (a name, or Type.name / module::name)";
+	if (rename_to.len > 0)
+	{
+		if (stdlib) return "rename_to edits your own code; stdlib=true only reads the standard library";
+		if (rename_to == name) return "rename_to is the name it already has";
+		foreach (k, c : rename_to) if (!util::ident_char(c) || (k == 0 && c.is_digit())) return "rename_to must be one identifier";
+	}
 	List{String} files;
 	files.init(tmem);
 	String base;
@@ -663,7 +718,7 @@ fn String refs_reply(String query, String root_arg, bool stdlib, int limit)
 		if (catch bp) continue;
 		collect(bp, &files, 0);
 	}
-	RefState st = { .out = &out, .limit = limit };
+	RefState st = { .out = &out, .limit = limit, .rename_to = rename_to };
 	int archives = 0;
 	foreach (f : files)
 	{
@@ -685,6 +740,13 @@ fn String refs_reply(String query, String root_arg, bool stdlib, int limit)
 	int shown = st.shown;
 	int file_count = st.files;
 	if (total == 0) return string::tformat("'%s' is not used in %s (%d files%s read). It may be spelled differently there: c3_lookup lists declarations that contain it.", name, label, (int)files.len(), archives > 0 ? string::tformat(", %d library archive(s)", archives) : "");
+	if (rename_to.len > 0)
+	{
+		String warn = st.collisions > 0 ? string::tformat("WARNING: '%s' already occurs %d time(s) in these files; check for a clash first.\n", rename_to, st.collisions) : "";
+		String archive_note = archives > 0 ? "Uses inside library archives are not editable and are not in this plan.\n" : "";
+		String cut = st.lines > shown ? string::tformat("INCOMPLETE: %d of %d changed lines are shown; raise limit (at most 100) or give a narrower path.\n", shown, st.lines) : "";
+		return string::tformat("Rename '%s' to '%s': %d edit(s) on %d line(s) in %d file(s) of %s. Nothing is written; make these edits, then c3_check.\n%s%s%s%s", name, rename_to, total, st.lines, file_count, label, cut, warn, archive_note, out.str_view());
+	}
 	if (total > shown) out.appendf("[%d more uses in this search; raise limit or give a narrower path]\n", total - shown);
 	return string::tformat("%d use(s) of '%s' in %d file(s) of %s:\n%s", total, name, file_count, label, out.str_view());
 }

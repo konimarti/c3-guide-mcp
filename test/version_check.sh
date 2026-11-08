@@ -4,7 +4,7 @@
 cd "$(dirname "$0")/.." || exit 1
 fail=0
 pj=$(jq -r .version project.json)
-main=$(sed -n 's/.*new_server("c3-guide-mcp", "\([^"]*\)").*/\1/p' src/main.c3)
+main=$(sed -n 's/^const String VERSION = "\([^"]*\)".*/\1/p' src/main.c3)
 [ "$pj" = "$main" ] || { echo "project.json says $pj, src/main.c3 says $main"; fail=1; }
 ci=$(sed -n 's/^  C3C_VERSION: \([^ ]*\).*/\1/p' .github/workflows/ci.yml)
 rel=$(sed -n 's/^  C3C_VERSION: \([^ ]*\).*/\1/p' .github/workflows/release.yml)

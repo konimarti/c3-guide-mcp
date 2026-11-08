@@ -240,7 +240,8 @@ fn void project_error_has_relative_path() @test
 	Path dir = make_project("module app;\nfn void main() { int x = ; }\n");
 	defer (void)path::rmtree(dir);
 	String t = check::c3_check(path: (String)dir);
-	assert(has(t, "src/main.c3:2:") && !has(t, "c3proj-"), "%s", t);
+	String body = t[:t.index_of("\n[c3c ") ?? t.len];   // the last line names the project on purpose (where it ran)
+	assert(has(body, "src/main.c3:2:") && !has(body, "c3proj-") && has(t, "[c3c "), "%s", t);
 }
 
 fn void single_file_path_is_checked() @test
@@ -509,9 +510,9 @@ fn void a_file_of_a_project_is_checked_with_its_project() @test
 	file::save(string::tformat("%s/src/b.c3", root), "module b;\nfn void hello() {}\n")!!;
 	// alone, a.c3 does not know module b; with its project it compiles
 	String r = check::c3_check("", f);
-	assert(r.contains("belongs to the project in") && r.contains("OK: no errors (type-checked, not linked)"), "%s", r);
-	// the directory is built and linked
-	assert(check::c3_check("", root).starts_with("OK: no errors") && !check::c3_check("", root).contains("not linked"));
+	assert(r.contains("belongs to the project in") && r.contains("OK: no errors (type-checked"), "%s", r);
+	// the directory is type-checked: never cc, never the linker
+	assert(check::c3_check("", root).starts_with("OK: no errors") && check::c3_check("", root).contains("type-checked"));
 	// and a platform given with the file reaches the project check
 	String w = string::tformat("%s/src/w.c3", root);
 	file::save(w, "module w;\nfn void g() { $if env::WIN32: int x = \"not an int\"; $endif }\n")!!;
@@ -694,4 +695,76 @@ fn void a_c3i_file_is_checked_alone_and_with_a_snippet() @test
 	assert(alone.starts_with("OK"), "%s", alone);
 	String together = check::c3_check("import b;\nfn void main() { int x = b::abs(-1); }", files: f);
 	assert(together.starts_with("OK"), "%s", together);
+}
+
+fn void format_returns_the_formatted_snippet() @test
+{
+	String? f = check::find_c3f();
+	if (catch f) { io::printn("skipped: c3f is not installed"); return; }
+	String r = check::c3_check("module a;\nfn int  f(int x){return x+1;}\n", format: true);
+	assert(has(r, "OK") && has(r, "c3f: formatted code") && has(r, "{ return x + 1; }"), "%s", r);
+	String again = check::c3_check("module a;\nfn int f(int x) { return x + 1; }\n", format: true);
+	assert(has(again, "already formatted"), "%s", again);
+	String plain = check::c3_check("module a;\nfn int f(int x){return x+1;}\n");
+	assert(!has(plain, "c3f"), "%s", plain);
+}
+
+// Tokens and keys in the client's environment are not handed to a program a snippet builds
+fn void a_program_does_not_see_the_clients_secrets() @test
+{
+	$if !env::WIN32:
+		env::set_var("C3GUIDE_TEST_SECRET", "hunter2");
+		defer (void)env::clear_var("C3GUIDE_TEST_SECRET");
+		String r = check::c3_run("import std::io, std::os::env;\nfn void main()\n{\n\tio::printn(env::tget_var(\"C3GUIDE_TEST_SECRET\") ?? \"absent\");\n\tio::printn(env::tget_var(\"PATH\") ?? \"nopath\");\n}");
+		assert(has(r, "absent") && !has(r, "hunter2") && !has(r, "nopath"), "%s", r);
+	$endif
+}
+
+// $embed reads any file at compile time and $echo prints it: not for code that reaches the compiler by path or files
+fn void a_file_or_project_that_reads_outside_itself_is_refused() @test
+{
+	Path dir = check::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/proj/src", root))!!, recursive: true)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/other", root))!!)!!;
+	String secret = string::tformat("%s/other/secret.txt", root);
+	file::save(secret, "CANARY_SECRET_ONE")!!;
+	file::save(string::tformat("%s/proj/project.json", root), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/proj/res.txt", root), "inside")!!;
+	// 1) a helper given as files
+	String helper = string::tformat("%s/other/h.c3", root);
+	file::save(helper, string::tformat("module h;\nconst String L = (String)$embed(\"%s\");\n$echo \"LEAK=\" +++ L;\n", secret))!!;
+	String r1 = check::c3_check("fn int main() { return 0; }", files: helper);
+	assert(has(r1, "rejected") && !has(r1, "CANARY"), "%s", r1);
+	// 2) a project whose source embeds a file outside it
+	String proj = string::tformat("%s/proj", root);
+	String main_c3 = string::tformat("%s/proj/src/main.c3", root);
+	file::save(main_c3, string::tformat("module app;\nconst String L = (String)$embed(\"%s\");\n$echo \"LEAK=\" +++ L;\nfn void main() {}\n", secret))!!;
+	String r2 = check::c3_check(path: proj);
+	assert(has(r2, "rejected") && !has(r2, "CANARY"), "%s", r2);
+	// 3) the same through ".." and a computed name
+	file::save(main_c3, "module app;\nconst String L = (String)$embed(\"../../other/secret.txt\");\nfn void main() {}\n")!!;
+	assert(has(check::c3_check(path: proj), "rejected"));
+	file::save(main_c3, "module app;\nconst String N = \"x\";\nconst String L = (String)$embed(N);\nfn void main() {}\n")!!;
+	assert(has(check::c3_check(path: proj), "rejected"));
+	// 4) an $embed of a file inside the project is a normal thing to do
+	file::save(main_c3, "module app;\nconst String L = (String)$embed(\"../res.txt\");\nfn void main() {}\n")!!;
+	String ok = check::c3_check(path: proj);
+	assert(has(ok, "OK: no errors"), "%s", ok);
+}
+
+// cflags and c-sources of a project are code (cc runs them): a check never reaches cc
+fn void a_project_check_never_runs_the_c_compiler() @test
+{
+	Path dir = check::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/c", root))!!)!!;
+	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"src/**\"], \"c-sources\": [\"c/a.c\"], \"cflags\": \"-DX=1\", \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/src/main.c3", root), "module app;\nfn void main() {}\n")!!;
+	file::save(string::tformat("%s/c/a.c", root), "#error BOOM_FROM_C\nint x;\n")!!;
+	String r = check::c3_check(path: root);
+	assert(has(r, "OK: no errors") && !has(r, "BOOM"), "%s", r);
 }

@@ -506,13 +506,14 @@ fn String short_uid(String uid)
 fn String c3_refs(String query @Desc("the name whose uses you want: an identifier, or Type.name / module::name (the last part is searched)") = "",
 	String path @Desc("a project directory or a .c3 file; its libraries (deps) are included. Default: the project you last gave to c3_check, c3_test, c3_run or c3_lookup") = "",
 	bool stdlib @Desc("search the C3 standard library of your c3c instead of a project") = false,
-	int limit @Desc("number of uses shown (1..100)") = 30)
-	@Desc("Where a name is used: file, line and the line itself, with the declaration marked. Read with the C3 grammar, so comments and strings are not uses. Use it instead of grep and sed before you rename, move or delete a function, type or module: it matches whole identifiers only, so `Server` does not match `TcpServerSocket`, and comments and strings are not uses. With stdlib=true it shows how the standard library itself uses a name.")
+	int limit @Desc("number of uses shown (1..100)") = 30,
+	String rename_to @Desc("instead of listing uses: the new name. Returns the exact edits (old line and new line, per file) that rename every use; nothing is written") = "")
+	@Desc("Where a name is used: file, line and the line itself, with the declaration marked. Read with the C3 grammar, so comments and strings are not uses. Use it instead of grep and sed before you rename, move or delete a function, type or module: it matches whole identifiers only, so `Server` does not match `TcpServerSocket`, and comments and strings are not uses. With rename_to=NEW it returns the edits that rename it (every use, nothing written), so a rename is a plan you apply and then c3_check. With stdlib=true it shows how the standard library itself uses a name.")
 	@ReadOnly
 {
 	if (query.trim().len == 0) return "give query: the name to find, e.g. 'new_server' or 'HashMap.init'";
 	if (path.len > 0) outline::note_project(path);
-	return util::clip(outline::refs_reply(query, path, stdlib, clamp(limit, 1, 100)), 6000);
+	return util::clip(outline::refs_reply(query, path, stdlib, clamp(limit, 1, 100), rename_to.trim()), 6000);
 }
 
 // The first symbol entry whose name is `name`.

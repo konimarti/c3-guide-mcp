@@ -2,6 +2,10 @@
 
 Two optional files that make Claude Code reliably use the c3-guide tools.
 
+## One command
+
+`c3-guide-mcp --setup` does the steps below for Claude Code (`--dry-run` shows the plan, `--doctor` the state). The hook also stops `sed -i` on `.c3` files: renames go through `c3_refs` with `rename_to`.
+
 ## Rules for the assistant: `CLAUDE.md`
 
 Copy the lines of [CLAUDE.md](CLAUDE.md) into your project's `CLAUDE.md` (or `~/.claude/CLAUDE.md` for all projects). Other editors take the same text in `AGENTS.md`, Cursor rules or `.github/copilot-instructions.md`.

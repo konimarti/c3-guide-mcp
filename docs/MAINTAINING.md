@@ -37,6 +37,8 @@ C3_DIR=/path/to/c3 c3c test c3-guide-mcp   # tools, search quality, c3_check and
 python3 test/stdio_test.py                 # JSON-RPC over the built binary
 python3 test/smoke.py [binary]             # one call per tool (also run on Windows in CI)
 python3 test/growth_test.py                # memory over 4,000 calls
+python3 test/setup_test.py                 # --setup and --doctor on a throw-away HOME
+python3 scripts/verify_corpus.py           # compile the code of the corpus; recipes must compile, manual blocks that do not are listed
 python3 test/corpus_test.py /path/to/c3    # snapshot and synonyms match the c3c install
 sh test/hook_test.sh                       # the Claude Code hook's matching rules
 sh test/version_check.sh                   # project.json, server and CI pins agree
@@ -44,9 +46,23 @@ sh test/version_check.sh                   # project.json, server and CI pins ag
 
 The `@test` functions in `test/*.c3` call the tool functions directly, so no binary has to be built first. Without `C3_DIR` the grammar gate and the live-docs tests print "skipped" and pass; CI sets it. If your Claude Code uses the redirect hook, put `C3_GUIDE_ALLOW=1` in front of `c3c test`.
 
+## Where the advice is written
+
+The same advice appears in four places: each tool's `@Desc` (`src/tools.c3`, `src/check.c3`), `INSTRUCTIONS` in `src/main.c3`, `integrations/claude-code/CLAUDE.md` (also compiled into the binary for `--setup`), and the README. The `@Desc` is canonical: change it first, then bring the other three in line. `src/main.c3` also holds the stdio loop (a copy of the mcp library's, with the usage log around it) and the command line modes handled by `src/setup.c3`.
+
+## Corpus checks
+
+`scripts/verify_corpus.py` compiles every recipe and every ```c3 block of the manual with the installed c3c. A recipe that fails is a bug (the script exits 1). A manual block that fails is either an illustration or a statement the compiler contradicts (an old keyword, a removed rule); read the list after a c3c release. A real contradiction goes into `ERRATA` in `scripts/gen_corpus.py` (applied when the corpus is generated; the script says when the manual was fixed and the entry can go).
+
+## Usage log and report
+
+`src/telemetry.c3` writes the local usage log described in the README; `scripts/usage_report.py` reads it and the Claude Code transcripts. Read the report after a release or a batch of sessions, and turn a recurring lookup that finds nothing into a synonym (`scripts/synonyms_seed.txt`), a legacy-name note or a hint (`src/hints.c3`). Nothing in the server changes its own corpus or hints.
+
 ## Safety design of the run tools
 
-- `c3_check` runs `c3c --trust=none --no-obj`: nothing is emitted or run. `$exec` does not run (tested with a positive control). `--trust=none` still allows `$embed`, which with `$echo` can print a file the server can read, so snippets containing `$embed`, `$include` or `$exec` are rejected before they reach the compiler. Files given by `path` are the user's own code and skip that filter.
+- On Linux and macOS, c3c and the programs it builds start in the scratch directory with a reduced environment (`KEEP_ENV` in `src/check.c3`; on Windows the environment is inherited and the directory is ours): c3c reads every `*.c3l` in its working directory, so a snippet must not run in the directory the client started in, and API keys in the client's environment are not handed to a snippet's program.
+- `c3_check` runs `c3c --trust=none --no-obj`: nothing is emitted or run. `$exec` does not run (tested with a positive control). `--trust=none` still allows `$embed`, which with `$echo` can print a file the server can read, so snippets containing `$embed`, `$include` or `$exec` are rejected before they reach the compiler. A project, file or `files` entry is read first by `src/guard.c3`: a compile-time read whose literal path ends outside the project (absolute, `..`, a link), a computed one, any at all in a file that belongs to no project, and a source too large to scan are refused (a hostile repository is the case: `$embed` + `$echo` would print any file the server can read). A project check is `-C` (type-check only): `cc` and the linker run the project's `cflags`, `c-sources` and `link-args`, which is code, so only `c3_test` and `c3_run` build.
+- `c3_lookup` and `c3_refs` read a project's `dependency-search-paths` only when they stay inside the project or its parent folder (sibling libraries); other entries are skipped.
 - Snippets and builds happen in a fresh temp directory (`c3guide-<nanoseconds>`), removed afterwards. A killed server leaves it behind; the next call removes `c3guide-*` older than an hour (symlinks are not followed).
 - Every c3c run has a deadline (snippet 10 s, project check 25 s, `c3_test`/`c3_run` up to 120 s) and a capped output. A reader thread does the blocking read, so a call always returns. At the deadline c3c and everything under the scratch directory are killed (`pkill -f` on the escaped directory name; Linux and macOS).
 - `c3_test`/`c3_run` execute what they build; the server is not a sandbox. The program's stdin is the `input` argument (16 KB), then end of input, so a program that reads stdin never waits for the deadline.

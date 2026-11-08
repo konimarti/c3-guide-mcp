@@ -3,6 +3,7 @@
 # stop the call and tell it to use the c3-guide tools instead: they run the same compiler and add the
 # stdlib signature or release note the bare error message lacks.
 # `c3c build` and `c3c compile` are let through: producing a binary is a legitimate use.
+# `sed -i` on .c3 / .c3i files is stopped too: a rename there goes through c3_refs (whole identifiers, rename_to).
 # Exit code 2 blocks the call and shows stderr to the model.
 #
 # Only the command itself is looked at (not the rest of the JSON), and only where c3c is the program being
@@ -27,6 +28,15 @@ blocked=$(printf '%s\n' "$cmd" | tr '\t' ' ' | tr ';&|(){}`' '\n\n\n\n\n\n\n\n' 
 	while (i <= n && w[i] ~ /^[A-Za-z_][A-Za-z0-9_]*=/) { if (w[i] == "C3_GUIDE_ALLOW=1") allow = 1; i++ }
 	if (i > n || allow) next
 	prog = w[i]; gsub(/^["\x27]+|["\x27]+$/, "", prog)
+	if (prog ~ /(^|\/)g?sed$/) {   # an in-place edit of C3 sources: a rename needs c3_refs first (whole identifiers only)
+		inplace = 0; c3file = 0
+		for (j = i + 1; j <= n; j++) {
+			if (w[j] ~ /^(-[A-Za-z]*i.*|--in-place.*)$/) inplace = 1
+			if (w[j] ~ /\.c3i?["\x27]?$/) c3file = 1
+		}
+		if (inplace && c3file) { print "sed"; exit }
+		next
+	}
 	if (prog !~ /(^|\/)c3c(\.exe)?$/ && prog !~ /^\$\{?C3C\}?$/) next
 	for (i = i + 1; i <= n; i++) {
 		if (w[i] ~ /^-/) continue
@@ -36,6 +46,14 @@ blocked=$(printf '%s\n' "$cmd" | tr '\t' ' ' | tr ';&|(){}`' '\n\n\n\n\n\n\n\n' 
 	}
 }')
 
+if [ "$blocked" = sed ]; then
+	cat >&2 <<'MSG'
+Do not rename or edit C3 identifiers with sed -i: it also changes longer names (Server inside TcpServerSocket),
+comments and strings. Call mcp__c3-guide__c3_refs first (whole identifiers only; with rename_to it returns the
+exact edits), then make the edits. To run sed anyway: C3_GUIDE_ALLOW=1 sed -i ...
+MSG
+	exit 2
+fi
 if [ "$blocked" = yes ]; then
 	cat >&2 <<'MSG'
 Do not run c3c by hand to check or run C3 code. Use the c3-guide MCP tools:

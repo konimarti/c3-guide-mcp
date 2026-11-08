@@ -84,6 +84,11 @@ jobs:
       - name: Snapshot matches this c3c
         if: runner.os == 'Linux'
         run: python3 test/corpus_test.py "$C3_DIR"
+      - name: Setup command and recipes compile
+        if: runner.os == 'Linux'
+        run: |
+          python3 test/setup_test.py
+          python3 scripts/verify_corpus.py
       - name: Default build passes too (Linux)
         if: runner.os == 'Linux'
         run: |

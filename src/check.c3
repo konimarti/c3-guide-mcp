@@ -1,6 +1,6 @@
 module c3guide::check;
 import mcp, libc, std::os::posix, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
-import c3guide::util, c3guide::hints, c3guide::corpus, c3guide::context, c3guide::outline, std::time;
+import c3guide::guard, c3guide::util, c3guide::hints, c3guide::corpus, c3guide::context, c3guide::outline, std::time;
 
 // Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
 // fresh temp dir and compiled with a FIXED command line:
@@ -12,7 +12,9 @@ import c3guide::util, c3guide::hints, c3guide::corpus, c3guide::context, c3guide
 // `--trust=none` still allows $embed, and $echo prints to stdout, so a snippet could read any file the
 // server can read and print it byte by byte. Snippets that mention $embed, $include or $exec are
 // rejected before they reach the compiler (the tokens cannot be spelled any other way: $eval only
-// builds identifiers). Do not run the server as a user that can read secrets regardless.
+// builds identifiers). Code that reaches the compiler by `path` or `files` is read first (src/guard.c3) for the same
+// reason, and a project is only type-checked (`-C`): its cflags, c-sources and link-args would run under cc and the
+// linker. Do not run the server as a user that can read secrets regardless.
 const sz MAX_CODE = 32 * 1024;
 const sz MAX_FIX = 12 * 1024;
 const sz MAX_OUTPUT = 4 * 1024;
@@ -324,10 +326,35 @@ fn bool child_exited(Process* p, int* status)
 
 fn long ms_since(Clock t) => (long)(t.to_now() / 1_000_000);
 
-// Run argv (no shell), capture stdout+stderr up to max_output, kill the child past that or past the deadline.
+// What c3c and the C toolchain it calls read (c3c's own getenv calls, plus the loader, locale and sanitizer settings).
+// Everything else of the client's environment (tokens, API keys) is not handed to a compiler or to a program a snippet builds.
+const String[*] KEEP_ENV = {
+	"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "TEMPDIR", "XDG_CACHE_HOME", "LANG", "LC_ALL", "LC_CTYPE",
+	"C3C_LIB", "C3C_CC", "C3C_AR", "CC", "AR", "SDKROOT", "DEVELOPER_DIR", "LD_LIBRARY_PATH", "ANDROID_NDK",
+	"ASAN_OPTIONS", "UBSAN_OPTIONS", "MSAN_OPTIONS", "TSAN_OPTIONS"
+};
+
+fn Process? spawn_clean(String[] cmd)
+{
+	$if env::WIN32:
+		return process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT | process::SpawnOptions.INHERIT_ENV);   // the loader needs SystemRoot and more
+	$else
+		String[] kept = mem::talloc_array(String, KEEP_ENV.len);
+		int n = 0;
+		foreach (k : KEEP_ENV)
+		{
+			String? v = env::tget_var(k);
+			if (try v) kept[n++] = string::tformat("%s=%s", k, v);
+		}
+		return process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT, kept[:n]);
+	$endif
+}
+
+// Run argv, capture stdout+stderr up to max_output, kill the child past that or past the deadline.
 // *code gets the exit status (0 when we killed it ourselves), *timed_out says whether the deadline fired. A reader
 // thread does the blocking read, so this call always returns: with the output so far if something keeps the pipe open.
-// `cwd`: the directory the child runs in. c3c treats every `*.c3l` in its working directory as a library, so a snippet
+// `cwd`: the directory the child runs in (Linux and macOS: through `sh -c 'cd "$1" && exec "$@"'`; argv is still never
+// parsed by a shell; on Windows the child keeps our directory). c3c treats every `*.c3l` in its working directory as a library, so a snippet
 // must not run in the directory the client was started in (a library being synced there breaks every call).
 fn String? run_capped(String[] cmd_in, int* code, bool* timed_out, ulong deadline_ms = DEADLINE_MS, sz max_output = MAX_OUTPUT, String sweep = "", String input = "", String cwd = "")
 {
@@ -345,7 +372,7 @@ fn String? run_capped(String[] cmd_in, int* code, bool* timed_out, ulong deadlin
 			cmd = wrapped;
 		}
 	$endif
-	Process spawned = process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT | process::SpawnOptions.INHERIT_ENV)!;
+	Process spawned = spawn_clean(cmd)!;
 	Process* proc = libc::calloc(1, Process::size);
 	*proc = spawned;
 	// What the program reads from stdin, then end of input: a program that reads stdin must see EOF, not wait for the
@@ -575,7 +602,7 @@ fn String? resolve_target(String target, bool* is_dir)
 		*is_dir = true;
 		return s;
 	}
-	if (!file::exists(s) || !outline::is_c3_file(s)) return BAD_TARGET~;
+	if (!file::exists(s) || !util::is_c3_file(s)) return BAD_TARGET~;
 	*is_dir = false;
 	return s;
 }
@@ -617,10 +644,10 @@ fn bool valid_opt(String o)
 const String BAD_TARGET_NAME = "target must be a build target name (letters, digits, _ . -), not an option";
 
 // Exactly one of code / path. Returns "" when the arguments are fine, else the message to show.
-fn String exclusive_args(String code, String target)
+fn String exclusive_args(String code, String path)
 {
-	if (code.len > 0 && target.len > 0) return "give either code or path, not both";
-	if (code.len == 0 && target.len == 0) return "give code (a snippet) or path (a project directory or .c3 file)";
+	if (code.len > 0 && path.len > 0) return "give either code or path, not both";
+	if (code.len == 0 && path.len == 0) return "give code (a snippet) or path (a project directory or .c3 file)";
 	if (code.len > MAX_CODE) return "give 1 to 32768 bytes of code";
 	foreach (f : FORBIDDEN)
 	{
@@ -678,13 +705,14 @@ fn String parse_files(String files, FileList* out)
 		String t = line.trim(" \t\r");
 		if (t.len == 0) continue;
 		if (out.n >= MAX_EXTRA_FILES) return "files: at most 8 files";
-		if (t.len > 4096 || t[0] == '-' || !outline::is_c3_file(t)) return string::tformat("files: '%s' is not a .c3 or .c3i file", util::clip(t, 80));
+		if (t.len > 4096 || t[0] == '-' || !util::is_c3_file(t)) return string::tformat("files: '%s' is not a .c3 or .c3i file", util::clip(t, 80));
 		Path? p = path::new(tmem, t);
 		if (catch p) return "files: invalid path";
 		Path? abs = p.absolute(tmem);
 		if (catch abs) return "files: invalid path";
 		String full = (String)abs;
 		if (!file::is_file(full)) return string::tformat("files: '%s' does not exist", util::clip(t, 80));
+		if (guard::file_escape(full, project_dir(full)).len > 0) return reads_outside(full);
 		out.items[out.n++] = full;
 	}
 	return "";
@@ -709,9 +737,16 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	String path @Desc("instead of code: a project directory (with project.json) or a .c3 / .c3i file on disk; a project is built (not run) in a scratch directory, nothing is written to it") = "",
 	String files @Desc("with code or a single .c3 / .c3i path: more .c3 or .c3i files compiled together with it, one path per line (a helper, an FFI binding, a library's source)") = "",
 	String target @Desc("with a project path: the build target, default the first") = "",
-	String platform @Desc("check for another platform without linking, e.g. 'windows-x64', 'macos-aarch64', 'linux-x64' (c3c --list-targets lists them)") = "")
-	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. Code in old 0.6/0.7 syntax that fails is rewritten mechanically (`int.sizeof` -> `int::size`, `isz` -> `sz`...) and the rewritten code is checked too. A project (path) is built through the link; a file that belongs to a project is checked with that project; a snippet or a file outside any project is only type-checked. `platform` checks for another OS without linking. It type-checks only: a clean result says nothing about leaks, double frees or use-after-free; run those with c3_test or c3_run and sanitize=address. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
+	String platform @Desc("check for another platform without linking, e.g. 'windows-x64', 'macos-aarch64', 'linux-x64' (c3c --list-targets lists them)") = "",
+	bool format @Desc("also run the formatter c3f: a snippet comes back formatted, a file or project as a diff of what would change (nothing is written)") = false)
+	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. Code in old 0.6/0.7 syntax that fails is rewritten mechanically (`int.sizeof` -> `int::size`, `isz` -> `sz`...) and the rewritten code is checked too. A project (path) is type-checked, never compiled with cc or linked (its c-sources, cflags and link-args are code); c3_test and c3_run build it. A file that belongs to a project is checked with that project; a snippet or a file outside any project is only type-checked. `platform` checks for another OS without linking. It type-checks only: a clean result says nothing about leaks, double frees or use-after-free; run those with c3_test or c3_run and sanitize=address. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
 	@Timeout(30000)
+{
+	String reply = check_any(code, path, files, target, platform);
+	return format ? string::tformat("%s%s", reply, format_report(code, path)) : reply;
+}
+
+fn String check_any(String code, String path, String files, String target, String platform)
 {
 	String bad = exclusive_args(code, path);
 	if (bad.len > 0) return bad;
@@ -721,9 +756,9 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	if (err.len > 0) return err;
 	if (path.len > 0)
 	{
-		if (outline::is_c3_file(path)) { context::note_file(path); }
+		if (util::is_c3_file(path)) { context::note_file(path); }
 		else { outline::note_project(path); }
-		return check_path(path, target, platform, true, extra.list());
+		return check_path(path, target, platform, extra.list());
 	}
 	context::note_source(code);
 	// No @pool here: the result lives in the caller's temp memory (a nested pool would free it on return).
@@ -741,6 +776,81 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	if (catch file::save(fixed, r.code)) return first;
 	String second = compile_only(fixed, (String)dir, "<code>", platform, extra.list());
 	return string::tformat("%s\n\n0.7 syntax found: %d mechanical rewrite(s) (%s). The rewritten code:\n--- code ---\n%s\n--- c3_check of the rewritten code ---\n%s", first, r.count, r.notes, r.code, second);
+}
+
+// An empty directory to run c3c in when it needs no files of its own (c3c reads every `*.c3l` in its working directory).
+// One per process, made on first use and made again if the stale-directory sweep removed it.
+char[512] cwd_buf;
+String neutral_cwd_path;
+
+fn String neutral_cwd()
+{
+	if (neutral_cwd_path.len > 0 && file::is_dir(neutral_cwd_path)) return neutral_cwd_path;
+	Path? p = scratch_dir();
+	if (catch p) return "";
+	String s = (String)p;
+	if (s.len >= cwd_buf.len) return "";
+	cwd_buf[:s.len] = s[..];
+	neutral_cwd_path = (String)cwd_buf[:s.len];
+	return neutral_cwd_path;
+}
+
+// The exit codes of the shell that sets the working directory when it cannot start c3c (125 cd failed, 126/127 exec failed).
+fn bool could_not_start(int status) => status == 125 || status == 126 || status == 127;
+
+const sz MAX_FORMAT_INPUT = 60000;
+
+// c3f, the C3 formatter, when it is installed ($C3F or on PATH).
+fn String? find_c3f()
+{
+	String? v = env::tget_var("C3F");
+	if (try v) { if (v.len > 0) return v; }
+	String? dirs = env::tget_var("PATH");
+	if (catch dirs) return NOT_FOUND~;
+	return which(env::WIN32 ? "c3f.exe" : "c3f", dirs);
+}
+
+// What c3f would change, appended to the check: the formatted snippet, or a diff for a file or project. Writes nothing.
+fn String format_report(String code, String path)
+{
+	String? bin = find_c3f();
+	if (catch bin) return "\n(format: c3f is not installed; put it on PATH or set C3F)";
+	return path.len > 0 ? format_path(bin, path) : format_snippet(bin, code);
+}
+
+fn String format_path(String bin, String path)
+{
+	bool is_dir;
+	String? where = resolve_target(path, &is_dir);
+	if (catch where) return "";
+	int status = 0;
+	bool timed_out = false;
+	String? out = run_capped({ bin, "--diff", where }, &status, &timed_out, DEADLINE_MS, 8192, "", "", neutral_cwd());
+	if (catch out) return "\n(format: c3f could not run)";
+	if (timed_out || could_not_start(status)) return "\n(format: c3f did not finish)";
+	return out.trim().len == 0 ? "\n(format: c3f has nothing to change)" : string::tformat("\n--- c3f would change ---\n%s", util::clip(redact(out, where, ""), 3000));
+}
+
+fn String format_snippet(String bin, String code)
+{
+	if (code.len > MAX_FORMAT_INPUT) return "\n(format: the snippet is too large for c3f here)";
+	int status = 0;
+	bool timed_out = false;
+	String? out = run_capped({ bin, "--stdin-filename", "snippet.c3", "-" }, &status, &timed_out, DEADLINE_MS, MAX_FORMAT_INPUT * 2, "", code, neutral_cwd());
+	if (catch out) return "\n(format: c3f could not run)";
+	if (timed_out || could_not_start(status)) return "\n(format: c3f did not finish)";
+	// c3f says what it could not format as "<stdin>:LINE: ..." lines: they are notes, not code
+	DString formatted = dstring::temp();
+	DString notes = dstring::temp();
+	foreach (line : out.tsplit("\n"))
+	{
+		if (line.starts_with("<stdin>:")) { notes.appendf("%s\n", line); }
+		else { formatted.appendf("%s\n", line); }
+	}
+	String f = formatted.str_view().trim_right();
+	String note = notes.len() > 0 ? string::tformat("\n(c3f: %s)", notes.str_view().trim()) : "";
+	if (f.trim() == code.trim()) return string::tformat("\n(format: already formatted)%s", note);
+	return string::tformat("\n--- c3f: formatted code ---\n%s%s", f, note);
 }
 
 // Type-check one file: nothing is emitted or run. `hide` is cut from the paths in the output.
@@ -762,17 +872,14 @@ fn String compile_only(String file, String hide, String replacement, String plat
 	foreach (e : extra) a.add(e);
 	int status = 0;
 	bool timed_out = false;
-	Path? cwd = scratch_dir();
-	if (catch cwd) return "cannot create a temp directory";
-	defer (void)path::rmtree(cwd);
-	String? out = run_capped(a.list(), &status, &timed_out, DEADLINE_MS, MAX_OUTPUT, "", "", (String)cwd);
+	String? out = run_capped(a.list(), &status, &timed_out, DEADLINE_MS, MAX_OUTPUT, "", "", neutral_cwd());
 	if (catch out) return NO_C3C;
-	if (status == 126 || status == 127) return NO_C3C;   // the shell that sets the working directory could not start c3c
+	if (could_not_start(status)) return NO_C3C;
 	String shown = report(out, status, timed_out, hide, replacement, "OK: no errors", DEADLINE_MS);
 	return string::tformat("%s%s", shown, after_compile(shown));
 }
 
-fn String check_path(String target_path, String target, String platform = "", bool linked = true, String[] extra = {})
+fn String check_path(String target_path, String target, String platform = "", String[] extra = {})
 {
 	bool is_dir;
 	String? where = resolve_target(target_path, &is_dir);
@@ -781,6 +888,8 @@ fn String check_path(String target_path, String target, String platform = "", bo
 	if (is_dir)
 	{
 		if (extra.len > 0) return "files goes with code or a single .c3 path, not with a project directory (the project lists its own sources)";
+		String outside = guard::project_escape(where);
+		if (outside.len > 0) return reads_outside(outside);
 		// `--no-obj` only exists for single files. A project is built (not run) in a scratch directory.
 		Path? scratch = scratch_dir();
 		if (catch scratch) return "cannot create a temp directory";
@@ -795,8 +904,9 @@ fn String check_path(String target_path, String target, String platform = "", bo
 			m.add("--target");
 			m.add(platform);
 		}
-		if (platform.len > 0 || !linked) m.add("-C");
-		String ok = platform.len > 0 || !linked ? "OK: no errors (type-checked, not linked)" : "OK: no errors";
+		// type-check only, never `cc` or the linker: a project's cflags, c-sources and link-args are code that would run
+		m.add("-C");
+		String ok = "OK: no errors (type-checked; c3_test or c3_run builds, links and runs)";
 		return run_c3c(m.list(), base, "", scratch, true, where, ok, PROJECT_CHECK_MS);
 	}
 	// A file checked on its own cannot see the other modules or the dependencies of its project: check the project
@@ -804,9 +914,17 @@ fn String check_path(String target_path, String target, String platform = "", bo
 	if (project.len > 0)
 	{
 		outline::note_project(project);
-		return string::tformat("(this file belongs to the project in %s: the whole project is type-checked; give the directory to build and link it)\n%s", project, check_path(project, target, platform, false));
+		return string::tformat("(this file belongs to the project in %s: the whole project is type-checked)\n%s", project, check_path(project, target, platform));
 	}
+	String outside = guard::file_escape(where, "");   // (a file of a project was checked above, with its project)
+	if (outside.len > 0) return reads_outside(outside);
 	return compile_only(where, base, "", platform, extra);
+}
+
+// $embed, $include and $exec can read any file the server can read, and $echo prints it into the reply: not at check time.
+fn String reads_outside(String file)
+{
+	return string::tformat("rejected: %s reads a file outside its own project at compile time ($embed/$include/$exec with a path that leaves it, a computed one, any at all in a file that belongs to no project), or is too large to be checked for that. c3_check does not compile it. If you trust it, build it yourself with `c3c`.", util::clip(file, 200));
 }
 
 // The directory of the project.json above a file, "" when the file belongs to no project.
@@ -849,10 +967,12 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	// failures and the summary line past the cap
 	String? out = run_capped(argv, &status, &timed_out, deadline_ms, MAX_RUN_CAPTURE, sd, input, sd);
 	if (catch out) return NO_C3C;
-	if (status == 126 || status == 127) return NO_C3C;
+	if (could_not_start(status)) return NO_C3C;
 	String shown = drop_runtime_frames(report(out, status, timed_out, hide, replacement, ok, deadline_ms));
 	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
-	return string::tformat("%s%s", shown, after_compile(shown));
+	// where it ran: a path that was defaulted or relative is the one thing a caller cannot see
+	String footer = where.len > 0 ? string::tformat("\n[c3c %s, %s]", compiler_version(), where) : "";
+	return string::tformat("%s%s%s", shown, after_compile(shown), footer);
 }
 
 fn String c3_test(String path @Desc("a project directory (with project.json) or a .c3 file with @test functions") = "",

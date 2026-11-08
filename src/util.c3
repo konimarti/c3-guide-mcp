@@ -1,5 +1,17 @@
 module c3guide::util;
-import std::core::string;
+import std::core::string, std::os::env;
+
+extern fn CInt chmod(ZString, uint) @if(!env::WIN32);
+
+fn bool is_c3_file(String name) => name.ends_with(".c3") || name.ends_with(".c3i");
+
+// Owner-only (0o600) or executable (0o755) mode for a file this server created. No-op on Windows.
+fn void set_mode(String file, uint mode)
+{
+	$if !env::WIN32:
+		chmod(file.zstr_tcopy(), mode);
+	$endif
+}
 
 // Largest n <= max such that s[:n] does not end inside a UTF-8 sequence (a cut in the middle of a
 // character would make the whole JSON-RPC line invalid for the client).
@@ -75,3 +87,21 @@ fn String sanitize_utf8(String s)
 	}
 	return out.str_view();
 }
+
+extern fn char* realpath(char*, char*) @if(!env::WIN32);
+
+// The path as the system sees it (links and `..` resolved); "" when it does not exist.
+fn String canonical(String p)
+{
+	$if env::WIN32:
+		return p;
+	$else
+		char[4096] buf;
+		char* r = realpath(p.zstr_tcopy(), &buf);
+		if (!r) return "";
+		return string::tformat("%s", (ZString)&buf);
+	$endif
+}
+
+// True when `target` is `root` or below it (both canonical).
+fn bool inside(String root, String target) => target == root || (target.len > root.len && target.starts_with(root) && target[root.len] == '/');
