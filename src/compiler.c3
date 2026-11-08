@@ -1,5 +1,5 @@
 module c3guide::compiler;
-import std::core::string, std::io::file, std::os::env;
+import std::core::string, std::io::file, std::io::path, std::os::env;
 import c3guide::proc, c3guide::corpus;
 
 // Finding the installed c3c and what it is: where it is, its version, its standard library, and the notes that say
@@ -41,16 +41,29 @@ fn String? find_c3c()
 char[1024] c3c_buf;   // the cached answer lives here: temp memory is reset between calls
 String found_c3c;
 
+// A relative path to a program (`C3C=bin/c3c`, a relative PATH entry) is made absolute here: the program is started from
+// another directory (proc::run_capped), where it would not be found.
+fn String absolute(String binary)
+{
+	if (!binary.contains("/") || binary.starts_with("/")) return binary;
+	Path? p = path::new(tmem, binary);
+	if (catch p) return binary;
+	Path? a = p.absolute(tmem);
+	if (catch a) return binary;
+	return (String)a;
+}
+
 fn String c3c_binary()
 {
 	String? v = env::tget_var("C3C");
-	if (try v) { if (v.len > 0) return v; }
+	if (try v) { if (v.len > 0) return absolute(v); }
 	if (found_c3c.len > 0) return found_c3c;
 	String? f = find_c3c();
 	if (catch f) return EXE;   // not found: let the spawn fail with the usual message (and look again next time)
-	if (f.len >= c3c_buf.len) return f;
-	c3c_buf[:f.len] = f[..];
-	found_c3c = (String)c3c_buf[:f.len];
+	String a = absolute(f);
+	if (a.len >= c3c_buf.len) return a;
+	c3c_buf[:a.len] = a[..];
+	found_c3c = (String)c3c_buf[:a.len];
 	return found_c3c;
 }
 

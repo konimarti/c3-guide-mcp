@@ -138,19 +138,11 @@ fn String[] with_joined_pairs(String[] terms)
 }
 
 // "std::io::read_line" -> "std io read line": every character that cannot be part of a word becomes a space.
-fn String words_only(String q)
+// With `split_underscore` false `_` stays, as in `read_line`: code the way people paste it (`main(String[] args)`, `path::ls`).
+fn String words(String q, bool split_underscore = true)
 {
 	DString out = dstring::temp();
-	foreach (c : q) out.append_char(is_word(c, true) ? c : ' ');
-	return out.str_view();
-}
-
-// Code the way people paste it into a question (`main(String[] args)`, `List{`, `path::ls`):
-// every character that cannot be part of a word becomes a space; `_` stays, as in `read_line`.
-fn String code_words(String q)
-{
-	DString out = dstring::temp();
-	foreach (c : q) out.append_char(is_word(c, false) ? c : ' ');
+	foreach (c : q) out.append_char(is_word(c, split_underscore) ? c : ' ');
 	return out.str_view();
 }
 
@@ -158,7 +150,7 @@ fn String code_words(String q)
 // symbols: match on words inside identifiers (`read_line`, `std::io::file`) instead of whole identifiers.
 fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 {
-	String[] terms = query_terms(symbols ? words_only(query) : query);
+	String[] terms = query_terms(symbols ? words(query) : query);
 	if (terms.len == 0) return {};
 	if (symbols && terms.len >= 2) terms = with_joined_pairs(terms);
 	int typed = (int)terms.len;

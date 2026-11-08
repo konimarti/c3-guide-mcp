@@ -1,7 +1,7 @@
 module c3guide::test::outline;
 import c3guide::compiler, c3guide::proc;
-import c3guide::outline, c3guide::tools, c3guide::check, c3guide::util, c3guide::test::support;
-import std::core::string, std::os::env, std::io, std::io::file, std::io::path, std::time::clock;
+import c3guide::ts, c3guide::outline, c3guide::tools, c3guide::check, c3guide::util, c3guide::test::support;
+import std::collections::list, std::core::string, std::os::env, std::io, std::io::file, std::io::path, std::time::clock;
 
 const String SAMPLE = `module demo::shapes;
 import std::io;
@@ -96,13 +96,38 @@ fn void a_very_deep_expression_does_not_crash_the_rewrite() @test
 	assert(n.len > 0, "survived deep nesting of the old form");
 }
 
+// How many .c3 files under `dir` the vendored grammar does not parse cleanly (and the first few names).
+// This is what tells you whether the grammar has caught up with a c3c release.
+fn int unparsed_files(String dir, DString* names)
+{
+	List{String} files;
+	files.init(tmem);
+	Path? p = path::new(tmem, dir);
+	if (catch p) return -1;
+	outline::collect(p, &files, 0);
+	TSParser* parser = ts::ts_parser_new();
+	defer ts::ts_parser_delete(parser);
+	ts::ts_parser_set_language(parser, ts::tree_sitter_c3());
+	int bad = 0;
+	foreach (f : files)
+	{
+		char[]? data = file::load_temp(f);
+		if (catch data) continue;
+		TSTree* tree = ts::ts_parser_parse_string(parser, null, data.ptr, (uint)data.len);
+		defer ts::ts_tree_delete(tree);
+		if (!ts::ts_node_has_error(ts::ts_tree_root_node(tree))) continue;
+		if (bad++ < 5) names.appendf("  %s\n", f);
+	}
+	return bad;
+}
+
 fn void the_grammar_parses_the_stdlib_of_the_c3c_it_targets() @test
 {
 	// Run with C3_DIR=<the c3c install> (CI sets it). Skipped without it: there is no stdlib to read.
 	String? dir = env::tget_var("C3_DIR");
 	if (catch dir) return;
 	DString names = dstring::temp();
-	int bad = outline::unparsed_files(string::tformat("%s/lib/std", dir), &names);
+	int bad = unparsed_files(string::tformat("%s/lib/std", dir), &names);
 	assert(bad == 0, "%d stdlib files do not parse with the vendored grammar: it has not caught up with this c3c. Keep the old grammar (git checkout vendor/) until it does, or see scripts/update_treesitter.py.\n%s", bad, names.str_view());
 }
 
@@ -324,4 +349,36 @@ fn void a_search_path_that_leaves_the_project_and_its_parent_is_not_read() @test
 	String proj = string::tformat("%s/a/proj", root);
 	assert(tools::c3_lookup("SIBLING_THING", proj).contains("SIBLING_THING"));   // a folder next to the project is read
 	assert(!tools::c3_lookup("ELSEWHERE_THING", proj).contains("e.c3"));   // one that leaves it is not
+}
+
+fn void a_rename_covers_macros_long_lines_and_needs_a_path() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
+	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	DString pad = dstring::temp();
+	for (int i = 0; i < 40; i++) pad.append("int aaaa = 1; ");
+	String src = string::tformat("module app;\nmacro @twice(#x) => #x;\nfn void main() { @twice(1); }\nfn void long() { %s @twice(2); }\n", pad.str_view());
+	file::save(string::tformat("%s/src/a.c3", root), src)!!;
+	String r = tools::c3_refs("@twice", root, false, 30, "@double");
+	assert(r.contains("+ macro @double(#x) => #x;") && r.contains("+ fn void main() { @double(1); }"), "%s", r);
+	assert(r.contains("a line of") && r.contains("column(s)"), "%s", r);   // the long line is located, not cut
+	assert(r.contains("by name, not by scope"), "%s", r);
+	assert(tools::c3_refs("@twice", root, false, 30, "double").contains("macro is renamed to a macro"));
+	assert(tools::c3_refs("twice", root, false, 30, "double").contains("is not used"));   // the plain name is another name
+	assert(tools::c3_refs("main", "", false, 30, "start").contains("give path"));
+}
+
+fn void a_project_whose_sources_are_not_in_src_is_searched() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/app", root))!!)!!;
+	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"app/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/app/main.c3", root), "module app;\nfn void entry_point() {}\nfn void main() { entry_point(); }\n")!!;
+	assert(tools::c3_refs("entry_point", root).contains("2 use(s)"), "%s", tools::c3_refs("entry_point", root));
+	assert(tools::c3_lookup("entry_point", root).contains("main.c3"));
 }

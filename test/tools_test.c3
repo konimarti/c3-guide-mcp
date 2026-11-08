@@ -206,7 +206,7 @@ fn void examples_refuse_names_with_nothing_in_them() @test
 	DString big = dstring::temp();
 	for (int i = 0; i < 5000; i++) big.append_char('a');
 	assert(tools::examples_for(big.str_view(), 3, 24).len <= MAX_TEXT, "nothing of a long name is echoed");
-	assert(tools::last_segment("::x") == "x" && tools::last_segment(".x") == "x" && tools::last_segment("std::io::file::") == "");
+	assert(util::last_part("::x") == "x" && util::last_part(".x") == "x" && util::last_part("std::io::file::") == "");
 }
 
 fn void similar_names_are_not_everything_that_shares_a_prefix() @test

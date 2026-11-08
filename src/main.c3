@@ -1,6 +1,6 @@
 module c3guide;
 import mcp, libc, std::core::string, std::os::env;
-import c3guide::corpus, c3guide::tools, c3guide::check, c3guide::live, c3guide::setup;
+import c3guide::proc, c3guide::corpus, c3guide::tools, c3guide::check, c3guide::live, c3guide::setup;
 import std::io;
 
 // Sent to the model in `initialize`: this is what makes a model use the tools without being told.
@@ -30,10 +30,15 @@ fn int main(String[] args)
 		{
 			case "--version": io::printn(VERSION); return 0;
 			case "--doctor": return setup::run_doctor(setup::self_path(args[0]), VERSION);
-			case "--setup": return setup::run_setup(setup::self_path(args[0]), args.len > 2 && args[2] == "--dry-run");
+			case "--setup":
+				if (args.len > 3 || (args.len == 3 && args[2] != "--dry-run")) { io::eprintf(USAGE, VERSION); return 2; }   // a typo must not turn a dry run into a real one
+				return setup::run_setup(setup::self_path(args[0]), args.len == 3);
 			case "--help":
 			case "-h": io::printf(USAGE, VERSION); return 0;
-			default: io::eprintf(USAGE, VERSION); return 2;
+			default:
+				// an editor may start the server with a flag of its own (`--stdio`): serve. At a terminal it is a typo.
+				if (libc::isatty(0) != 0) { io::eprintf(USAGE, VERSION); return 2; }
+				io::eprintfn("c3-guide-mcp: ignoring the argument '%s'", args[1]);
 		}
 	}
 	// a program that exits without reading its input must not take the server down with a broken pipe
@@ -48,5 +53,6 @@ fn int main(String[] args)
 	tools::register(&server);
 	check::register(&server);
 	server.serve_stdio();
+	proc::cleanup();
 	return 0;
 }

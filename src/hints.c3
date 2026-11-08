@@ -333,30 +333,18 @@ fn String fault_returns(String code, int* count)
 	sz i = 0;
 	while (i < code.len)
 	{
+		sz blank = util::skip_blank(code, i);   // whitespace and comments (nested, doc) are copied as they are
+		if (blank > i)
+		{
+			out.append(code[i:blank - i]);
+			i = blank;
+			continue;
+		}
 		char c = code[i];
-		if (c == '"' || c == '\'')   // string or character literal: copied as it is
+		if (c == '"' || c == '\'' || c == '`')   // string, character or raw string literal
 		{
-			sz j = i + 1;
-			while (j < code.len && code[j] != c) j += code[j] == '\\' ? 2 : 1;
-			j = j < code.len ? j + 1 : code.len;
-			out.append(code[i:j - i]);
-			i = j;
-			continue;
-		}
-		if (c == '/' && i + 1 < code.len && code[i + 1] == '/')
-		{
-			sz j = i;
-			while (j < code.len && code[j] != '\n') j++;
-			out.append(code[i:j - i]);
-			i = j;
-			continue;
-		}
-		if ((c == '/' && i + 1 < code.len && code[i + 1] == '*') || (c == '<' && i + 1 < code.len && code[i + 1] == '*'))
-		{
-			String close = c == '/' ? "*/" : "*>";
-			sz j = i + 2;
-			while (j + 1 < code.len && code[j:2] != close) j++;
-			j = j + 1 < code.len ? j + 2 : code.len;
+			bool plain;
+			sz j = util::skip_literal(code, i, &plain);
 			out.append(code[i:j - i]);
 			i = j;
 			continue;

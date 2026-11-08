@@ -1,4 +1,5 @@
 module c3guide::context;
+import c3guide::util;
 import std::core::string, std::io::file;
 
 // What this session is working with: the standard library modules the code it checked imports, and the modules of
@@ -8,7 +9,6 @@ import std::core::string, std::io::file;
 
 const sz MAX_MODULES = 16;
 const sz MAX_NAME = 96;
-const sz MAX_SOURCE = 1024 * 1024;
 const float BOOST = 1.5f;
 
 struct Slot
@@ -59,7 +59,7 @@ fn void note_module(String name)
 // The modules of the `import a::b, c::d;` lines of C3 source.
 fn void note_source(String source)
 {
-	if (source.len > MAX_SOURCE) return;
+	if (source.len > util::MAX_SOURCE) return;
 	foreach (line : source.tsplit("\n"))
 	{
 		String l = line.trim(" \t\r");
@@ -78,7 +78,7 @@ fn void note_file(String path) => @pool()
 {
 	long? size = file::get_size(path);
 	if (catch size) return;
-	if (size > MAX_SOURCE) return;
+	if (size > util::MAX_SOURCE) return;
 	char[]? data = file::load_temp(path);
 	if (try data) note_source((String)data);
 }

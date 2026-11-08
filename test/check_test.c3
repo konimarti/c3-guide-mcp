@@ -2,6 +2,7 @@ module c3guide::test::check;
 import c3guide::format;
 import c3guide::compiler, c3guide::proc;
 import c3guide::check, c3guide::util, c3guide::hints, c3guide::test::support;
+import libc;
 import std::core::string, std::io, std::io::file, std::io::path, std::os::env, std::time, std::time::clock;
 import std::os::posix;
 
@@ -89,14 +90,16 @@ fn void temp_dirs_are_cleaned_up() @test
 fn void stale_temp_dirs_are_swept_and_fresh_ones_kept() @test
 {
 	Path tmp = path::temp_directory(tmem)!!;
-	String old = string::tformat("%s/c3guide-stale-test", (String)tmp);
-	String fresh = string::tformat("%s/c3guide-fresh-test", (String)tmp);
+	String old = string::tformat("%s/c3guide-1111", (String)tmp);
+	String fresh = string::tformat("%s/c3guide-2222", (String)tmp);
+	String foreign = string::tformat("%s/c3guide-mine", (String)tmp);   // not one of ours (no digits only): never removed
 	// two hours old; `date -r SECONDS` is BSD/macOS, `date -d @SECONDS` is GNU, and touch -d "2 hours ago" is GNU only
-	support::sh(string::tformat("mkdir -p '%s' '%s' && t=$(( $(date +%%s) - 7200 )) && touch -t \"$(date -r $t +%%Y%%m%%d%%H%%M.%%S 2>/dev/null || date -d @$t +%%Y%%m%%d%%H%%M.%%S)\" '%s'", old, fresh, old));
+	support::sh(string::tformat("mkdir -p '%s' '%s' '%s' && t=$(( $(date +%%s) - 7200 )) && touch -t \"$(date -r $t +%%Y%%m%%d%%H%%M.%%S 2>/dev/null || date -d @$t +%%Y%%m%%d%%H%%M.%%S)\" '%s' '%s'", old, fresh, foreign, old, foreign));
 	check::c3_check("fn void f() {}");
 	assert(!file::exists(old), "stale temp dir should be removed");
 	assert(file::exists(fresh), "fresh temp dir belongs to another server and stays");
-	support::sh(string::tformat("rm -rf '%s'", fresh));
+	assert(file::exists(foreign), "a directory that is not named like ours stays, however old");
+	support::sh(string::tformat("rm -rf '%s' '%s'", fresh, foreign));
 }
 
 fn void missing_compiler_gives_a_clear_message() @test
@@ -769,4 +772,59 @@ fn void a_project_check_never_runs_the_c_compiler() @test
 	file::save(string::tformat("%s/c/a.c", root), "#error BOOM_FROM_C\nint x;\n")!!;
 	String r = check::c3_check(path: root);
 	assert(has(r, "OK: no errors") && !has(r, "BOOM"), "%s", r);
+}
+
+extern fn CInt symlink(ZString, ZString) @if(!env::WIN32);
+
+// The ways past the first version of the guard, each shown by a reviewer with a real secret outside the project
+fn void the_guard_does_not_miss_odd_spellings_or_odd_places() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/other", root))!!)!!;
+	file::save(string::tformat("%s/other/secret.txt", root), "S3CRET")!!;
+	String manifest = "{ \"sources\": [\"app/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }";
+	String[] places = { "app", "app/vendor", "app/a/b/c/d/e/f/g/h/i/j" };   // sources are not in src/; vendor; deeper than 8
+	int n = 0;
+	foreach (place : places)
+	{
+		int depth = 1;
+		foreach (c : place) if (c == '/') depth++;
+		DString ups = dstring::temp();
+		for (int k = 0; k <= depth; k++) ups.append("../");   // from the file to the folder that holds the project
+		String secret = string::tformat("%sother/secret.txt", ups.str_view());
+		String[] bodies = {
+			string::tformat("module a;\nconst char C = $embed\n(\"%s\")[0];\nfn void main() {}\n", secret),
+			string::tformat("module a;\nconst char C = $embed /* x */ (\"%s\")[0];\nfn void main() {}\n", secret),
+			string::tformat("module a;\nconst char C = $embed(\"\\x2e\\x2e/%s\")[0];\nfn void main() {}\n", secret[3..]),
+			string::tformat("module a;\nconst char C = $embed(\".\" +++ \".%s\")[0];\nfn void main() {}\n", secret[1..]),
+			"module a;\nconst String N = \"x\";\nconst char C = $embed(N)[0];\nfn void main() {}\n"
+		};
+		foreach (body : bodies)
+		{
+			String proj = string::tformat("%s/p%d", root, n++);
+			String where = string::tformat("%s/%s", proj, place);
+			path::mkdir(path::new(tmem, where)!!, recursive: true)!!;
+			file::save(string::tformat("%s/project.json", proj), manifest)!!;
+			file::save(string::tformat("%s/m.c3", where), body)!!;
+			String r = check::c3_check(path: proj);
+			assert(has(r, "rejected") && !has(r, "S3CRET"), "%s in %s: %s", body, place, r);
+		}
+	}
+	// a link inside the tree is not followed blindly
+	String lp = string::tformat("%s/linked", root);
+	path::mkdir(path::new(tmem, string::tformat("%s/app", lp))!!, recursive: true)!!;
+	file::save(string::tformat("%s/project.json", lp), manifest)!!;
+	file::save(string::tformat("%s/app/m.c3", lp), "module a;\nfn void main() {}\n")!!;
+	$if !env::WIN32:
+		assert(symlink(string::tformat("%s/other", root).zstr_tcopy(), string::tformat("%s/app/out", lp).zstr_tcopy()) == 0);
+		assert(has(check::c3_check(path: lp), "rejected"));
+	$endif
+	// and a clean project in the same odd place is still checked
+	String ok = string::tformat("%s/clean", root);
+	path::mkdir(path::new(tmem, string::tformat("%s/app/a/b/c/d/e/f/g/h/i", ok))!!, recursive: true)!!;
+	file::save(string::tformat("%s/project.json", ok), manifest)!!;
+	file::save(string::tformat("%s/app/a/b/c/d/e/f/g/h/i/m.c3", ok), "module a;\nfn void main() {}\n")!!;
+	assert(has(check::c3_check(path: ok), "OK: no errors"));
 }

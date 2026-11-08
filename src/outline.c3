@@ -2,10 +2,9 @@ module c3guide::outline;
 import c3guide::compiler;
 import std::core::string, std::io, std::io::file, std::io::path, std::collections::list, std::sort, std::compression::zip;
 import std::encoding::json, std::collections::object;
-import c3guide::ts, c3guide::util, c3guide::context, c3guide::check;
+import c3guide::ts, c3guide::util, c3guide::context;
 
 const sz MAX_OUTLINE = 6 * 1024;
-const sz MAX_SOURCE = 1024 * 1024;   // a bigger .c3 file is generated or hostile: parsing it costs memory in proportion
 const sz MAX_FILES = 400;
 const sz MAX_CONTEXT_FILES = 60;   // a project's imports are in its first files; reading all of a big one is not worth it
 const long MAX_ARCHIVE = 32 * 1024 * 1024;
@@ -99,31 +98,6 @@ fn String outline_source(String source, String match = "")
 	}
 	if (partial) out.append("  (the parser did not accept all of this file: the list may be incomplete)\n");
 	return out.str_view();
-}
-
-// How many .c3 files under `dir` the vendored grammar does not parse cleanly (and the first few names).
-// This is what tells you whether the grammar has caught up with a c3c release.
-fn int unparsed_files(String dir, DString* names)
-{
-	List{String} files;
-	files.init(tmem);
-	Path? p = path::new(tmem, dir);
-	if (catch p) return -1;
-	collect(p, &files, 0);
-	TSParser* parser = ts::ts_parser_new();
-	defer ts::ts_parser_delete(parser);
-	ts::ts_parser_set_language(parser, ts::tree_sitter_c3());
-	int bad = 0;
-	foreach (f : files)
-	{
-		char[]? data = file::load_temp(f);
-		if (catch data) continue;
-		TSTree* tree = ts::ts_parser_parse_string(parser, null, data.ptr, (uint)data.len);
-		defer ts::ts_tree_delete(tree);
-		if (!ts::ts_node_has_error(ts::ts_tree_root_node(tree))) continue;
-		if (bad++ < 5) names.appendf("  %s\n", f);
-	}
-	return bad;
 }
 
 fn bool is_archive(String name) => name.ends_with(".c3l");   // a library: a zip file of .c3 sources
@@ -228,7 +202,7 @@ fn String outline_file(String file_path, String shown, String match = "")
 {
 	long? size = file::get_size(file_path);
 	if (catch size) return "";
-	if (size > (long)MAX_SOURCE) return string::tformat("%s\n  (skipped: %d KB is more than the %d KB limit)\n", shown, (int)(size / 1024), (int)(MAX_SOURCE / 1024));
+	if (size > (long)util::MAX_SOURCE) return string::tformat("%s\n  (skipped: %d KB is more than the %d KB limit)\n", shown, (int)(size / 1024), (int)(util::MAX_SOURCE / 1024));
 	char[]? data = file::load_temp(file_path);
 	if (catch data) return "";
 	String body = outline_source((String)data, match);
@@ -257,7 +231,7 @@ fn String archive_outline(String archive, String shown, String match)
 	{
 		ZipEntry? e = z.stat_at(i);
 		if (catch e) continue;
-		if (e.is_directory || e.is_encrypted || !util::is_c3_file(e.name) || e.uncompressed_size > (long)MAX_SOURCE) continue;
+		if (e.is_directory || e.is_encrypted || !util::is_c3_file(e.name) || e.uncompressed_size > (long)util::MAX_SOURCE) continue;
 		bool dup = false;
 		foreach (name : seen) if (name == e.name) dup = true;
 		if (dup) continue;
@@ -344,22 +318,16 @@ fn String declared_name(String header)
 	return last.trim(" ;");
 }
 
-fn String last_part(String name)
-{
-	String s = name[((name.rindex_of("::") ?? -2) + 2)..];
-	return s[((s.rindex_of(".") ?? -1) + 1)..];
-}
-
 // 0 = exact, 1 = contained in the declared name, 2 = elsewhere in the line
 fn int name_rank(String header, String query)
 {
-	String q = last_part(query).to_lower_tcopy();
+	String q = util::last_part(query).to_lower_tcopy();
 	String full = query[((query.rindex_of("::") ?? -2) + 2)..].to_lower_tcopy();
 	foreach (nm : declared_name(header).tsplit(","))
 	{
 		String n = nm.trim().to_lower_tcopy();
 		if (n.len == 0) continue;
-		String l = last_part(n);
+		String l = util::last_part(n);
 		bool qualified = full.contains(".");
 		if (n == full || (l == q && (!qualified || n.ends_with(full)))) return 0;
 	}
@@ -423,6 +391,26 @@ fn void scan_roots(String root, List{String}* bases)
 		Object*? m = json::parse(tmem, (String)data);
 		if (try m)
 		{
+			// the folders `sources` names (`app/**` is app/), when they are inside the project and not src/ already (without a
+			// src/ the whole project is read, and they are in it)
+			Object*? sources = file::is_dir(src) ? m.get("sources") : NOT_FOUND~;
+			if (try sources)
+			{
+				if (sources.is_array())
+				{
+					for (sz i = 0; i < sources.get_len(); i++)
+					{
+						Object* one = sources.get_at(i);
+						if (!one.is_string() || one.s.len == 0 || one.s[0] == '/') continue;
+						String pattern = one.s;
+						sz cut = pattern.index_of_char('*') ?? pattern.len;
+						String folder = string::tformat("%s/%s", root, pattern[:cut]);
+						String real = util::canonical(folder);
+						String home = util::canonical(root);
+						if (real.len > 0 && util::inside(home, real) && file::is_dir(real) && real != util::canonical(src) && real != home) bases.push(real);
+					}
+				}
+			}
 			Object*? paths = m.get("dependency-search-paths");
 			if (try paths)
 			{
@@ -480,7 +468,7 @@ fn String project_lookup(String root_arg, String query, int max, int* count, Str
 		foreach (x : query.to_lower_tcopy().tsplit(" ")) if (x.len >= 3) w.push(x);
 		terms = w.array_view();
 	}
-	String needle = terms.len > 0 ? "" : last_part(query);
+	String needle = terms.len > 0 ? "" : util::last_part(query);
 	List{Found} acc;
 	acc.init(tmem);
 	if (!path::is_dir(abs))
@@ -610,6 +598,8 @@ fn void refs_emit(RefState* st, String shown_name, String src, String name)
 	}
 }
 
+const sz MAX_PLAN_LINE = 200;
+
 // One "- old line / + new line" pair for each line that uses the name; every use on the line is renamed.
 fn void rename_lines(RefState* st, String shown_name, String[] lines, List{Ref}* hits, String name)
 {
@@ -619,6 +609,7 @@ fn void rename_lines(RefState* st, String shown_name, String[] lines, List{Ref}*
 	{
 		uint row = (*hits)[i].row;
 		DString fresh = dstring::temp();
+		DString columns = dstring::temp();
 		sz at = 0;
 		String old = row < lines.len ? lines[row] : "";
 		for (; i < hits.len() && (*hits)[i].row == row; i++)
@@ -628,13 +619,19 @@ fn void rename_lines(RefState* st, String shown_name, String[] lines, List{Ref}*
 			fresh.append(old[at:col - at]);
 			fresh.append(st.rename_to);
 			at = col + name.len;
+			columns.appendf("%s%d", columns.len() > 0 ? ", " : "", (int)col + 1);
 			st.total++;
 		}
 		fresh.append(old[at..]);
 		st.lines++;
 		if (st.shown >= st.limit) continue;
 		st.shown++;
-		st.out.appendf("  %d:\n    - %s\n    + %s\n", (int)row + 1, util::clip(util::sanitize_utf8(old.trim_right()), 160), util::clip(util::sanitize_utf8(fresh.str_view().trim_right()), 160));
+		if (old.len > MAX_PLAN_LINE)   // a line cut for display would hide the edit: say where it is instead
+		{
+			st.out.appendf("  %d: a line of %d bytes; the name is at column(s) %s\n", (int)row + 1, (int)old.len, columns.str_view());
+			continue;
+		}
+		st.out.appendf("  %d:\n    - %s\n    + %s\n", (int)row + 1, util::sanitize_utf8(old.trim_right()), util::sanitize_utf8(fresh.str_view().trim_right()));
 	}
 }
 
@@ -653,7 +650,7 @@ fn void refs_in_archive(String archive, String shown, String name, RefState* st)
 	{
 		ZipEntry? e = z.stat_at(i);
 		if (catch e) continue;
-		if (e.is_directory || e.is_encrypted || !util::is_c3_file(e.name) || e.uncompressed_size > (long)MAX_SOURCE) continue;
+		if (e.is_directory || e.is_encrypted || !util::is_c3_file(e.name) || e.uncompressed_size > (long)util::MAX_SOURCE) continue;
 		used += e.uncompressed_size;
 		if (used > MAX_ARCHIVE_BYTES) return;
 		refs_entry(&z, &e, shown, name, st);
@@ -671,14 +668,17 @@ fn void refs_entry(ZipArchive* z, ZipEntry* e, String shown, String name, RefSta
 // and comments are not uses. `root_arg`: the project (default the session's); stdlib: the installed standard library.
 fn String refs_reply(String query, String root_arg, bool stdlib, int limit, String rename_to = "")
 {
-	String name = last_part(query.trim());
+	String name = util::last_part(query.trim());
 	if (name.len == 0) return "give query: the name to find, e.g. 'new_server' or 'HashMap.init'";
-	foreach (c : name) if (!util::ident_char(c)) return "query must be one identifier (a name, or Type.name / module::name)";
+	bool is_macro = name.starts_with("@");   // a macro is written @name and is found by that
+	foreach (k, c : name) if (!(util::ident_char(c) || (k == 0 && is_macro && name.len > 1))) return "query must be one identifier (a name, @macro, or Type.name / module::name)";
 	if (rename_to.len > 0)
 	{
 		if (stdlib) return "rename_to edits your own code; stdlib=true only reads the standard library";
+		if (root_arg.len == 0) return "give path (the project to edit) with rename_to: a rename is never planned for the project you used last";
 		if (rename_to == name) return "rename_to is the name it already has";
-		foreach (k, c : rename_to) if (!util::ident_char(c) || (k == 0 && c.is_digit())) return "rename_to must be one identifier";
+		if (rename_to.starts_with("@") != is_macro) return "a macro is renamed to a macro: give both as @name";
+		foreach (k, c : rename_to) if (!(util::ident_char(c) || (k == 0 && is_macro)) || (k == (is_macro ? 1 : 0) && c.is_digit())) return "rename_to must be one identifier";
 	}
 	List{String} files;
 	files.init(tmem);
@@ -732,7 +732,7 @@ fn String refs_reply(String query, String root_arg, bool stdlib, int limit, Stri
 		}
 		long? size = file::get_size(f);
 		if (catch size) continue;
-		if (size > (long)MAX_SOURCE) continue;
+		if (size > (long)util::MAX_SOURCE) continue;
 		char[]? data = file::load_temp(f);
 		if (catch data) continue;
 		refs_emit(&st, shown_name, (String)data, name);
@@ -746,7 +746,7 @@ fn String refs_reply(String query, String root_arg, bool stdlib, int limit, Stri
 		String warn = st.collisions > 0 ? string::tformat("WARNING: '%s' already occurs %d time(s) in these files; check for a clash first.\n", rename_to, st.collisions) : "";
 		String archive_note = archives > 0 ? "Uses inside library archives are not editable and are not in this plan.\n" : "";
 		String cut = st.lines > shown ? string::tformat("INCOMPLETE: %d of %d changed lines are shown; raise limit (at most 100) or give a narrower path.\n", shown, st.lines) : "";
-		return string::tformat("Rename '%s' to '%s': %d edit(s) on %d line(s) in %d file(s) of %s. Nothing is written; make these edits, then c3_check.\n%s%s%s%s", name, rename_to, total, st.lines, file_count, label, cut, warn, archive_note, out.str_view());
+		return string::tformat("Rename '%s' to '%s': %d edit(s) on %d line(s) in %d file(s) of %s. Nothing is written. The plan goes by name, not by scope: a local or a field with the same name is in it too. Make the edits, then c3_check.\n%s%s%s%s", name, rename_to, total, st.lines, file_count, label, cut, warn, archive_note, out.str_view());
 	}
 	if (total > shown) out.appendf("[%d more uses in this search; raise limit or give a narrower path]\n", total - shown);
 	return string::tformat("%d use(s) of '%s' in %d file(s) of %s:\n%s", total, name, file_count, label, out.str_view());

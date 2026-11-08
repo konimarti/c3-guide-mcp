@@ -13,7 +13,7 @@ def check(name, ok, detail=""):
 
 def run(home, *args):
     env = {"PATH": "/usr/bin:/bin", "HOME": home}
-    r = subprocess.run([B, *args], capture_output=True, text=True, env=env, timeout=30)
+    r = subprocess.run([B, *args], capture_output=True, text=True, env=env, timeout=30, stdin=subprocess.DEVNULL)
     return r.returncode, r.stdout + r.stderr
 
 with tempfile.TemporaryDirectory() as home:
@@ -56,7 +56,25 @@ with tempfile.TemporaryDirectory() as home:
     rc, out = run(home, "--setup")
     check("a CLAUDE.md that is too large is left alone", open(big).read().startswith("my notes") and "c3-guide:begin" not in open(big).read() and "left alone" in out, out)
 
-rc, out = run("/nonexistent", "--bogus")
-check("an unknown option is refused", rc == 2 and "--doctor" in out, out)
+with tempfile.TemporaryDirectory() as home:
+    rc, out = run(home, "--setup", "--dryrun")   # a typo must not turn a dry run into a real one
+    check("a mistyped --setup flag is refused and writes nothing", rc == 2 and not os.path.exists(os.path.join(home, ".claude")), out)
+    rc, out = run(home, "--stdio")   # an editor's own flag: serve (here the input is already at its end)
+    check("an unknown flag with piped input is ignored", rc == 0 and "ignoring" in out, out)
+    cfg = os.path.join(home, "we ird\"dir")
+    env = {"PATH": "/usr/bin:/bin", "HOME": home, "CLAUDE_CONFIG_DIR": cfg}
+    r = subprocess.run([B, "--setup"], capture_output=True, text=True, env=env, timeout=30, stdin=subprocess.DEVNULL)
+    import json
+    try:
+        data = json.load(open(os.path.join(cfg, "settings.json")))
+        cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        check("a config path with a quote and a space gives valid JSON and a quoted command", cmd.startswith("'") and cmd.endswith("'"), cmd)
+    except Exception as e:
+        check("a config path with a quote and a space gives valid JSON and a quoted command", False, e)
+    md = os.path.join(cfg, "CLAUDE.md")
+    open(md, "w").write("keep\n<!-- c3-guide:begin (written by c3-guide-mcp --setup; edit outside this block) -->\nmore of mine\n")
+    r = subprocess.run([B, "--setup"], capture_output=True, text=True, env=env, timeout=30, stdin=subprocess.DEVNULL)
+    check("a begin marker without an end marker is not rewritten", open(md).read().endswith("more of mine\n") and "no end marker" in r.stdout and r.returncode == 1, r.stdout)
+
 print("setup_test:", "all ok" if fails == 0 else f"{fails} failed")
 sys.exit(1 if fails else 0)

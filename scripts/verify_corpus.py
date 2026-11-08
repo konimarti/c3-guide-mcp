@@ -28,8 +28,11 @@ def compile_only(c3c, code, work):
     src = os.path.join(work, "t.c3")
     with open(src, "w") as fh:
         fh.write(code)
-    r = subprocess.run([c3c, "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", src],
-                       capture_output=True, text=True, cwd=work, timeout=60)
+    try:
+        r = subprocess.run([c3c, "--trust=none", "--no-obj", "--no-entry", "-q", "compile-only", src],
+                           capture_output=True, text=True, cwd=work, timeout=60)
+    except subprocess.TimeoutExpired:
+        return False, "c3c timed out"
     errs = [l for l in (r.stdout + r.stderr).splitlines() if "error:" in l]
     return (r.returncode == 0 and not errs), (errs[0].split("error:", 1)[1].strip() if errs else (r.stdout + r.stderr).strip()[:120])
 
@@ -48,7 +51,7 @@ def check_block(c3c, code, recipe=False):
         if ok:
             return "ok", ""
         why2 = ""
-        if "module " not in code:
+        if not re.search(r"^module ", code, re.M):
             imports = [l for l in code.splitlines() if l.startswith("import ")]
             rest = "\n".join(l for l in code.splitlines() if not l.startswith("import "))
             head = "\n".join(imports) + "\n" + (PRELUDE if not imports else "")
@@ -80,7 +83,7 @@ def main():
         elif kind == "doc":
             for m in re.finditer(r"```c3\n(.*?)```", body, flags=re.S):
                 code = m.group(1)
-                on_purpose = re.search(r"//.*\b(error|invalid|illegal|not allowed|fails?)\b", code, re.I)
+                on_purpose = re.search(r"//\s*(error|invalid|illegal|not allowed)\b", code, re.I)
                 items.append(("manual", title, code) if not on_purpose else ("on-purpose", title, code))
     todo = [i for i in items if i[0] != "on-purpose"]
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as ex:

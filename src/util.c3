@@ -3,6 +3,15 @@ import std::core::string, std::os::env;
 
 extern fn CInt chmod(ZString, uint) @if(!env::WIN32);
 
+// `std::io::File.read` -> `read`, `io::printn` -> `printn`: the last part of a qualified name.
+fn String last_part(String name)
+{
+	String s = name[((name.rindex_of("::") ?? -2) + 2)..];
+	return s[((s.rindex_of(".") ?? -1) + 1)..];
+}
+
+const sz MAX_SOURCE = 1024 * 1024;   // a bigger .c3 file is generated or hostile: it is not parsed
+
 fn bool is_c3_file(String name) => name.ends_with(".c3") || name.ends_with(".c3i");
 
 // Owner-only (0o600) or executable (0o755) mode for a file this server created. No-op on Windows.
@@ -110,6 +119,7 @@ fn bool inside(String root, String target) => target == root || (target.len > ro
 // string without a match in c3c 0.8.5, hence the small loop.)
 fn String redact(String s, String needle, String replacement)
 {
+	if (needle.len == 0) return s;
 	DString out = dstring::temp();
 	while (true)
 	{
@@ -121,4 +131,55 @@ fn String redact(String s, String needle, String replacement)
 	}
 	out.append(s);
 	return out.str_view();
+}
+
+// ---- scanning C3 text without reading comments and strings as code ----
+
+// Past whitespace and comments (line, nested block, and <* doc *>) from `i`.
+fn sz skip_blank(String s, sz i)
+{
+	while (i < s.len)
+	{
+		char c = s[i];
+		if (c == ' ' || c == '\t' || c == '\n' || c == '\r') { i++; continue; }
+		if (c == '/' && i + 1 < s.len && s[i + 1] == '/')
+		{
+			while (i < s.len && s[i] != '\n') i++;
+			continue;
+		}
+		if (c == '/' && i + 1 < s.len && s[i + 1] == '*')
+		{
+			int depth = 1;
+			i += 2;
+			while (i < s.len && depth > 0)
+			{
+				if (s[i] == '/' && i + 1 < s.len && s[i + 1] == '*') { depth++; i += 2; }
+				else if (s[i] == '*' && i + 1 < s.len && s[i + 1] == '/') { depth--; i += 2; }
+				else { i++; }
+			}
+			continue;
+		}
+		if (c == '<' && i + 1 < s.len && s[i + 1] == '*')
+		{
+			i += 2;
+			while (i + 1 < s.len && !(s[i] == '*' && s[i + 1] == '>')) i++;
+			i = i + 2 < s.len ? i + 2 : s.len;
+			continue;
+		}
+		break;
+	}
+	return i;
+}
+
+// Past the string or character literal that starts at `i` (a `"`, `'` or backtick); `*plain` says it held no escape.
+fn sz skip_literal(String s, sz i, bool* plain)
+{
+	char q = s[i++];
+	*plain = true;
+	while (i < s.len && s[i] != q)
+	{
+		if (s[i] == '\\' && q != '`') { *plain = false; i++; }
+		i++;
+	}
+	return i < s.len ? i + 1 : s.len;
 }

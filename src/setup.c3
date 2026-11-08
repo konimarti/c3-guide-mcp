@@ -1,6 +1,7 @@
 module c3guide::setup;
 import c3guide::compiler;
-import c3guide::check, c3guide::corpus, c3guide::util;
+import c3guide::corpus, c3guide::util;
+import libc, std::time::clock;
 import std::io, std::io::file, std::io::path, std::os::env, std::core::string;
 
 // `c3-guide-mcp --setup` puts the integration in place for Claude Code, `--doctor` says what is and is not in place.
@@ -46,29 +47,80 @@ fn bool is_link(String f)
 	return path::is_link(p);
 }
 
-// The text of CLAUDE.md with our block set to `block`: replaced in place, else appended.
+// The text of CLAUDE.md with our block set to `block`: replaced in place, else appended. A begin marker without its end
+// marker is not ours to guess about: the text is returned unchanged (the caller sees that it did not change).
 fn String with_block(String existing, String block)
 {
 	String body = string::tformat("%s\n%s\n%s", BEGIN, block.trim(), END);
-	sz? from = existing.index_of("<!-- c3-guide:begin");
-	sz? to = existing.index_of(END);
-	if (try from && try to && to > from) return string::tformat("%s%s%s", existing[:from], body, existing[to + END.len..]);
+	sz? from = existing.index_of(BEGIN);
+	if (try from)
+	{
+		sz? to = existing[from..].index_of(END);
+		if (catch to) return existing;
+		return string::tformat("%s%s%s", existing[:from], body, existing[from + to + END.len..]);
+	}
 	if (existing.trim().len == 0) return string::tformat("%s\n", body);
 	return string::tformat("%s\n\n%s\n", existing.trim_right(), body);
 }
 
 fn bool block_current(String existing) => existing.contains(BEGIN) && existing == with_block(existing, CLAUDE_SNIPPET);
 
+// `s` as a JSON string literal.
+fn String json_string(String s)
+{
+	DString d = dstring::temp();
+	d.append('"');
+	foreach (c : s)
+	{
+		if (c == '"' || c == '\\') { d.append('\\'); d.append(c); }
+		else if (c == '\n') { d.append("\\n"); }
+		else if (c == '\t') { d.append("\\t"); }
+		else if (c < 0x20) { d.appendf("\\u%04x", (int)c); }
+		else { d.append(c); }
+	}
+	d.append('"');
+	return d.str_view();
+}
+
+// `s` as one shell word: as it is when it is plain, else in single quotes.
+fn String shell_word(String s)
+{
+	bool plain = s.len > 0;
+	foreach (c : s) if (!(c.is_alnum() || c == '_' || c == '/' || c == '.' || c == '-' || c == '+' || c == ':')) plain = false;
+	if (plain) return s;
+	DString d = dstring::temp();
+	d.append('\'');
+	foreach (c : s)
+	{
+		if (c == '\'') { d.append("'\\''"); }
+		else { d.append(c); }
+	}
+	d.append('\'');
+	return d.str_view();
+}
+
 fn String settings_snippet(String hook)
 {
 	return string::tformat(`{
   "hooks": {
     "PreToolUse": [
-      { "matcher": "Bash", "hooks": [ { "type": "command", "command": "%s" } ] }
+      { "matcher": "Bash", "hooks": [ { "type": "command", "command": %s } ] }
     ]
   }
 }
-`, hook);
+`, json_string(shell_word(hook)));
+}
+
+// A new file next to `target`, then a rename over it: a reader never sees half of it.
+fn void? save_atomic(String target, String content)
+{
+	String temp = string::tformat("%s.c3-guide-%d", target, (long)clock::now());
+	file::save(temp, content)!;
+	if (libc::rename(temp.zstr_tcopy(), target.zstr_tcopy()) != 0)
+	{
+		(void)file::delete(temp);
+		return io::GENERAL_ERROR~;
+	}
 }
 
 // Writes `content` to `target` unless it is a symlink or equal to what is there. Says what it did.
@@ -77,7 +129,7 @@ fn String put(String what, String target, String content, uint mode, bool dry, i
 	if (is_link(target)) return string::tformat("  skipped  %s: %s is a symbolic link; edit its target yourself", what, target);
 	if (read_or_empty(target) == content && file::is_file(target)) return string::tformat("  ok       %s: already up to date", what);
 	if (dry) return string::tformat("  would write %s (%s)", what, target);
-	if (catch file::save(target, content)) { *failed += 1; return string::tformat("  FAILED   %s: cannot write %s", what, target); }
+	if (catch save_atomic(target, content)) { *failed += 1; return string::tformat("  FAILED   %s: cannot write %s", what, target); }
 	util::set_mode(target, mode);
 	return string::tformat("  wrote    %s (%s)", what, target);
 }
@@ -113,6 +165,7 @@ fn int run_setup(String exe, bool dry)
 	String md_path = string::tformat("%s/CLAUDE.md", cfg);
 	String? md = read_text(md_path);
 	if (catch md) { io::printfn("  skipped  rules for the assistant: %s is unreadable or larger than 1 MB, left alone", md_path); failed++; }
+	else if (md.contains(BEGIN) && !md[md.index_of(BEGIN)!!..].contains(END)) { io::printfn("  skipped  rules for the assistant: %s has the begin marker of our block and no end marker; fix or remove it, then run --setup again", md_path); failed++; }
 	else { io::printn(put("rules for the assistant", md_path, with_block(md, CLAUDE_SNIPPET), 0o644, dry, &failed)); }
 	String hook = string::tformat("%s/hooks/%s", cfg, HOOK_NAME);
 	io::printn(put("hook script", hook, HOOK_SCRIPT, 0o755, dry, &failed));
@@ -121,7 +174,7 @@ fn int run_setup(String exe, bool dry)
 	else if (read_or_empty(settings).contains(HOOK_NAME)) { io::printn("  ok       hook registration: settings.json already names the hook"); }
 	else { io::printfn("  to do    hook registration: add this to hooks.PreToolUse in %s (it is not rewritten for you):\n%s", settings, settings_snippet(hook)); }
 	if (registered()) { io::printn("  ok       MCP server: c3-guide is registered"); }
-	else { io::printfn("  to do    MCP server: run  claude mcp add c3-guide --scope user -- %s", exe); }
+	else { io::printfn("  to do    MCP server: run  claude mcp add c3-guide --scope user -- %s", shell_word(exe)); }
 	io::printn("Restart Claude Code to pick up the changes. `c3-guide-mcp --doctor` shows what is in place.");
 	return failed > 0 ? 1 : 0;
 }

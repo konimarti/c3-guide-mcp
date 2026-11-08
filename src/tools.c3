@@ -1,7 +1,7 @@
 module c3guide::tools;
 import c3guide::compiler, c3guide::proc;
 import mcp, std::core::string;
-import c3guide::corpus, c3guide::context, c3guide::search, c3guide::util, c3guide::hints, c3guide::check, c3guide::live, c3guide::outline;
+import c3guide::corpus, c3guide::context, c3guide::search, c3guide::util, c3guide::live, c3guide::outline;
 import std::sort, std::math, std::collections::list, std::io::file, libc;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
@@ -131,13 +131,13 @@ fn String search_all(String query, int limit, String file)
 	if (file.len > 0) context::note_file(file);
 	Hit[] hits = search::search(query, { "recipe", "doc" }, n);
 	// pasted code (`main(String[] args)`, `path::ls`, `List{`) has no words until the punctuation is gone
-	if (hits.len == 0) hits = search::search(search::code_words(query), { "recipe", "doc" }, n);
+	if (hits.len == 0) hits = search::search(search::words(query, false), { "recipe", "doc" }, n);
 	// The library is searched on every question: a task ("tcp server") is often one word in the manual ("accept" in
 	// attributes) and a whole module in the library. A name that holds two of the question's words is shown when it has
 	// as many of them as the manual's best section, or the section has under half; the one with more goes first.
 	live::ensure();
 	Hit[] syms = search::search(query, SYMBOL_KINDS[..], 3, true);
-	String[] terms = search::query_terms(search::words_only(query));
+	String[] terms = search::query_terms(search::words(query));
 	int manual = hits.len > 0 ? words_in(&corpus::entries[hits[0].idx], terms) : 0;
 	int library = 0;
 	int library_context = 0;   // a name from a module the session works with counts as one more word
@@ -184,7 +184,7 @@ fn String search_all(String query, int limit, String file)
 
 fn String changes_reply(String topic, int limit = 3)
 {
-	String words = search::code_words(topic);   // `int.sizeof`, `String.split`, `0.8.0`: the punctuation is not part of a word
+	String words = search::words(topic, false);   // `int.sizeof`, `String.split`, `0.8.0`: the punctuation is not part of a word
 	String[] terms = search::query_terms(words);
 	Hit[] hits = search::search(words, { "change" }, 24);
 	if (hits.len == 0) return "nothing in the release notes";
@@ -280,12 +280,6 @@ fn String syntax_reply(String topic)
 }
 
 // "std::io::printfn" -> "printfn", "std::core::string::String.split" -> "split"
-fn String last_segment(String uid)
-{
-	String s = uid[((uid.rindex_of("::") ?? -2) + 2)..];
-	return s[((s.rindex_of(".") ?? -1) + 1)..];
-}
-
 // Does the symbol uid match the user's name? "printfn", "io::printfn", "String.split" and the full uid all do.
 fn bool uid_matches(String uid, String name)
 {
@@ -293,12 +287,6 @@ fn bool uid_matches(String uid, String name)
 	if (uid.len <= name.len) return false;
 	char sep = uid[uid.len - name.len - 1];
 	return uid.ends_with(name) && (sep == ':' || sep == '.');
-}
-
-fn bool is_symbol(String kind)
-{
-	foreach (k : SYMBOL_KINDS) if (k == kind) return true;
-	return false;
 }
 
 // Signature line plus the first sentence of the doc: enough to choose, short enough for five hits.
@@ -321,7 +309,7 @@ fn String describe(String query, bool strict = false)
 	out.appendf("Symbols matching '%s' (c3c %s):\n", query, corpus::symbols_version);
 	// Words are all a description search has. When even the best hit has few of them, the nearest names are not an
 	// answer: say so, since "the standard library has no such function" is the usual truth (symlinks, mkdtemp...)
-	String[] terms = search::query_terms(search::words_only(query));
+	String[] terms = search::query_terms(search::words(query));
 	int best = 0;
 	foreach (h : hits)
 	{
@@ -361,7 +349,7 @@ fn int exact_matches(String name)
 {
 	live::ensure();
 	int n = 0;
-	foreach (&e : corpus::entries) if (is_symbol(e.kind) && uid_matches(e.title, name)) n++;
+	foreach (&e : corpus::entries) if (corpus::is_symbol_kind(e.kind) && uid_matches(e.title, name)) n++;
 	return n;
 }
 
@@ -467,7 +455,7 @@ fn String lookup_one(String q, String path, int examples, bool source)
 			foreach (&e : corpus::entries)
 			{
 				if (shown >= 3) break;
-				if (is_symbol(e.kind) && uid_matches(e.title, q)) out.appendf("%s %s", shown++ > 0 ? "," : "", e.title);
+				if (corpus::is_symbol_kind(e.kind) && uid_matches(e.title, q)) out.appendf("%s %s", shown++ > 0 ? "," : "", e.title);
 			}
 			out.append("\n");
 		}
@@ -520,7 +508,7 @@ fn String c3_refs(String query @Desc("the name whose uses you want: an identifie
 // The first symbol entry whose name is `name`.
 fn Entry* first_symbol(String name)
 {
-	foreach (&e : corpus::entries) if (is_symbol(e.kind) && uid_matches(e.title, name)) return e;
+	foreach (&e : corpus::entries) if (corpus::is_symbol_kind(e.kind) && uid_matches(e.title, name)) return e;
 	return null;
 }
 
@@ -571,7 +559,7 @@ fn String method_summary(String word, String owner)
 	int count = 0;
 	foreach (&e : corpus::entries)
 	{
-		if (!(e.kind == "method" || e.kind == "mmethod") || last_segment(e.title).to_lower_tcopy() != w) continue;
+		if (!(e.kind == "method" || e.kind == "mmethod") || util::last_part(e.title).to_lower_tcopy() != w) continue;
 		if (owner.len > 0 && !e.title.to_lower_tcopy().contains(string::tformat("::%s::", owner))) continue;
 		String receiver = e.title[(e.title.rindex_of("::") ?? -2) + 2..];
 		receiver = receiver[:receiver.rindex_of(".") ?? receiver.len];
@@ -606,7 +594,7 @@ fn String members_of(String prefix, bool methods)
 	int count = 0;
 	foreach (&e : corpus::entries)
 	{
-		if (!is_symbol(e.kind) || !e.title.starts_with(prefix) || e.title.len <= prefix.len + 1) continue;
+		if (!corpus::is_symbol_kind(e.kind) || !e.title.starts_with(prefix) || e.title.len <= prefix.len + 1) continue;
 		String rest = e.title[prefix.len + 1..];
 		bool is_method = e.title[prefix.len] == '.';
 		if (methods ? !is_method : (e.title[prefix.len] != ':' || rest.contains("::") || rest.contains("."))) continue;
@@ -616,7 +604,7 @@ fn String members_of(String prefix, bool methods)
 		names.append(rest);
 	}
 	if (count == 0) return "";
-	return string::tformat("%s (%d): %s\n  c3_lookup %s%sNAME for one signature.\n", methods ? "Methods" : "Functions and types", count, util::clip(names.str_view(), 1400), last_segment(prefix), methods ? "." : "::");
+	return string::tformat("%s (%d): %s\n  c3_lookup %s%sNAME for one signature.\n", methods ? "Methods" : "Functions and types", count, util::clip(names.str_view(), 1400), util::last_part(prefix), methods ? "." : "::");
 }
 
 // "distinct type TcpSocket = inline std::net::Socket": the methods of Socket are TcpSocket's too.
@@ -638,7 +626,7 @@ fn String module_listing(String n)
 	String full = "";
 	foreach (&e : corpus::entries)
 	{
-		if (!is_symbol(e.kind) || e.title.contains(".")) continue;
+		if (!corpus::is_symbol_kind(e.kind) || e.title.contains(".")) continue;
 		String parent = e.title[:e.title.rindex_of("::") ?? 0];
 		if (parent.len > 0 && uid_matches(parent, n)) { full = parent; break; }
 	}
@@ -662,7 +650,7 @@ fn String symbol_reply(String name, bool* found_out = null, int* exact_out = nul
 	int found = 0;
 	foreach (&e : corpus::entries)
 	{
-		if (!is_symbol(e.kind) || !uid_matches(e.title, n)) continue;
+		if (!corpus::is_symbol_kind(e.kind) || !uid_matches(e.title, n)) continue;
 		if (found++ < 6) out.append(hit_text(e, MAX_SNIPPET, string::tformat("  [c3c %s]", corpus::symbols_version)));   // the version is on every signature: a note said once is missed
 		if (found == 1) context::note_symbol(e.title);
 	}
@@ -700,7 +688,7 @@ fn String symbol_reply(String name, bool* found_out = null, int* exact_out = nul
 	out.append(legacy_note(n));
 	out.appendf("'%s' does not exist in the standard library of c3c %s. (Your own or library code: give path.)\n", n, corpus::symbols_version);
 	// `allocator::free` is asked for by its old module: the same name in another module is the likely answer
-	String q = last_segment(n).to_lower_tcopy();
+	String q = util::last_part(n).to_lower_tcopy();
 	String module_hint = "";
 	if (n.contains("::")) { String m = n[:n.rindex_of("::") ?? 0].to_lower_tcopy(); module_hint = m[(m.rindex_of("::") ?? -2) + 2..]; }
 	int shown = 0;
@@ -710,9 +698,9 @@ fn String symbol_reply(String name, bool* found_out = null, int* exact_out = nul
 	{
 		foreach (&e : corpus::entries)
 		{
-			if (!is_symbol(e.kind) || shown >= 8) continue;
+			if (!corpus::is_symbol_kind(e.kind) || shown >= 8) continue;
 			String uid = e.title.to_lower_tcopy();
-			String last = last_segment(e.title).to_lower_tcopy();
+			String last = util::last_part(e.title).to_lower_tcopy();
 			bool same = last == q;
 			bool near = module_hint.len >= 3 && uid.contains(module_hint[:module_hint.len < 4 ? module_hint.len : 4]);
 			bool plain = !e.title[(e.title.rindex_of("::") ?? 0)..].contains(".");
@@ -736,7 +724,7 @@ fn String symbol_reply(String name, bool* found_out = null, int* exact_out = nul
 	{
 		String owner = n[:n.rindex_of("::") ?? 0].to_lower_tcopy();
 		owner = owner[(owner.rindex_of("::") ?? -2) + 2..];
-		String summary = method_summary(last_segment(n), owner);
+		String summary = method_summary(util::last_part(n), owner);
 		if (summary.len > 0)
 		{
 			as_method = true;
@@ -744,7 +732,7 @@ fn String symbol_reply(String name, bool* found_out = null, int* exact_out = nul
 			out.append(summary);
 		}
 	}
-	out.append(rename_notes(last_segment(n)));
+	out.append(rename_notes(util::last_part(n)));
 	// a wrong name usually has the right words in it (`File.read_line`, `tnew_array`)
 	String words = as_method ? "" : describe(n, true);
 	if (!words.starts_with("no symbol")) out.append(words);
@@ -781,7 +769,7 @@ fn bool looks_like_use(String line, String word)
 // `max_lines` lines. "" when nothing uses it.
 fn String examples_for(String n, int limit, sz max_lines)
 {
-	String word = last_segment(n);
+	String word = util::last_part(n);
 	if (word.len < 2) return "";
 	int max = clamp(limit, 0, 5);
 	if (max == 0) return "";

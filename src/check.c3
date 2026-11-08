@@ -1,20 +1,18 @@
 module c3guide::check;
-import mcp, libc, std::os::posix, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock;
-import c3guide::guard, c3guide::proc, c3guide::compiler, c3guide::format, c3guide::util, c3guide::hints, c3guide::corpus, c3guide::context, c3guide::outline, std::time;
+import mcp, std::core::string, std::io::path, std::io::file;
+import c3guide::guard, c3guide::proc, c3guide::compiler, c3guide::format, c3guide::util, c3guide::hints, c3guide::context, c3guide::outline;
 
-// Only the compiler's own diagnostics come back, never a build artifact. The snippet is written to a
-// fresh temp dir and compiled with a FIXED command line:
-//   --trust=none  no $exec / $include at compile time, whatever the user's c3c config says
-//   --no-obj      nothing is emitted or linked, so nothing can run
-//   a 10 s deadline, enforced here (watchdog thread kills the compiler), so no `timeout` program is needed
-// The compiler binary is not a tool argument: C3C env var, else "c3c" from PATH.
+// c3_check, c3_test and c3_run: the real compiler's diagnostics (never a build artifact), with hints.
 //
-// `--trust=none` still allows $embed, and $echo prints to stdout, so a snippet could read any file the
-// server can read and print it byte by byte. Snippets that mention $embed, $include or $exec are
-// rejected before they reach the compiler (the tokens cannot be spelled any other way: $eval only
-// builds identifiers). Code that reaches the compiler by `path` or `files` is read first (src/guard.c3) for the same
-// reason, and a project is only type-checked (`-C`): its cflags, c-sources and link-args would run under cc and the
-// linker. Do not run the server as a user that can read secrets regardless.
+// A snippet is written to a fresh temp dir and compiled with a fixed command line (`--trust=none --no-obj`: nothing is
+// emitted or linked, so nothing can run). Running c3c, its deadlines and its working directory are src/proc.c3; finding it
+// is src/compiler.c3.
+//
+// `--trust=none` still allows $embed, and a compile error can print what it read, so a snippet could read any file the
+// server can read. Snippets that mention $embed, $include or $exec are rejected before they reach the compiler (the tokens
+// cannot be spelled any other way: $eval only builds identifiers). Code that reaches the compiler by `path` or `files` is
+// read first (src/guard.c3) for the same reason, and a project is only type-checked (`-C`): its cflags, c-sources and
+// link-args would run under cc and the linker. Do not run the server as a user that can read secrets regardless.
 const sz MAX_CODE = 32 * 1024;
 const sz MAX_FIX = 12 * 1024;
 const ulong PROJECT_CHECK_MS = 25000;   // c3_check of a project: under the tool's 30 s limit, so our own message is what the caller sees
@@ -24,7 +22,6 @@ const ulong RUN_DEADLINE_MS = 120000;   // c3_test / c3_run: the program has to 
 fn ulong deadline_for(int timeout_s) => timeout_s <= 0 || timeout_s > 120 ? RUN_DEADLINE_MS : (ulong)timeout_s * 1000;
 const sz MAX_RUN_OUTPUT = 6 * 1024;
 const sz MAX_RUN_CAPTURE = 64 * 1024;
-const String[*] FORBIDDEN = { "$embed", "$include", "$exec" };
 
 // The hints and, when the compile failed and the compilers differ, the note above.
 fn String after_compile(String shown)
@@ -141,16 +138,14 @@ fn String exclusive_args(String code, String path)
 {
 	if (code.len > 0 && path.len > 0) return "give either code or path, not both";
 	if (code.len == 0 && path.len == 0) return "give code (a snippet) or path (a project directory or .c3 file)";
-	if (code.len > MAX_CODE) return "give 1 to 32768 bytes of code";
-	foreach (f : FORBIDDEN)
+	if (code.len > MAX_CODE) return string::tformat("give 1 to %d bytes of code", (int)MAX_CODE);
+	foreach (f : guard::COMPILE_TIME_READS)
 	{
 		if (code.contains(f)) return string::tformat("rejected: %s reads files or runs programs at compile time and is not allowed here", f);
 	}
 	return "";
 }
 
-// The compiler's text, with the scratch directory (snippet) or the project directory (project) removed
-// from the paths, an explanation when it was cut or timed out, and hints for what went wrong.
 // c3c 0.8.5 warns about every key of a library manifest it does not know (`version`, `authors`), on every build, for a
 // library the user did not write. Left out, with a count, so the output is about the code.
 fn String without_manifest_warnings(String text, int* dropped)
@@ -164,6 +159,8 @@ fn String without_manifest_warnings(String text, int* dropped)
 	return kept.str_view();
 }
 
+// The compiler's text, with the scratch directory (snippet) or the project directory (project) removed
+// from the paths, an explanation when it was cut or timed out, and hints for what went wrong.
 fn String report(String out, int status, bool timed_out, String hide, String replacement, String ok, ulong deadline_ms)
 {
 	int dropped = 0;
@@ -184,7 +181,7 @@ const sz MAX_STDIN = 16 * 1024;
 
 struct FileList
 {
-	String[8] items;
+	String[MAX_EXTRA_FILES] items;
 	int n;
 }
 
@@ -197,7 +194,7 @@ fn String parse_files(String files, FileList* out)
 	{
 		String t = line.trim(" \t\r");
 		if (t.len == 0) continue;
-		if (out.n >= MAX_EXTRA_FILES) return "files: at most 8 files";
+		if (out.n >= MAX_EXTRA_FILES) return string::tformat("files: at most %d files", MAX_EXTRA_FILES);
 		if (t.len > 4096 || t[0] == '-' || !util::is_c3_file(t)) return string::tformat("files: '%s' is not a .c3 or .c3i file", util::clip(t, 80));
 		Path? p = path::new(tmem, t);
 		if (catch p) return "files: invalid path";
@@ -219,7 +216,7 @@ fn String parse_args(String args, Args* a)
 	{
 		String t = line.trim("\r");
 		if (t.len == 0) continue;
-		if (n++ >= MAX_PROGRAM_ARGS) return "args: at most 16 arguments";
+		if (n++ >= MAX_PROGRAM_ARGS) return string::tformat("args: at most %d arguments", MAX_PROGRAM_ARGS);
 		if (t.len > 1024) return "args: an argument is longer than 1024 bytes";
 		a.add(t);
 	}
@@ -236,7 +233,7 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	@Timeout(30000)
 {
 	String reply = check_any(code, path, files, target, platform);
-	if (!format) return reply;
+	if (!format || !(reply.starts_with("OK") || reply.contains("error:"))) return reply;   // not after a refused call
 	String where = "";
 	if (path.len > 0)
 	{
@@ -351,7 +348,7 @@ fn String check_path(String target_path, String target, String platform = "", St
 // $embed, $include and $exec can read any file the server can read, and $echo prints it into the reply: not at check time.
 fn String reads_outside(String file)
 {
-	return string::tformat("rejected: %s reads a file outside its own project at compile time ($embed/$include/$exec with a path that leaves it, a computed one, any at all in a file that belongs to no project), or is too large to be checked for that. c3_check does not compile it. If you trust it, build it yourself with `c3c`.", util::clip(file, 200));
+	return string::tformat("rejected: %s cannot be shown to stay inside its project: it reads at compile time ($embed/$include/$exec) with a path that leaves it or one that is computed, or it is a link, an unreadable or oversized file, or a tree too large to check. c3_check does not compile it. If you trust it, build it yourself with `c3c`.", util::clip(file, 200));
 }
 
 // The directory of the project.json above a file, "" when the file belongs to no project.
@@ -368,7 +365,7 @@ fn String project_dir(String file)
 
 // Build and run the target's tests / the program in a scratch directory: every artifact goes there, the
 // user's tree is not written to. `--trust=none` as for check; `input` is the program's stdin (then end of input).
-fn String run_c3c(String[] mode_args, String hide, String replacement, Path scratch, bool is_dir_target, String where, String ok, ulong deadline_ms = RUN_DEADLINE_MS, String input = "")
+fn String run_c3c(String[] mode_args, String hide, String replacement, Path scratch, bool is_dir_target, String where, String ok, ulong deadline_ms = RUN_DEADLINE_MS, String input = "", bool program = false)
 {
 	String sd = (String)scratch;
 	Args a;
@@ -395,7 +392,10 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	String? out = proc::run_capped(argv, &status, &timed_out, { .deadline_ms = deadline_ms, .max_output = MAX_RUN_CAPTURE, .input = input, .cwd = sd, .sweep = sd });
 	if (catch out) return NO_C3C;
 	if (proc::could_not_start(status)) return NO_C3C;
-	String shown = drop_runtime_frames(report(out, status, timed_out, hide, replacement, ok, deadline_ms));
+	// a program's own output is shown as it is, with its exit code; a test run drops the runtime's frames and passing lines
+	String shown = report(out, program ? 0 : status, timed_out, hide, replacement, ok, deadline_ms);
+	if (program) { if (status != 0 && !timed_out && !shown.contains("error: ")) shown = string::tformat("%s\n[exit code %d]", shown, status); }
+	else { shown = drop_runtime_frames(shown); }
 	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
 	// where it ran: a path that was defaulted or relative is the one thing a caller cannot see
 	String footer = where.len > 0 ? string::tformat("\n[c3c %s, %s]", compiler::compiler_version(), where) : "";
@@ -459,7 +459,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	if (!valid_target(target)) return BAD_TARGET_NAME;
 	if (!valid_opt(opt)) return BAD_OPT;
 	if (!valid_sanitize(sanitize)) return BAD_SANITIZE;
-	if (input.len > MAX_STDIN) return "input: at most 16384 bytes";
+	if (input.len > MAX_STDIN) return string::tformat("input: at most %d bytes", (int)MAX_STDIN);
 	FileList extra;
 	String err = parse_files(files, &extra);
 	if (err.len > 0) return err;
@@ -515,7 +515,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 		m.add("--");
 		foreach (t : tail.list()) m.add(t);
 	}
-	return run_c3c(m.list(), hide, replacement, scratch, is_dir, where, "(no output)", deadline_for(timeout_s), input);
+	return run_c3c(m.list(), hide, replacement, scratch, is_dir, where, "(no output)", deadline_for(timeout_s), input, true);
 }
 
 fn void register(mcp::Server* s)

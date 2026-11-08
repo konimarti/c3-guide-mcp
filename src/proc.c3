@@ -7,7 +7,7 @@ import libc, std::os::posix, std::thread, std::core::string, std::io, std::io::p
 const ulong DEADLINE_MS = 10000;
 const sz MAX_OUTPUT = 4 * 1024;
 
-faultdef WATCHDOG_FAILED;
+faultdef WATCHDOG_FAILED, NO_CWD;
 
 // Everything the reader thread shares with the caller. It is allocated with libc and, if the reader cannot be
 // stopped (something outside our reach holds the pipe open), deliberately left behind: a stuck thread is a
@@ -145,12 +145,6 @@ fn Process? spawn_clean(String[] cmd)
 	$endif
 }
 
-// Run argv, capture stdout+stderr up to max_output, kill the child past that or past the deadline.
-// *code gets the exit status (0 when we killed it ourselves), *timed_out says whether the deadline fired. A reader
-// thread does the blocking read, so this call always returns: with the output so far if something keeps the pipe open.
-// `cwd`: the directory the child runs in (Linux and macOS: through `sh -c 'cd "$1" && exec "$@"'`; argv is still never
-// parsed by a shell; on Windows the child keeps our directory). c3c treats every `*.c3l` in its working directory as a library, so a snippet
-// must not run in the directory the client was started in (a library being synced there breaks every call).
 // What a run needs beyond the command; a field left at zero or "" takes the default.
 struct RunOpts
 {
@@ -161,6 +155,12 @@ struct RunOpts
 	String sweep;        // a scratch directory whose processes are killed too when the run is cut short
 }
 
+// Run argv, capture stdout+stderr up to max_output, kill the child past that or past the deadline.
+// *code gets the exit status (0 when we killed it ourselves), *timed_out says whether the deadline fired. A reader
+// thread does the blocking read, so this call always returns: with the output so far if something keeps the pipe open.
+// `cwd`: the directory the child runs in (Linux and macOS: through `sh -c 'cd "$1" && exec "$@"'`; argv is still never
+// parsed by a shell; on Windows the child keeps our directory). c3c treats every `*.c3l` in its working directory as a library, so a snippet
+// must not run in the directory the client was started in (a library being synced there breaks every call).
 fn String? run_capped(String[] cmd_in, int* code, bool* timed_out, RunOpts opts = {})
 {
 	ulong deadline_ms = opts.deadline_ms > 0 ? opts.deadline_ms : DEADLINE_MS;
@@ -168,6 +168,7 @@ fn String? run_capped(String[] cmd_in, int* code, bool* timed_out, RunOpts opts 
 	String input = opts.input;
 	String sweep = opts.sweep;
 	String cwd = opts.cwd.len > 0 ? opts.cwd : neutral_cwd();
+	if (cwd.len == 0) return NO_CWD~;   // never fall back to our own directory: c3c reads every *.c3l in it
 	String[] cmd = cmd_in;
 	$if !env::WIN32:
 		if (cwd.len > 0)
@@ -175,7 +176,7 @@ fn String? run_capped(String[] cmd_in, int* code, bool* timed_out, RunOpts opts 
 			String[] wrapped = mem::talloc_array(String, cmd_in.len + 5);
 			wrapped[0] = "/bin/sh";
 			wrapped[1] = "-c";
-			wrapped[2] = "cd \"$1\" || exit 125; shift; exec \"$@\"";
+			wrapped[2] = "cd \"$1\" || exit 253; shift; command -v \"$1\" >/dev/null 2>&1 || exit 252; exec \"$@\"";
 			wrapped[3] = "sh";
 			wrapped[4] = cwd;
 			foreach (i, c : cmd_in) wrapped[5 + i] = c;
@@ -305,6 +306,14 @@ fn String? run_capped(String[] cmd_in, int* code, bool* timed_out, RunOpts opts 
 }
 
 // A killed server cannot run its `defer`, so it leaves c3guide-* behind: remove those older than an hour.
+// c3guide-<digits>: the names scratch_dir makes (anything else in the temp directory is not ours to remove)
+fn bool ours(String name)
+{
+	if (!name.starts_with("c3guide-") || name.len == 8) return false;
+	foreach (c : name[8..]) if (!c.is_digit()) return false;
+	return true;
+}
+
 fn void sweep_stale(Path tmp)
 {
 	PathList? list = path::ls(tmem, tmp, no_dirs: false, relative: true);
@@ -312,7 +321,7 @@ fn void sweep_stale(Path tmp)
 	foreach (entry : list)
 	{
 		String name = entry.basename();
-		if (!name.starts_with("c3guide-")) continue;
+		if (!ours(name)) continue;
 		Path? full = tmp.tappend(name);
 		if (catch full) continue;
 		if (path::is_link(full)) continue;   // never follow a planted symlink into someone else's files
@@ -335,7 +344,7 @@ fn Path? scratch_dir()
 
 // An empty directory to run c3c in when it needs no files of its own (c3c reads every `*.c3l` in its working directory).
 // One per process, made on first use and made again if the stale-directory sweep removed it.
-char[512] cwd_buf;
+char[1024] cwd_buf;
 String neutral_cwd_path;
 
 fn String neutral_cwd()
@@ -350,6 +359,12 @@ fn String neutral_cwd()
 	return neutral_cwd_path;
 }
 
-// The exit codes of the shell that sets the working directory when it cannot start c3c (125 cd failed, 126/127 exec failed).
-fn bool could_not_start(int status) => status == 125 || status == 126 || status == 127;
+// The exit codes of the shell that sets the working directory: 253 it could not go there, 252 the program is not there. A
+// program that exits 126 or 127 itself (a c3_run) is not "could not start".
+fn bool could_not_start(int status) => status == 252 || status == 253;
 
+// The directory made by neutral_cwd, removed when the server stops.
+fn void cleanup()
+{
+	if (neutral_cwd_path.len > 0) (void)path::rmtree(path::new(tmem, neutral_cwd_path)!!);
+}
