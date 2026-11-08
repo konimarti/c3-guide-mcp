@@ -409,6 +409,45 @@ fn String c3_lookup(String query @Desc("a name ('printfn', 'io::printfn', 'Strin
 		if (path.len > 0) return outline::outline_path(path);
 		return LOOKUP_HELP;
 	}
+	// "to_upper_tcopy mem::temp_new_array": several names in one call are looked up one by one
+	String[] names = name_list(q);
+	if (names.len > 1)
+	{
+		DString many = dstring::temp();
+		foreach (n : names) many.appendf("== %s ==\n%s\n", n, lookup_one(n, path, 0, false));
+		String all = many.str_view();
+		return string::tformat("%s%s", util::clip(all, 5200), check::version_note(all.contains("does not exist")));
+	}
+	String reply = lookup_one(q, path, examples, source);
+	return string::tformat("%s%s", reply, check::version_note(reply.contains("does not exist")));
+}
+
+// A query of two to six tokens that all look like names (no plain words) and of which at least one is a standard library
+// name is a list of names, not a description. Otherwise: empty.
+fn String[] name_list(String q)
+{
+	live::ensure();
+	String[] raw = q.tsplit(" ");
+	String[] out = mem::talloc_array(String, 6);
+	int n = 0;
+	int known = 0;
+	foreach (r : raw)
+	{
+		String t = r.trim(" ,;\t\n");
+		if (t.len == 0) continue;
+		if (n >= 6) return {};
+		foreach (c : t) if (!(c.is_alnum() || c == '_' || c == ':' || c == '.' || c == '@' || c == '$')) return {};
+		out[n++] = t;
+		bool is_known = first_symbol(t) != null;
+		if (is_known) known++;
+		// a plain word ("lowercase") is a description word, a name has :: . _ @ $ or exists
+		if (!is_known && !t.contains("::") && !t.contains(".") && !t.contains("_") && !t.contains("@") && !t.contains("$")) return {};
+	}
+	return (n >= 2 && known >= 1) ? out[:n] : {};
+}
+
+fn String lookup_one(String q, String path, int examples, bool source)
+{
 	int pcount = 0;
 	String pscope = "";
 	String proj = outline::project_lookup(path, q, 10, &pcount, &pscope);
@@ -452,8 +491,7 @@ fn String c3_lookup(String query @Desc("a name ('printfn', 'io::printfn', 'Strin
 			if (examples > 0) out.append(examples_for(q, clamp(examples, 0, 3), 18));
 		}
 	}
-	String reply = out.str_view();
-	return string::tformat("%s%s", util::clip(reply, source ? 5200 : 4000), check::version_note(reply.contains("does not exist")));
+	return util::clip(out.str_view(), source ? 5200 : 4000);
 }
 
 // `std::collections::map::HashMap.init` -> `HashMap.init`; `std::io::printfn` -> `io::printfn`

@@ -306,3 +306,12 @@ fn void every_signature_names_the_compiler_it_came_from() @test
 	String r = tools::symbol_reply("String.split");
 	assert(r.contains("[c3c "), "%s", r);
 }
+
+fn void several_names_in_one_lookup_are_answered_one_by_one() @test
+{
+	String r = tools::c3_lookup("String.to_upper_tcopy mem::temp_new_array", "", 0, false);
+	assert(r.contains("== String.to_upper_tcopy ==") && r.contains("== mem::temp_new_array =="), "%s", r);
+	assert(r.contains("to_upper_tcopy(") && !r.contains("Weak matches"), "%s", r);
+	String w = tools::c3_lookup("read a line from stdin", "", 0, false);   // plain words stay a description
+	assert(!w.contains("== "), "%s", w);
+}
