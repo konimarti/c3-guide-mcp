@@ -1,7 +1,7 @@
 module c3guide::test::check;
 import c3guide::format;
 import c3guide::compiler, c3guide::proc;
-import c3guide::check, c3guide::util, c3guide::hints, c3guide::guard, c3guide::test::support;
+import c3guide::check, c3guide::util, c3guide::hints, c3guide::guard, c3guide::sources, c3guide::test::support;
 import libc;
 import std::core::string, std::io, std::io::file, std::io::path, std::os::env, std::time, std::time::clock;
 import std::os::posix;
@@ -1003,4 +1003,85 @@ fn void links_that_leave_the_project_or_hide_a_source_are_refused() @test
 		String r = check::c3_check(path: proj);
 		assert(has(r, "OK: no errors"), "%s", r);
 	$endif
+}
+
+// A snippet checked or run together with a project (code and path): the project's modules and libraries are there.
+fn String snippet_project(String root, String name) @local
+{
+	String proj = string::tformat("%s/%s", root, name);
+	path::mkdir(path::new(tmem, string::tformat("%s/src", proj))!!, recursive: true)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/lib/helper.c3l/src", proj))!!, recursive: true)!!;
+	file::save(string::tformat("%s/project.json", proj), "{ \"sources\": [\"./*\", \"src/**\"], \"dependency-search-paths\": [\"lib\"], \"dependencies\": [\"helper\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/lib/helper.c3l/manifest.json", proj), "{ \"provides\": \"helper\", \"sources\": [\"src/**\"], \"targets\": { \"linux-x64\": {}, \"macos-aarch64\": {}, \"macos-x64\": {}, \"windows-x64\": {} } }")!!;
+	file::save(string::tformat("%s/lib/helper.c3l/src/helper.c3", proj), "module helper;\nfn int triple(int x) => x * 3;\n")!!;
+	file::save(string::tformat("%s/src/calc.c3", proj), "module calc;\nfn int twice(int x) => x * 2;\n")!!;
+	file::save(string::tformat("%s/root_mod.c3", proj), "module root_mod;\nfn int five() => 5;\n")!!;
+	file::save(string::tformat("%s/src/main.c3", proj), "module app;\nimport std::io;\nfn void main()\n{\n\tio::printn(\"the project's main\");\n}\n")!!;
+	return proj;
+}
+
+fn void a_snippet_uses_the_modules_and_libraries_of_a_project() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String proj = snippet_project((String)dir, "p");
+	String snip = "import calc, helper, root_mod;\nfn int use() => calc::twice(helper::triple(root_mod::five()));";
+	// without the project the modules are unknown
+	assert(has(check::c3_check(snip), "error"), "the snippet alone must not compile");
+	String r = check::c3_check(snip, path: proj);
+	assert(has(r, "OK: no errors"), "%s", r);
+	// a type error in the snippet is reported against the snippet, and no path of the project or the scratch leaks
+	r = check::c3_check("import calc;\nfn int bad() => calc::twice(\"x\");", path: proj);
+	assert(has(r, "error:") && has(r, "<code>/snippet.c3") && !has(r, "c3guide-") && !has(r, (String)dir), "%s", r);
+	// an error in a project source is shown relative to the project
+	file::save(string::tformat("%s/src/calc.c3", proj), "module calc;\nfn int twice(int x) => x * ;\n")!!;
+	r = check::c3_check("import calc;", path: proj);
+	assert(has(r, "src/calc.c3") && !has(r, (String)dir), "%s", r);
+	file::save(string::tformat("%s/src/calc.c3", proj), "module calc;\nfn int twice(int x) => x * 2;\n")!!;
+	// nothing is written into the tree
+	assert(!file::exists(string::tformat("%s/snippet.c3", proj)) && !file::exists(string::tformat("%s/build", proj)));
+	// run: the snippet's main runs, and the project's main (in another file) does not clash
+	String run = "import std::io, calc;\nfn void main() { io::printfn(\"%d\", calc::twice(21)); }";
+	String out = check::c3_run(run, path: proj);
+	assert(out.starts_with("42"), "%s", out);
+	assert(!has(out, "the project's main"), "%s", out);
+	// c3_check of a snippet with its own main next to the project's main
+	assert(has(check::c3_check(run, path: proj), "OK: no errors"));
+	// a snippet without main is a type-check in c3_check, and the project's main stays in
+	assert(has(check::c3_check("import app;", path: proj), "OK: no errors"));
+}
+
+fn void a_snippet_with_a_project_obeys_both_guards() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	String proj = snippet_project(root, "p");
+	file::save(string::tformat("%s/secret.txt", root), "S3CRET")!!;
+	// the project guard: a source of the project that reads outside it
+	file::save(string::tformat("%s/src/evil.c3", proj), string::tformat("module evil;\nconst char C = $embed(\"%s/secret.txt\")[0];\n", root))!!;
+	String r = check::c3_check("import calc;", path: proj);
+	assert(has(r, "rejected") && !has(r, "S3CRET"), "%s", r);
+	r = check::c3_run("fn void main() {}", path: proj);
+	assert(has(r, "rejected") && !has(r, "S3CRET"), "%s", r);
+	(void)file::delete(string::tformat("%s/src/evil.c3", proj));
+	// the snippet guard: no compile-time reads in the snippet, project or not
+	r = check::c3_check("const char C = $embed(\"x\")[0];", path: proj);
+	assert(has(r, "rejected"), "%s", r);
+	r = check::c3_run("const char C = $embed(\"x\")[0];\nfn void main() {}", path: proj);
+	assert(has(r, "rejected"), "%s", r);
+	// code with a file as path is still a mistake (files has the other sources)
+	r = check::c3_check("fn void f() {}", path: string::tformat("%s/src/calc.c3", proj));
+	assert(has(r, "not both"), "%s", r);
+	r = check::c3_run("fn void main() {}", path: string::tformat("%s/src/calc.c3", proj));
+	assert(has(r, "not both"), "%s", r);
+}
+
+fn void defines_main_reads_function_definitions_only() @test
+{
+	assert(sources::defines_main("module a;\nfn void main() {}"));
+	assert(sources::defines_main("fn int main(String[] args) => 0;"));
+	assert(sources::defines_main("fn int? main (String[] args) { return 0; }"));
+	assert(!sources::defines_main("module a;\nfn void domain() {}\nfn void f() { x.main(); main(); }"));
+	assert(!sources::defines_main("// fn void main() {}\nfn void f() {}"));
 }

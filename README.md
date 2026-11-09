@@ -23,6 +23,8 @@ All of them take `query`, `code` or `path`, and every argument has a default: a 
 
 The assistant runs `c3_check` before it shows you code. It gets the compiler's own errors, plus a hint that names the fix.
 
+To check a usage snippet against your own library, give `code` and `path=<project directory>` to `c3_check` or `c3_run`: the snippet is compiled with the project's sources and libraries (`import yourmodule;`), in a scratch directory, nothing is written to the tree. If the snippet has its own `main`, the project's source files that define one are left out.
+
 ```
 fn void main() { int n = int.sizeof; isz x = 3; }
 

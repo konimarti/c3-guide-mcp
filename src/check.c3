@@ -1,6 +1,6 @@
 module c3guide::check;
-import mcp, std::core::string, std::io::path, std::io::file;
-import c3guide::guard, c3guide::proc, c3guide::compiler, c3guide::format, c3guide::util, c3guide::hints, c3guide::context, c3guide::outline;
+import mcp, std::core::string, std::io::path, std::io::file, std::collections::list;
+import c3guide::guard, c3guide::sources, c3guide::proc, c3guide::compiler, c3guide::format, c3guide::util, c3guide::hints, c3guide::context, c3guide::outline;
 
 // c3_check, c3_test and c3_run: the real compiler's diagnostics (never a build artifact), with hints.
 //
@@ -70,7 +70,7 @@ faultdef BAD_TARGET;
 // A command line under construction (C3 has no varargs-free array literal with conditional members).
 struct Args
 {
-	String[64] items;
+	String[800] items;   // a command line with a project's sources (sources::MAX_SOURCES) and its libraries
 	int n;
 }
 
@@ -133,10 +133,19 @@ fn bool valid_opt(String o)
 
 const String BAD_TARGET_NAME = "target must be a build target name (letters, digits, _ . -), not an option";
 
-// Exactly one of code / path. Returns "" when the arguments are fine, else the message to show.
+const String CODE_AND_PATH = "give either code or path, not both, unless path is a project directory (with project.json): then the snippet is compiled with the project's sources and libraries. To use other files with a snippet, give them in files";
+
+// code or path, or both when path is a project directory (the snippet is compiled with the project's sources and
+// libraries). Returns "" when the arguments are fine, else the message to show.
 fn String exclusive_args(String code, String path)
 {
-	if (code.len > 0 && path.len > 0) return "give either code or path, not both";
+	if (code.len > 0 && path.len > 0)
+	{
+		bool is_dir;
+		String? w = resolve_target(path, &is_dir);
+		if (catch w) return CODE_AND_PATH;
+		if (!is_dir) return CODE_AND_PATH;
+	}
 	if (code.len == 0 && path.len == 0) return "give code (a snippet) or path (a project directory or .c3 file)";
 	if (code.len > MAX_CODE) return string::tformat("give 1 to %d bytes of code", (int)MAX_CODE);
 	foreach (f : guard::COMPILE_TIME_READS)
@@ -161,10 +170,10 @@ fn String without_manifest_warnings(String text, int* dropped)
 
 // The compiler's text, with the scratch directory (snippet) or the project directory (project) removed
 // from the paths, an explanation when it was cut or timed out, and hints for what went wrong.
-fn String report(String out, int status, bool timed_out, String hide, String replacement, String ok, ulong deadline_ms)
+fn String report(String out, int status, bool timed_out, String hide, String replacement, String ok, ulong deadline_ms, String also_hide = "")
 {
 	int dropped = 0;
-	String shown = without_manifest_warnings(strip_ansi(util::redact(out, hide, replacement)), &dropped).trim_right();
+	String shown = without_manifest_warnings(strip_ansi(util::redact(util::redact(out, hide, replacement), also_hide, "")), &dropped).trim_right();
 	if (dropped > 0 && shown.trim().len > 0) shown = string::tformat("%s\n\n(%d warning(s) about unknown keys in a library manifest left out: not your code)", shown, dropped);
 	if (timed_out) shown = string::tformat("%s\n[timeout: longer than %d s]", shown, (int)(deadline_ms / 1000));
 	if (shown.trim().len == 0 && !timed_out)
@@ -208,6 +217,42 @@ fn String parse_files(String files, FileList* out)
 	return "";
 }
 
+// A snippet that is checked or run together with a project (code and path): the project's own sources and libraries are
+// added to the command line, and nothing is written to its tree. The project is read by the guard first, exactly as in
+// path mode. The project's `main` would clash with the snippet's: when the snippet defines one, the sources that define
+// theirs are left out (a project that keeps its `main` in a file with other code loses that code; give such code as
+// `files` or move it). The project-level `sources` are used, not a target's; the project's c-sources, cflags and
+// link-args are not (they are code that cc and the linker would run). Returns "" or the message to show.
+fn String project_for_snippet(String path, String code, Args* out, String* root_out)
+{
+	bool is_dir;
+	String? where = resolve_target(path, &is_dir);
+	if (catch where) return BAD_TARGET_TEXT;
+	if (!is_dir) return CODE_AND_PATH;
+	String outside = guard::project_escape(where);
+	if (outside.len > 0) return reads_outside(outside);
+	outline::note_project(path);
+	List{String} found;
+	found.init(tmem);
+	sources::project_files(where, &found);
+	bool own_main = sources::defines_main(code);
+	foreach (f : found)
+	{
+		if (own_main && sources::file_defines_main(f)) continue;
+		if (out.n >= out.items.len - 100) return string::tformat("the project has more than %d sources: too many to compile with a snippet", sources::MAX_SOURCES);
+		out.add(f);
+	}
+	List{String} dirs;
+	List{String} names;
+	dirs.init(tmem);
+	names.init(tmem);
+	sources::project_libraries(where, &dirs, &names);
+	foreach (d : dirs) { out.add("--libdir"); out.add(d); }
+	foreach (n : names) { out.add("--lib"); out.add(n); }
+	*root_out = string::tformat("%s/", where);
+	return "";
+}
+
 // The program arguments, one per line (a line is one argument, spaces included).
 fn String parse_args(String args, Args* a)
 {
@@ -224,18 +269,18 @@ fn String parse_args(String args, Args* a)
 }
 
 fn String c3_check(String code @Desc("a C3 snippet or file content; a main function is not required") = "",
-	String path @Desc("instead of code: a project directory (with project.json) or a .c3 / .c3i file on disk; a project is built (not run) in a scratch directory, nothing is written to it") = "",
+	String path @Desc("a project directory (with project.json) or a .c3 / .c3i file on disk to check instead of code; a project is built (not run) in a scratch directory, nothing is written to it. WITH code and a project directory: the snippet is checked together with the project's sources and libraries, so `import yourmodule;` works (if the snippet defines main, the project source files that define theirs are left out)") = "",
 	String files @Desc("with code or a single .c3 / .c3i path: more .c3 or .c3i files compiled together with it, one path per line (a helper, an FFI binding, a library's source)") = "",
 	String target @Desc("with a project path: the build target, default the first") = "",
 	String platform @Desc("check for another platform without linking, e.g. 'windows-x64', 'macos-aarch64', 'linux-x64' (c3c --list-targets lists them)") = "",
 	bool format @Desc("also run the formatter c3f: a snippet comes back formatted, a file or project as a diff of what would change (nothing is written)") = false)
-	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. Code in old 0.6/0.7 syntax that fails is rewritten mechanically (`int.sizeof` -> `int::size`, `isz` -> `sz`...) and the rewritten code is checked too. A project (path) is type-checked, never compiled with cc or linked (its c-sources, cflags and link-args are code); c3_test and c3_run build it. A file that belongs to a project is checked with that project; a snippet or a file outside any project is only type-checked. `platform` checks for another OS without linking. It type-checks only: a clean result says nothing about leaks, double frees or use-after-free; run those with c3_test or c3_run and sanitize=address. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
+	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. Code in old 0.6/0.7 syntax that fails is rewritten mechanically (`int.sizeof` -> `int::size`, `isz` -> `sz`...) and the rewritten code is checked too. A project (path) is type-checked, never compiled with cc or linked (its c-sources, cflags and link-args are code); c3_test and c3_run build it. A file that belongs to a project is checked with that project; a snippet or a file outside any project is only type-checked. To check a usage snippet against your own library, give both code and path=<project directory>. `platform` checks for another OS without linking. It type-checks only: a clean result says nothing about leaks, double frees or use-after-free; run those with c3_test or c3_run and sanitize=address. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
 	@Timeout(30000)
 {
 	String reply = check_any(code, path, files, target, platform);
 	if (!format || !(reply.starts_with("OK") || reply.contains("error:"))) return reply;   // not after a refused call
 	String where = "";
-	if (path.len > 0)
+	if (path.len > 0 && code.len == 0)
 	{
 		bool is_dir;
 		String? w = resolve_target(path, &is_dir);
@@ -253,32 +298,42 @@ fn String check_any(String code, String path, String files, String target, Strin
 	FileList extra;
 	String err = parse_files(files, &extra);
 	if (err.len > 0) return err;
-	if (path.len > 0)
+	if (path.len > 0 && code.len == 0)
 	{
 		if (util::is_c3_file(path)) { context::note_file(path); }
 		else { outline::note_project(path); }
 		return check_path(path, target, platform, extra.list());
 	}
 	context::note_source(code);
+	// code with a project directory as path: the project's sources and libraries go on the command line after the files
+	Args project;
+	String hide_project = "";
+	if (path.len > 0)
+	{
+		String refused = project_for_snippet(path, code, &project, &hide_project);
+		if (refused.len > 0) return refused;
+		foreach (x : extra.list()) project.add(x);
+	}
+	String[] with = path.len > 0 ? project.list() : extra.list();
 	// No @pool here: the result lives in the caller's temp memory (a nested pool would free it on return).
 	Path? dir = proc::scratch_dir();
 	if (catch dir) return "cannot create a temp directory";
 	defer (void)path::rmtree(dir);
 	String file = string::tformat("%s/snippet.c3", (String)dir);
 	if (catch file::save(file, code)) return "cannot write the snippet";
-	String first = compile_only(file, (String)dir, "<code>", platform, extra.list());
+	String first = compile_only(file, (String)dir, "<code>", platform, with, hide_project);
 	if (!first.contains("error:") || code.len > MAX_FIX) return first;
 	// old syntax: apply the mechanical rewrite and check that too, so one call shows what is left
 	hints::Rewrite r = hints::rewrite(code);
 	if (r.count == 0) return first;
 	String fixed = string::tformat("%s/rewritten.c3", (String)dir);
 	if (catch file::save(fixed, r.code)) return first;
-	String second = compile_only(fixed, (String)dir, "<code>", platform, extra.list());
+	String second = compile_only(fixed, (String)dir, "<code>", platform, with, hide_project);
 	return string::tformat("%s\n\n0.7 syntax found: %d mechanical rewrite(s) (%s). The rewritten code:\n--- code ---\n%s\n--- c3_check of the rewritten code ---\n%s", first, r.count, r.notes, r.code, second);
 }
 
 // Type-check one file: nothing is emitted or run. `hide` is cut from the paths in the output.
-fn String compile_only(String file, String hide, String replacement, String platform = "", String[] extra = {})
+fn String compile_only(String file, String hide, String replacement, String platform = "", String[] extra = {}, String also_hide = "")
 {
 	Args a;
 	a.add(compiler::c3c_binary());
@@ -299,7 +354,7 @@ fn String compile_only(String file, String hide, String replacement, String plat
 	String? out = proc::run_capped(a.list(), &status, &timed_out);
 	if (catch out) return NO_C3C;
 	if (proc::could_not_start(status)) return NO_C3C;
-	String shown = report(out, status, timed_out, hide, replacement, "OK: no errors", proc::DEADLINE_MS);
+	String shown = report(out, status, timed_out, hide, replacement, "OK: no errors", proc::DEADLINE_MS, also_hide);
 	return string::tformat("%s%s", shown, after_compile(shown));
 }
 
@@ -365,7 +420,7 @@ fn String project_dir(String file)
 
 // Build and run the target's tests / the program in a scratch directory: every artifact goes there, the
 // user's tree is not written to. `--trust=none` as for check; `input` is the program's stdin (then end of input).
-fn String run_c3c(String[] mode_args, String hide, String replacement, Path scratch, bool is_dir_target, String where, String ok, ulong deadline_ms = RUN_DEADLINE_MS, String input = "", bool program = false)
+fn String run_c3c(String[] mode_args, String hide, String replacement, Path scratch, bool is_dir_target, String where, String ok, ulong deadline_ms = RUN_DEADLINE_MS, String input = "", bool program = false, String also_hide = "")
 {
 	String sd = (String)scratch;
 	Args a;
@@ -393,7 +448,7 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	if (catch out) return NO_C3C;
 	if (proc::could_not_start(status)) return NO_C3C;
 	// a program's own output is shown as it is, with its exit code; a test run drops the runtime's frames and passing lines
-	String shown = report(out, program ? 0 : status, timed_out, hide, replacement, ok, deadline_ms);
+	String shown = report(out, program ? 0 : status, timed_out, hide, replacement, ok, deadline_ms, also_hide);
 	if (program) { if (status != 0 && !timed_out && !shown.contains("error: ")) shown = string::tformat("%s\n[exit code %d]", shown, status); }
 	else { shown = drop_runtime_frames(shown); }
 	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
@@ -443,7 +498,7 @@ fn String c3_test(String path @Desc("a project directory (with project.json) or 
 }
 
 fn String c3_run(String code @Desc("a C3 program with a main function") = "",
-	String path @Desc("instead of code: a project directory or a .c3 file") = "",
+	String path @Desc("instead of code: a project directory or a .c3 file. With code and a project directory the snippet is built with the project's sources and libraries and its main runs, not the project's (the project source files that define a main are left out); its c-sources, cflags and link-args are not used") = "",
 	String args @Desc("the program's command-line arguments, one per line") = "",
 	String input @Desc("what the program reads from stdin (up to 16 KB); then it sees end of input") = "",
 	String files @Desc("with code or a single .c3 path: more .c3 files compiled into the program, one path per line") = "",
@@ -475,6 +530,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	String hide;
 	String replacement = "";
 	String where = "";
+	String also_hide = "";
 	bool is_dir = false;
 	if (code.len > 0)
 	{
@@ -486,6 +542,11 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 		m.add(file);
 		hide = (String)scratch;
 		replacement = "<code>";
+		if (path.len > 0)   // code with a project directory as path: the project's sources and libraries are compiled in
+		{
+			String refused = project_for_snippet(path, code, &m, &also_hide);
+			if (refused.len > 0) return refused;
+		}
 	}
 	else
 	{
@@ -515,7 +576,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 		m.add("--");
 		foreach (t : tail.list()) m.add(t);
 	}
-	return run_c3c(m.list(), hide, replacement, scratch, is_dir, where, "(no output)", deadline_for(timeout_s), input, true);
+	return run_c3c(m.list(), hide, replacement, scratch, is_dir, where, "(no output)", deadline_for(timeout_s), input, true, also_hide);
 }
 
 fn void register(mcp::Server* s)
