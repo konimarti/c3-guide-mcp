@@ -446,3 +446,16 @@ fn void an_exact_library_method_comes_before_a_weak_project_hit() @test
 	String own = tools::c3_lookup("Scanner.next_token", path: root, examples: 0);
 	assert(own.starts_with("In "), "%s", own);
 }
+
+fn void a_std_qualified_query_skips_weak_project_names() @test
+{
+	Path dir = root_sources_project();
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	file::save(string::tformat("%s/v2/files.c3", root), "module yaml::files;\nfn int from_file() => 1;\nfn int check_alloc_file() => 2;\n")!!;
+	String r = tools::c3_lookup("std::io::File", path: root, examples: 0);
+	assert(r.contains("std::io::File") && !r.contains("from_file") && !r.contains("merely contain"), "%s", r);
+	// the same name without std:: still shows the project's names after the library's
+	String p = tools::c3_lookup("File.size", path: root, examples: 0);
+	assert(p.contains("QUEUE_SIZE"), "%s", p);
+}

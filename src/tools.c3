@@ -570,6 +570,8 @@ fn String lookup_one(String q, String path, int examples, bool source)
 	bool found_std = false;
 	int exact = 0;
 	String std = symbol_reply(q, &found_std, &exact);
+	// `std::io::File` names the library: a project name that merely contains it (check_alloc_file) is not what was asked
+	if (q.starts_with("std::") && found_std && pbest > 0) pcount = 0;
 	DString out = dstring::temp();
 	if (pcount > 0 && pbest > 0 && found_std && exact >= 1 && exact <= 2 && !q.contains(" "))
 	{
