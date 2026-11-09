@@ -988,6 +988,8 @@ fn void links_that_leave_the_project_or_hide_a_source_are_refused() @test
 			"ln -s ../../../outdir src/sub/outdir.c3l",                                    // a library directory outside
 			"mkdir lib; ln -s ../data/real lib/fake.c3l",                               // a library name for a plain directory
 			"echo 'module a; const char C = $embed(\"/etc/passwd\")[0];' > data/notes.txt; ln -s ../../data/notes.txt src/sub/sneaky.c3",   // a source whose text is not read under its own name
+			// a link whose target is deeper: c3c reads `$embed("../../../../outside.txt")` from the target's folder (data/real/x), where it reaches the secret; from the link's folder it names nothing
+			"mkdir data/real/x; echo 'module a; const char C = $embed(\"../../../../outside.txt\")[0];' > data/real/x/t.txt; ln -s ../../data/real/x/t.txt src/sub/via.c3",
 			"ln -s ../../../outside.txt data/real/deep",                                   // below another folder
 			"ln -s ../../../outdir/../outside.txt data/real/deeper",                           // the same with a .. in the middle
 		};

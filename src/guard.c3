@@ -1,6 +1,6 @@
 module c3guide::guard;
 import c3guide::util;
-import std::io::file, std::io::path, std::core::string, std::collections::list, std::collections::object, std::compression::zip, std::encoding::json;
+import std::os::env, std::io::file, std::io::path, std::core::string, std::collections::list, std::collections::object, std::compression::zip, std::encoding::json;
 
 // c3_check promises that nothing is run and nothing is read outside what is being checked. `--trust=none` stops `$exec`,
 // but still lets `$embed` read any file the server can read (an `$assert` on one byte of it is enough to read it back).
@@ -134,7 +134,13 @@ fn String file_escape(String f, String root)
 	char[]? data = file::load_temp(f);
 	if (catch data) return "";
 	String dir = f[:f.rindex_of("/") ?? 0];
-	return escapes((String)data, dir, root.len > 0 ? util::canonical(root) : "") ? f : "";
+	String canon_root = root.len > 0 ? util::canonical(root) : "";
+	if (escapes((String)data, dir, canon_root)) return f;
+	// c3c resolves a relative path from the folder the file really lies in: for a link, that is the target's folder
+	String real = util::canonical(f);
+	String real_dir = real[:real.rindex_of("/") ?? 0];
+	if (real.len > 0 && real_dir != dir && escapes((String)data, real_dir, canon_root)) return f;
+	return "";
 }
 
 struct Scan
@@ -234,6 +240,9 @@ fn String tree_escape(String dir, String root, int depth, Scan* scan)
 			// c3c follows a link, so it reads whatever the link ends at. Its real path (every link of a chain resolved) must
 			// exist and be inside this tree: that place is scanned where it lies, so a directory link is not entered again
 			// (no second scan, no loop), and a file link is read below under the link's own name, which c3c goes by.
+			$if env::WIN32:
+				return f;   // util::canonical cannot resolve a link here, so none can be shown to stay inside
+			$endif
 			String real = util::canonical(f);
 			if (real.len == 0 || !util::inside(root, real)) return f;   // dangling, or it leaves the tree
 			if (path::is_dir(full))
