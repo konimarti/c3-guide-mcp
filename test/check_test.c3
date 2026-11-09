@@ -830,7 +830,7 @@ fn void the_guard_does_not_miss_odd_spellings_or_odd_places() @test
 }
 
 // A doc comment is text only up to its contracts: c3c reads `@require ...` lines as code, and `$embed` there reads a file.
-// `int[<*>]` and `a <<*p` hold no doc comment. Each of these read a file outside with the guard of 0.7.0.
+// `int[<*>]` and `a <<*p` hold no doc comment. Each of these read a file outside with the guard before these fixes.
 fn void the_guard_reads_contracts_as_code() @test
 {
 	Path dir = proc::scratch_dir()!!;
