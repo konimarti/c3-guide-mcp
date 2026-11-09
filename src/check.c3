@@ -74,7 +74,10 @@ struct Args
 	int n;
 }
 
-fn void Args.add(&self, String s) => self.items[self.n++] = s;
+fn void Args.add(&self, String s)
+{
+	if (self.n < self.items.len) self.items[self.n++] = s;   // callers that can be given many (a project's libraries) check first
+}
 fn String[] Args.list(&self) => self.items[:self.n];
 
 // What `path` names: a project directory (has project.json) or one .c3 file. Returns the absolute directory
@@ -247,6 +250,7 @@ fn String project_for_snippet(String path, String code, Args* out, String* root_
 	dirs.init(tmem);
 	names.init(tmem);
 	sources::project_libraries(where, &dirs, &names);
+	if ((long)out.n + 2 * (long)(dirs.len() + names.len()) >= (long)out.items.len - 100) return "the project names too many libraries (dependencies and dependency-search-paths) to compile with a snippet";
 	foreach (d : dirs) { out.add("--libdir"); out.add(d); }
 	foreach (n : names) { out.add("--lib"); out.add(n); }
 	*root_out = string::tformat("%s/", where);

@@ -1128,3 +1128,17 @@ fn void project_files_walk_folders_and_skip_links() @test
 		assert(files.len() < 20, "a loop through a link: %d files", (int)files.len());
 	$endif
 }
+
+fn void a_project_with_very_many_libraries_is_refused_not_overrun() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String proj = snippet_project((String)dir, "p");
+	DString deps = dstring::temp();
+	for (int i = 0; i < 900; i++) deps.appendf("%s\"lib%d\"", i > 0 ? "," : "", i);
+	file::save(string::tformat("%s/project.json", proj), string::tformat("{ \"sources\": [\"src/**\"], \"dependencies\": [%s], \"targets\": { \"app\": { \"type\": \"executable\" } } }", deps.str_view()))!!;
+	String r = check::c3_check("import calc;", path: proj);
+	assert(has(r, "too many libraries"), "%s", r);
+	r = check::c3_run("fn void main() {}", path: proj);
+	assert(has(r, "too many libraries"), "%s", r);
+}
