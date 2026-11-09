@@ -459,3 +459,28 @@ fn void a_std_qualified_query_skips_weak_project_names() @test
 	String p = tools::c3_lookup("File.size", path: root, examples: 0);
 	assert(p.contains("QUEUE_SIZE"), "%s", p);
 }
+
+// project.json names the sources: a folder it does not name is not read, with or without a src/ folder
+fn void sources_without_a_src_folder_are_the_only_ones_scanned() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/v2", root))!!)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/other", root))!!)!!;
+	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"v2/*\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/v2/foo.c3", root), "module v2;\nfn void target_foo() {}\n")!!;
+	file::save(string::tformat("%s/other/secret.c3", root), "module other;\nfn void should_not_be_found() {}\n")!!;
+	int count;
+	String scope;
+	assert(outline::project_lookup(root, "target_foo", 10, &count, &scope).contains("v2/foo.c3"));
+	String r = outline::project_lookup(root, "should_not_be_found", 10, &count, &scope);
+	assert(count == 0 && r == "", "%s", r);
+	// the fallbacks stay: no sources key reads the whole project, and a src folder is read without sources
+	file::save(string::tformat("%s/project.json", root), "{ \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	assert(outline::project_lookup(root, "should_not_be_found", 10, &count, &scope).contains("other/secret.c3"));
+	path::mkdir(path::new(tmem, string::tformat("%s/src", root))!!)!!;
+	file::save(string::tformat("%s/src/s.c3", root), "module s;\nfn void in_src() {}\n")!!;
+	assert(outline::project_lookup(root, "in_src", 10, &count, &scope).contains("src/s.c3"));
+	assert(outline::refs_reply("should_not_be_found", root, false, 10).contains("is not used"));
+}

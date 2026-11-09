@@ -391,8 +391,8 @@ fn void scan_roots(String root, List{Base}* bases)
 		return;
 	}
 	String src = string::tformat("%s/src", root);
-	bases.push({ file::is_dir(src) ? src : root, true });
 	bool has_deps = false;
+	bool named = false;   // project.json says what the sources are: nothing else is read as one
 	char[]? data = file::load_temp(manifest);
 	if (try data)
 	{
@@ -401,11 +401,12 @@ fn void scan_roots(String root, List{Base}* bases)
 		{
 			// the folders `sources` names (`app/**` is app/), when they are inside the project and not src/ already (without a
 			// src/ the whole project is read, and they are in it)
-			Object*? sources = file::is_dir(src) ? m.get("sources") : NOT_FOUND~;
+			Object*? sources = m.get("sources");
 			if (try sources)
 			{
 				if (sources.is_array())
 				{
+					named = sources.get_len() > 0;
 					for (sz i = 0; i < sources.get_len(); i++)
 					{
 						Object* one = sources.get_at(i);
@@ -419,7 +420,7 @@ fn void scan_roots(String root, List{Base}* bases)
 						bool deep = pattern.ends_with("**");
 						bool wildcard = cut < pattern.len;
 						// `./*` and `*` are the project's own folder (its files, not what is below), `**` all of it
-						if (file::is_dir(real) && (real != util::canonical(src) || !deep) && real != home) { bases.push({ real, deep }); }
+						if (file::is_dir(real) && real != home) { bases.push({ real, deep }); }
 						else if (real == home && wildcard && file::is_dir(real)) { bases.push({ real, deep }); }
 						else if (!wildcard && file::is_file(real) && util::is_c3_file(real)) { bases.push({ real, false }); }
 					}
@@ -448,6 +449,7 @@ fn void scan_roots(String root, List{Base}* bases)
 			}
 		}
 	}
+	if (!named) bases.push({ file::is_dir(src) ? src : root, true });   // no manifest sources: src, else the whole project
 	if (!has_deps)
 	{
 		foreach (name : (String[]){ "deps", "lib" })
