@@ -4,8 +4,8 @@
 cd "$(dirname "$0")/.." || exit 1
 fail=0
 pj=$(jq -r .version project.json)
-main=$(sed -n 's/^const String VERSION = "\([^"]*\)".*/\1/p' src/main.c3)
-[ "$pj" = "$main" ] || { echo "project.json says $pj, src/main.c3 says $main"; fail=1; }
+grep -q '^const String VERSION = env::PROJECT_VERSION;' src/main.c3 || { echo "src/main.c3 must take VERSION from env::PROJECT_VERSION (project.json is the one place the version is written)"; fail=1; }
+[ -n "$pj" ] && [ "$pj" != null ] || { echo "project.json has no version"; fail=1; }
 ci=$(sed -n 's/^  C3C_VERSION: \([^ ]*\).*/\1/p' .github/workflows/ci.yml)
 rel=$(sed -n 's/^  C3C_VERSION: \([^ ]*\).*/\1/p' .github/workflows/release.yml)
 [ -n "$ci" ] && [ "$ci" = "$rel" ] || { echo "C3C_VERSION differs: ci '$ci', release '$rel'"; fail=1; }

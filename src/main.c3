@@ -14,7 +14,8 @@ Do not write C3 from memory. Call the tools below directly by name (this server 
 - c3_search for how to do something (manual, recipes); scope=changes when old syntax or an old name fails; scope=syntax for the exact lists of attributes, builtins, keywords and type properties.
 Trust the compiler over this documentation when they disagree.`;
 
-const String VERSION = "0.5.6";
+// The one place the version is written is "version" in project.json: c3c passes it in as env::PROJECT_VERSION.
+const String VERSION = env::PROJECT_VERSION;
 
 const String USAGE = `c3-guide-mcp %s: C3 knowledge for AI assistants (an MCP server on stdin/stdout).
   c3-guide-mcp             serve (this is how an editor starts it)
