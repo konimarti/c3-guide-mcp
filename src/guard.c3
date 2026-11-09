@@ -9,7 +9,7 @@ import std::io::file, std::io::path, std::core::string, std::collections::list, 
 //
 // The scan fails closed. It reads EVERYTHING under the project (not only what `sources` lists, `.git` included), every
 // directory named in project.json as a source or a library path (inside the project or not, each as a tree of its own),
-// the contracts of doc comments (code to c3c), and refuses a tree with a symbolic link, one it cannot read, one that is
+// the contracts of doc comments (code to c3c), and refuses a tree with a symbolic link that leaves the project or ends nowhere (a link whose real path is inside the tree is read where it lies, and a directory link is not entered a second time), one it cannot read, one that is
 // too large to check, or a directory library (`*.c3l/`) whose manifest.json is unreadable or names a folder outside it.
 
 const long MAX_SCAN_FILE = 4 * 1024 * 1024;        // a source larger than this is refused (padding is not a way past)
@@ -229,8 +229,21 @@ fn String tree_escape(String dir, String root, int depth, Scan* scan)
 		Path? full = dp.tappend(name);
 		if (catch full) return dir;
 		String f = (String)full;
-		if (path::is_link(full)) return f;   // c3c would follow it, to a place this scan did not read
-		if (path::is_dir(full))
+		if (path::is_link(full))
+		{
+			// c3c follows a link, so it reads whatever the link ends at. Its real path (every link of a chain resolved) must
+			// exist and be inside this tree: that place is scanned where it lies, so a directory link is not entered again
+			// (no second scan, no loop), and a file link is read below under the link's own name, which c3c goes by.
+			String real = util::canonical(f);
+			if (real.len == 0 || !util::inside(root, real)) return f;   // dangling, or it leaves the tree
+			if (path::is_dir(full))
+			{
+				// a directory library is told by its name: `x.c3l -> plain` would skip the manifest check of the target
+				if (name.ends_with(".c3l") && !real.ends_with(".c3l")) return f;
+				continue;
+			}
+		}
+		else if (path::is_dir(full))
 		{
 			String hit = tree_escape(f, root, depth + 1, scan);
 			if (hit.len > 0) return hit;

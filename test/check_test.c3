@@ -931,3 +931,76 @@ fn void the_guard_reads_git_folders_too() @test
 	String r = check::c3_check(path: proj);
 	assert(has(r, "rejected") && has(r, ".git/x/evil.c3"), "%s", r);
 }
+
+// A data folder full of links to places inside the project (the yaml-test-suite layout: `name/x -> ../A2M4`) is not an
+// escape: the target is read where it lies. A link that ends outside the project, or nowhere, or that c3c would compile
+// under a name the scan does not read, still is. Each case below is one project in a fresh folder.
+fn String link_project(String root, String name, String script) @local
+{
+	String proj = string::tformat("%s/%s", root, name);
+	path::mkdir(path::new(tmem, string::tformat("%s/src/sub", proj))!!, recursive: true)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/data/real", proj))!!, recursive: true)!!;
+	file::save(string::tformat("%s/project.json", proj), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/src/main.c3", proj), "module app;\nfn void main() {}\n")!!;
+	file::save(string::tformat("%s/data/real/in.yaml", proj), "a: 1\n")!!;
+	file::save(string::tformat("%s/outside.txt", root), "S3CRET")!!;
+	support::sh(string::tformat("cd '%s' && %s", proj, script));
+	return proj;
+}
+
+fn void links_that_stay_inside_the_project_are_accepted() @test
+{
+	$if !env::WIN32:
+		Path dir = proc::scratch_dir()!!;
+		defer (void)path::rmtree(dir);
+		String root = (String)dir;
+		// 1500 links to sibling directories, a link to a file, a chain, a link to an ancestor (a loop if it were entered),
+		// and a link from outside the source folder into it
+		String script = "mkdir data/name; for i in 1 2 3 4 5 6 7 8; do ln -s ../real data/name/x$i; done; "
+			"ln -s real/in.yaml data/file.yaml; ln -s file.yaml data/chain.yaml; ln -s .. data/real/up; ln -s ../src/sub data/into_src";
+		String proj = link_project(root, "ok", script);
+		String r = check::c3_check(path: proj);
+		assert(has(r, "OK: no errors"), "%s", r);
+		assert(guard::project_escape(proj) == "", "%s", guard::project_escape(proj));
+		// the links do not hide a source that is bad: it is read where it lies, through a link or not
+		file::save(string::tformat("%s/src/sub/evil.c3", proj), "module evil;\nmacro probe() { $assert $embed(\"../../../outside.txt\")[0] == 'X' : \"no\"; }\n")!!;
+		r = check::c3_check(path: proj);
+		assert(has(r, "rejected") && !has(r, "S3CRET"), "%s", r);
+	$endif
+}
+
+fn void links_that_leave_the_project_or_hide_a_source_are_refused() @test
+{
+	$if !env::WIN32:
+		Path dir = proc::scratch_dir()!!;
+		defer (void)path::rmtree(dir);
+		String root = (String)dir;
+		path::mkdir(path::new(tmem, string::tformat("%s/outdir", root))!!)!!;
+		file::save(string::tformat("%s/outdir/evil.c3", root), "module evil;\n")!!;
+		String[] scripts = {
+			"ln -s ../../outdir data/dir_out",                                          // a directory outside
+			"ln -s ../../outside.txt data/file_out.txt",                                // a file outside
+			"ln -s ../../../outside.txt src/sub/in_source.txt",                            // a link in a source folder
+			"ln -s nowhere data/dangling",                                              // dangling
+			"ln -s real/nowhere.c3 src/sub/dangling.c3",                                // dangling, named as a source
+			"ln -s ../../outdir data/hop; ln -s hop data/chain_out",                    // a chain that ends outside
+			"ln -s ../../../outside.txt src/sub/leak.c3",                                  // a source that is a link outside
+			"ln -s ../../../outdir src/sub/outdir.c3l",                                    // a library directory outside
+			"mkdir lib; ln -s ../data/real lib/fake.c3l",                               // a library name for a plain directory
+			"echo 'module a; const char C = $embed(\"/etc/passwd\")[0];' > data/notes.txt; ln -s ../../data/notes.txt src/sub/sneaky.c3",   // a source whose text is not read under its own name
+			"ln -s ../../../outside.txt data/real/deep",                                   // below another folder
+			"ln -s ../../../outdir/../outside.txt data/real/deeper",                           // the same with a .. in the middle
+		};
+		int n = 0;
+		foreach (s : scripts)
+		{
+			String proj = link_project(root, string::tformat("bad%d", n++), s);
+			String r = check::c3_check(path: proj);
+			assert(has(r, "rejected") && !has(r, "S3CRET"), "%s: %s", s, r);
+		}
+		// a link to an archive that is a directory of the project is the project's own directory: fine
+		String proj = link_project(root, "arch", "mkdir -p lib/real.c3l; echo '{ \"provides\": \"real\" }' > lib/real.c3l/manifest.json; ln -s real.c3l lib/alias.c3l");
+		String r = check::c3_check(path: proj);
+		assert(has(r, "OK: no errors"), "%s", r);
+	$endif
+}
