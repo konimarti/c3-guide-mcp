@@ -59,7 +59,11 @@ fn void add_dir(String dir, bool deep, int depth, List{String}* out)
 		String full = string::tformat("%s/%s", dir, name);
 		if (file::is_dir(full))
 		{
-			if (deep && !path::is_link(path::new(tmem, full)!!)) add_dir(full, true, depth + 1, out);
+			if (deep)
+			{
+				Path? sub = path::new(tmem, full);
+				if (try sub) { if (!path::is_link(sub)) add_dir(full, true, depth + 1, out); }
+			}
 		}
 		else if (util::is_c3_file(name))
 		{

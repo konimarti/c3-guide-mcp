@@ -4,7 +4,7 @@ import c3guide::compiler, c3guide::proc;
 import c3guide::check, c3guide::util, c3guide::hints, c3guide::guard, c3guide::sources, c3guide::test::support;
 import libc;
 import std::core::string, std::io, std::io::file, std::io::path, std::os::env, std::time, std::time::clock;
-import std::os::posix;
+import std::os::posix, std::collections::list;
 
 const String[*] TOKENS = { "$include", "$exec", "$embed" };
 const String[*] FLAGS = { "--trust=none", "--no-obj", "--no-entry", "compile-only" };
@@ -1104,4 +1104,25 @@ fn void a_snippet_main_does_not_misread_project_files() @test
 	file::save(string::tformat("%s/src/main.c3", proj), "module app;\nfn void\nmain() {}\n")!!;
 	String r = check::c3_run("import helper2, std::io;\nfn void main() { io::printfn(\"%d\", helper2::answer()); }", path: proj);
 	assert(r.starts_with("42"), "%s", r);
+}
+
+// `src/**` reads the folders below src, and a link to a folder is not entered (no loop); a path that cannot be made is
+// skipped, not a panic (it was `path::new(...)!!`; no fixture can make that call fail, so this only pins the walk).
+fn void project_files_walk_folders_and_skip_links() @test
+{
+	$if !env::WIN32:
+		Path dir = proc::scratch_dir()!!;
+		defer (void)path::rmtree(dir);
+		String proj = snippet_project((String)dir, "p");
+		path::mkdir(path::new(tmem, string::tformat("%s/src/deep/er", proj))!!, recursive: true)!!;
+		file::save(string::tformat("%s/src/deep/er/x.c3", proj), "module x;\n")!!;
+		support::sh(string::tformat("ln -s .. '%s/src/deep/up'", proj));
+		List{String} files;
+		files.init(tmem);
+		sources::project_files(proj, &files);
+		int n = 0;
+		foreach (f : files) if (f.ends_with("/deep/er/x.c3")) n++;
+		assert(n == 1, "%d", n);
+		assert(files.len() < 20, "a loop through a link: %d files", (int)files.len());
+	$endif
 }
