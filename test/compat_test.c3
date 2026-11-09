@@ -82,3 +82,16 @@ fn void the_tools_of_the_old_set_are_forwarded() @test
 	String h = call("c3_nothing", `{"name":"x"}`);
 	assert(h.contains("unknown tool"), "%s", h);
 }
+
+// 0.5.6 gave c3_changes and c3_syntax one argument, `topic`; and a call may leave `arguments` out
+fn void topic_is_the_query_of_the_old_tools_and_an_alias() @test
+{
+	String a = call("c3_changes", `{"topic":"faultdef"}`);
+	assert(a.contains("c3_changes is called c3_search") && a.contains("faultdef") && !a.contains("give query"), "%s", a);
+	String b = call("c3_syntax", `{"topic":"attributes"}`);
+	assert(b.contains("@inline") && !b.contains("lists: attributes"), "%s", b);
+	String c = call("c3_search", `{"topic":"foreach with index"}`);
+	assert(!c.contains("does not take") && !c.contains("give query"), "%s", c);
+	String d = call("c3_lookup", `{"query":"printfn","topic":"zzzqqq"}`);
+	assert(d.contains("printfn") && !d.contains("zzzqqq"), "%s", d);
+}

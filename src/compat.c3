@@ -43,7 +43,7 @@ fn void serve_stdio(mcp::Server* s)
 // The target of an argument name that is not one of the tool's: "" when it is not an alias of anything.
 fn String alias_of(mcp::Tool* t, String key)
 {
-	if ((key == "name" || key == "symbol") && takes(t, "query") && !takes(t, key)) return "query";
+	if ((key == "name" || key == "symbol" || key == "topic") && takes(t, "query") && !takes(t, key)) return "query";
 	if (key == "file" && takes(t, "path") && !takes(t, "file")) return "path";
 	return "";
 }
@@ -89,6 +89,7 @@ fn void add_pair(Allocator a, DString* body, String key, String value_json)
 // The first of `names` that args holds as a string, else "".
 fn String first_string(Object* args, String[] names)
 {
+	if (!args) return "";
 	foreach (n : names)
 	{
 		String? v = args.get_string(n);
@@ -121,11 +122,11 @@ fn String forward_legacy(Allocator a, String id, String old, Object* args, Strin
 		case "c3_syntax":
 			tool = "c3_search";
 			scope = "syntax";
-			query = first_string(args, { "query", "list", "name" });
+			query = first_string(args, { "query", "topic", "list", "name" });
 		case "c3_changes":
 			tool = "c3_search";
 			scope = "changes";
-			query = first_string(args, { "query", "name", "symbol" });
+			query = first_string(args, { "query", "topic", "name", "symbol" });
 		case "c3_fix":
 			tool = "c3_check";
 			code = first_string(args, { "code" });
@@ -208,7 +209,7 @@ fn String handle(mcp::Server* s, Allocator a, String line)
 				changed = true;
 				to = target;
 				// the real name wins when both are given, and `name` when there are two
-				if (args.has_key(target) || (key == "symbol" && args.has_key("name")) || given.str_view().contains(string::tformat("|%s|", target))) to = "";
+				if (args.has_key(target) || ((key == "symbol" || key == "topic") && args.has_key("name")) || given.str_view().contains(string::tformat("|%s|", target))) to = "";
 			}
 		}
 		if (to.len > 0)
