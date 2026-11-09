@@ -110,6 +110,29 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 	return string::tformat("%s%s", reply, manual_note());
 }
 
+// "what is sz type", "explain defer", "difference between a struct and a union": a question about the language. Library
+// names that share a word with it ("TypeEnum") are not the answer; a name that is one of the words ("what is Path") is.
+fn bool asks_what_it_is(String q)
+{
+	String low = q.trim().to_lower_tcopy();
+	String[*] openers = { "what is ", "what are ", "what's ", "what does ", "explain ", "meaning of ", "difference between ", "define " };
+	foreach (o : openers) if (low.starts_with(o)) return true;
+	return false;
+}
+
+// The library hits whose name is one of the question's words.
+fn Hit[] named_by(Hit[] syms, String[] terms)
+{
+	List{Hit} keep;
+	keep.init(tmem);
+	foreach (h : syms)
+	{
+		String name = util::last_part(corpus::entries[h.idx].title).to_lower_tcopy();
+		foreach (t : terms) if (name == t || name == string::tformat("%ss", t)) { keep.push(h); break; }
+	}
+	return keep.array_view();
+}
+
 fn bool asks_about_change(String q)
 {
 	String low = q.to_lower_tcopy();
@@ -139,6 +162,7 @@ fn String search_all(String query, int limit, String file)
 	live::ensure();
 	Hit[] syms = search::search(query, SYMBOL_KINDS[..], 3, true);
 	String[] terms = search::query_terms(search::words(query));
+	if (asks_what_it_is(query)) syms = named_by(syms, terms);
 	int manual = hits.len > 0 ? words_in(&corpus::entries[hits[0].idx], terms) : 0;
 	int library = 0;
 	int library_context = 0;   // a name from a module the session works with counts as one more word
@@ -376,7 +400,7 @@ fn String syntax_reply(String topic)
 	{
 		String old = legacy_note(t);
 		if (old.len > 0) return old;
-		return "no such list or entry; lists: attributes, builtins, keywords, type-properties, operators, precedence. A standard library name (a macro like @pool) is c3_lookup.";
+		return string::tformat("no such list or entry: '%s' is in none of the lists (attributes, builtins, keywords, type-properties, operators, precedence). Where such a name is: compile-time functions like $assignable are described in the manual (c3_search \"%s\"), the keywords list has most $-words ($defined, $eval, $stringify) and the builtins list the $$ ones; a standard library function, macro or type, @pool for one, is c3_lookup.", util::clip(t, 60), util::clip(t.trim("@$"), 60));
 	}
 	return util::clip(out.str_view(), MAX_REPLY);
 }
@@ -836,6 +860,55 @@ fn String alias_target(Entry* e)
 	return out.str_view();
 }
 
+// The fields of a struct, union or bitstruct as its signature line shows them ("struct T (I) { A a, B b }"): "Type name" each.
+fn void fields_of(String body, List{String}* names, List{String}* types)
+{
+	String first = body.tsplit("\n")[0];
+	sz open = first.index_of(" { ") ?? -1;
+	sz close = first.rindex_of(" }") ?? -1;
+	if (open < 0 || close <= open) return;
+	String inner = first[open + 3:close - open - 3];
+	int depth = 0;
+	sz start = 0;
+	for (sz i = 0; i <= inner.len; i++)
+	{
+		char c = i < inner.len ? inner[i] : ',';
+		if (c == '{' || c == '[' || c == '(' || c == '<') depth++;
+		if (c == '}' || c == ']' || c == ')' || c == '>') depth--;
+		if (c != ',' || depth > 0) continue;
+		String one = inner[start:i - start].trim();
+		start = i + 1;
+		sz sp = one.rindex_of(" ") ?? -1;
+		if (sp <= 0) continue;
+		names.push(one[sp + 1..]);
+		types.push(one[:sp].trim());
+	}
+}
+
+// `TempAllocator.used` is a field of the struct, not a method: its type, and how it is used. "" when n is not that.
+fn String field_reply(String n)
+{
+	sz dot = n.rindex_of(".") ?? -1;
+	if (dot <= 0 || dot + 1 >= n.len) return "";
+	String owner = n[:dot];
+	String name = n[dot + 1..];
+	foreach (&e : corpus::entries)
+	{
+		if (e.kind != "type" || !uid_matches(e.title, owner)) continue;
+		List{String} names;
+		List{String} types;
+		names.init(tmem);
+		types.init(tmem);
+		fields_of(e.body, &names, &types);
+		foreach (i, f : names)
+		{
+			if (f != name) continue;
+			return string::tformat("'%s' is a field of %s (%s), of type %s: written `x.%s`, not called, so it has no signature of its own.\n  %s\nc3_lookup %s lists its methods.\n", n, e.title, e.loc, types[i], name, util::clip(e.body.tsplit("\n")[0], 300), util::last_part(owner));
+		}
+	}
+	return "";
+}
+
 // `std::io::path`, `io::path`, `path`: the module, when it is one. Its functions and macros, names only.
 fn String module_listing(String n)
 {
@@ -900,6 +973,13 @@ fn String symbol_reply(String name, bool* found_out = null, int* exact_out = nul
 			String wrapped = inner.len > 1 ? method_summary(inner, "") : "";
 			return string::tformat("%s%s", builtin, wrapped);
 		}
+	}
+	// `TempAllocator.used`: not a method, but a member of the struct
+	String field = field_reply(n);
+	if (field.len > 0)
+	{
+		if (found_out) *found_out = true;
+		return field;
 	}
 	// not found: say so (a model must not assume a guessed API exists), then offer close names
 	out.append(legacy_note(n));

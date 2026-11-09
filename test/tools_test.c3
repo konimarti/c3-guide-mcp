@@ -376,3 +376,23 @@ fn void a_version_query_returns_that_releases_notes() @test
 	assert(tools::c3_search("0.8.5", "changes").starts_with("### 0.8.5"));
 	assert(!tools::c3_search("what was renamed in 0.7 for fault", "all").contains("nothing in the release notes of"));
 }
+
+// `TempAllocator.used` is a field: it exists, and its type is known
+fn void a_field_looked_up_as_a_member_is_said_to_be_a_field() @test
+{
+	String r = tools::symbol_reply("TempAllocator.used");
+	assert(r.contains("is a field of") && r.contains("of type sz") && !r.contains("does not exist"), "%s", r);
+	String h = tools::symbol_reply("HashMap.count");
+	assert(h.contains("is a field of") && h.contains("of type int"), "%s", h);
+	// a name that is neither a method nor a field still does not exist
+	assert(tools::symbol_reply("TempAllocator.nothere_at_all").contains("does not exist"));
+	// and a method is still a method
+	assert(!tools::symbol_reply("String.split").contains("is a field of"));
+}
+
+fn void a_name_in_no_syntax_list_points_to_where_it_is() @test
+{
+	String r = tools::syntax_reply("assignable");
+	assert(r.contains("none of the lists") && r.contains("c3_search") && r.contains("c3_lookup") && r.contains("builtins"), "%s", r);
+	assert(tools::syntax_reply("zzzqqqxx").contains("no such list"));
+}

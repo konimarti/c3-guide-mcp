@@ -146,6 +146,27 @@ fn String words(String q, bool split_underscore = true)
 	return out.str_view();
 }
 
+// The manual puts the name of what it defines in backticks (`sz` in the section on integers). Among the best few, a section
+// that has one of the typed words that way, as a whole, goes before one that only has the word in a heading or a sample.
+fn Hit[] prefer_defining_sections(Hit[] sorted, String[] typed_terms, int limit)
+{
+	sz top = math::min(sorted.len, (sz)math::max(limit, 3) * 3);
+	for (sz i = 0; i < top; i++)
+	{
+		Entry* e = &corpus::entries[sorted[i].idx];
+		if (e.kind != "doc") continue;
+		int named = 0;
+		foreach (t : typed_terms)
+		{
+			if (t[0] == '@' || t[0] == '$' || t.len < 2) continue;
+			if (e.body.contains(string::tformat("`%s`", t))) named++;
+		}
+		sorted[i].score *= 1.0f + 0.3f * (float)named;
+	}
+	sort::quicksort(sorted[:top], fn int(Hit a, Hit b) => a.score < b.score ? 1 : (a.score > b.score ? -1 : a.idx - b.idx));
+	return sorted;
+}
+
 // Top `limit` entries whose kind is in `kinds` (empty = all), best first.
 // symbols: match on words inside identifiers (`read_line`, `std::io::file`) instead of whole identifiers.
 fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
@@ -209,21 +230,27 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 			if (!ok) continue;
 		}
 		float s = 0;
+		int covered = 0;   // how many of the words the person typed this entry has
 		for (int k = 0; k < nterms; k++)
 		{
 			int f = tf_all[i * nterms + k];
 			int tt = ttf_all[i * nterms + k];
 			if (f + tt == 0) continue;
+			if (k < typed) covered++;
 			float idf = math::ln(1.0f + ((float)(total - df[k]) + 0.5f) / ((float)df[k] + 0.5f));
 			float norm = f * 2.2f / (f + 1.2f * (0.25f + 0.75f * len_cache[i] / avg));
 			float weight = k < typed ? 1.0f : SYNONYM_WEIGHT;
 				s += weight * idf * (norm + 3.0f * short_bonus[i] * (tt > 0 ? 1.0f : 0.0f));
 		}
+		// A section about the question has its words; one that repeats a common word ("type") does not. BM25 saturates
+		// the repeated word, so say it once more: the share of the typed words an entry has counts (squared) in a question.
+		if (!symbols && typed >= 2) { float share = (float)covered / (float)typed; s *= share * share; }
 		if (symbols) s *= context::boost(e.title);   // a name from a module the session works with
 		if (e.kind == "recipe") s *= RECIPE_BOOST;   // a program that was compiled and run beats prose that says the same
 		if (s > 0) hits.push({ s, (int)i });
 	}
 	Hit[] sorted = hits.array_view();
 	sort::quicksort(sorted, fn int(Hit a, Hit b) => a.score < b.score ? 1 : (a.score > b.score ? -1 : a.idx - b.idx));   // equal scores: the entry that comes first, so a ranking never depends on the sort
+	if (!symbols && typed >= 2) sorted = prefer_defining_sections(sorted, terms[:typed], limit);
 	return sorted[:(sz)(sorted.len < limit ? sorted.len : limit)];
 }

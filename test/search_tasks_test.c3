@@ -102,3 +102,19 @@ fn void a_good_answer_is_not_followed_by_manual_noise() @test
 	assert(support::contains_ci(reply, "Recipe: tcp server"), "%s", reply);
 	assert(!support::contains_ci(reply, "Attribute syntax") && !support::contains_ci(reply, "$defined"), "%s", reply);
 }
+
+// Questions about the language where words of the question are also in library names (TypeEnum, SZ, implements_copy,
+// ArenaAllocator.acquire): the manual's answer comes first and the library names are not added.
+fn void concept_questions_get_the_manual_answer_not_library_names() @test
+{
+	context::clear();
+	String about_sz = tools::c3_search("what is sz type", limit: 3);
+	assert(support::contains_ci(about_sz, "iptr") || support::contains_ci(about_sz, "5_1_1 Integers"), "%s", about_sz);
+	assert(support::contains_ci(about_sz, "5_1_1 Integers"), "the section that defines sz is the first hit: %s", about_sz);
+	assert(about_sz.starts_with("### 5_1 Basic Types"), "%s", about_sz);
+	assert(!support::contains_ci(about_sz, "TypeEnum") && !support::contains_ci(about_sz, "bitset::SZ") && !support::contains_ci(about_sz, "Standard library ("), "%s", about_sz);
+	String q = tools::c3_search("compile time check if a type implements an interface or is assignable ($defined, $assignable, implements)", limit: 3);
+	assert(!q.starts_with("Standard library"), "%s", q);
+	assert(!support::contains_ci(q, "implements_copy") && !support::contains_ci(q, "ArenaAllocator.acquire") && !support::contains_ci(q, "std::time::Clock"), "%s", q);
+	assert(support::contains_ci(q, "Interfaces") || support::contains_ci(q, "$defined"), "%s", q);
+}
