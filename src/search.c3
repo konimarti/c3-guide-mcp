@@ -8,6 +8,7 @@ import std::sort, std::math;
 // title hits weighted x3). Costs a few ms per query and keeps startup at zero.
 
 const float RECIPE_BOOST = 1.4f;
+const float RECIPE_SHARE = 0.25f;   // a recipe with less than this share of the typed words' weight is cut like a section
 const sz MAX_QUERY_BYTES = 256;
 const sz MAX_TERMS = 16;
 const float SYNONYM_WEIGHT = 0.5f;   // a word the person did not type counts for less than one they did
@@ -167,6 +168,16 @@ fn Hit[] prefer_defining_sections(Hit[] sorted, String[] typed_terms, int limit)
 	return sorted;
 }
 
+// "what is sz type", "explain defer", "difference between a struct and a union": a question about the language. Library
+// names that share a word with it ("TypeEnum") are not the answer; a name that is one of the words ("what is Path") is.
+fn bool asks_what_it_is(String q)
+{
+	String low = q.trim().to_lower_tcopy();
+	String[*] openers = { "what is ", "what are ", "what's ", "what does ", "explain ", "meaning of ", "difference between ", "define " };
+	foreach (o : openers) if (low.starts_with(o)) return true;
+	return false;
+}
+
 // Top `limit` entries whose kind is in `kinds` (empty = all), best first.
 // symbols: match on words inside identifiers (`read_line`, `std::io::file`) instead of whole identifiers.
 fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
@@ -219,6 +230,10 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 		}
 	}
 	float avg = (float)(sumlen / total);
+	bool question = typed >= 8 || asks_what_it_is(query);
+	float typed_weight = 0;   // the weights of the words typed, to say how much of them an entry has
+	for (int k = 0; k < typed; k++) typed_weight += math::ln(1.0f + ((float)(total - df[k]) + 0.5f) / ((float)df[k] + 0.5f));
+	if (typed_weight <= 0) typed_weight = 1;
 	List{Hit} hits;
 	hits.init(tmem);
 	foreach (i, &e : corpus::entries)
@@ -230,21 +245,21 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 			if (!ok) continue;
 		}
 		float s = 0;
-		int covered = 0;   // how many of the words the person typed this entry has
+		float covered = 0;   // how much of the typed words' weight (idf) this entry has
 		for (int k = 0; k < nterms; k++)
 		{
 			int f = tf_all[i * nterms + k];
 			int tt = ttf_all[i * nterms + k];
 			if (f + tt == 0) continue;
-			if (k < typed) covered++;
 			float idf = math::ln(1.0f + ((float)(total - df[k]) + 0.5f) / ((float)df[k] + 0.5f));
+			if (k < typed) covered += idf;
 			float norm = f * 2.2f / (f + 1.2f * (0.25f + 0.75f * len_cache[i] / avg));
 			float weight = k < typed ? 1.0f : SYNONYM_WEIGHT;
 				s += weight * idf * (norm + 3.0f * short_bonus[i] * (tt > 0 ? 1.0f : 0.0f));
 		}
 		// A section about the question has its words; one that repeats a common word ("type") does not. BM25 saturates
-		// the repeated word, so say it once more: the share of the typed words an entry has counts (squared) in a question.
-		if (!symbols && typed >= 2) { float share = (float)covered / (float)typed; s *= share * share; }
+		// the repeated word, so say it once more: the share of the typed words' weight an entry has counts (squared) in a question.
+		if (!symbols && typed >= 2) { float share = covered / typed_weight; s *= e.kind == "recipe" && !question ? math::pow(share, 0.8f) : share * share; }   // a task is answered by a program that ran, whose words are few and chosen: cut less. A question about the language (long, or "what is") is answered by the manual
 		if (symbols) s *= context::boost(e.title);   // a name from a module the session works with
 		if (e.kind == "recipe") s *= RECIPE_BOOST;   // a program that was compiled and run beats prose that says the same
 		if (s > 0) hits.push({ s, (int)i });

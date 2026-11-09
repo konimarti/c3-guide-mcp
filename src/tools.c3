@@ -120,16 +120,6 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 	return string::tformat("%s%s", reply, manual_note());
 }
 
-// "what is sz type", "explain defer", "difference between a struct and a union": a question about the language. Library
-// names that share a word with it ("TypeEnum") are not the answer; a name that is one of the words ("what is Path") is.
-fn bool asks_what_it_is(String q)
-{
-	String low = q.trim().to_lower_tcopy();
-	String[*] openers = { "what is ", "what are ", "what's ", "what does ", "explain ", "meaning of ", "difference between ", "define " };
-	foreach (o : openers) if (low.starts_with(o)) return true;
-	return false;
-}
-
 // The library hits whose name is one of the question's words.
 fn Hit[] named_by(Hit[] syms, String[] terms)
 {
@@ -172,7 +162,7 @@ fn String search_all(String query, int limit, String file)
 	live::ensure();
 	Hit[] syms = search::search(query, SYMBOL_KINDS[..], 3, true);
 	String[] terms = search::query_terms(search::words(query));
-	if (asks_what_it_is(query)) syms = named_by(syms, terms);
+	if (search::asks_what_it_is(query)) syms = named_by(syms, terms);
 	int manual = hits.len > 0 ? words_in(&corpus::entries[hits[0].idx], terms) : 0;
 	int library = 0;
 	int library_context = 0;   // a name from a module the session works with counts as one more word
