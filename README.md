@@ -17,7 +17,7 @@ c3-guide-mcp gives your assistant the real C3: your compiler, the standard libra
 | `c3_refs` | Where a name is used, before you change or delete it. |
 | `c3_search` | How to do something: the manual, tested example programs, release notes, the compiler's exact lists. |
 
-All of them take `query`, `code` or `path`, and every argument has a default: a call with a missing argument gets a sentence that names the argument to give, not a protocol error.
+All of them take `query`, `code` or `path`, and every argument has a default: a call with a missing argument gets a sentence that names the argument to give, not a protocol error. The argument names of earlier releases still work (`name` and `symbol` for `query`, `file` for `path`), a call to one of the old tools (`c3_symbol`, `c3_outline`, ...) is forwarded to its replacement, and an argument a tool does not take is answered with the ones it takes.
 
 ### 1. Code is checked by the real compiler
 

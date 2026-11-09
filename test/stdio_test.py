@@ -40,4 +40,8 @@ check("no argument is a plain message, not a protocol error", "query" in r[4]["r
 check("unknown tool -> error", "error" in r[5] or r[5]["result"].get("isError"), json.dumps(r[5]))
 check("multibyte cut stays valid JSON", "�" not in r[6]["result"]["content"][0]["text"])
 check("lookup without a query says what to give", "give query" in r[7]["result"]["content"][0]["text"])
+r = session([("c3_lookup", {"name": "printfn"}), ("c3_lookup", {"query": "printfn", "colour": "red"}), ("c3_symbol", {"name": "printfn"})])
+check("name is query over the pipe", "fn sz? printfn" in r[2]["result"]["content"][0]["text"], json.dumps(r[2]))
+check("an unknown argument names the ones the tool takes", "does not take 'colour'" in r[3]["result"]["content"][0]["text"], json.dumps(r[3]))
+check("an old tool name is forwarded", "c3_symbol is called c3_lookup" in r[4]["result"]["content"][0]["text"], json.dumps(r[4]))
 sys.exit(1 if fails else 0)

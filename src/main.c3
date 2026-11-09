@@ -1,6 +1,6 @@
 module c3guide;
 import mcp, libc, std::core::string, std::os::env;
-import c3guide::proc, c3guide::corpus, c3guide::tools, c3guide::check, c3guide::live, c3guide::setup;
+import c3guide::compat, c3guide::proc, c3guide::corpus, c3guide::tools, c3guide::check, c3guide::live, c3guide::setup;
 import std::io;
 
 // Sent to the model in `initialize`: this is what makes a model use the tools without being told.
@@ -52,7 +52,7 @@ fn int main(String[] args)
 	defer server.free();
 	tools::register(&server);
 	check::register(&server);
-	server.serve_stdio();
+	compat::serve_stdio(&server);
 	proc::cleanup();
 	return 0;
 }
