@@ -44,7 +44,17 @@ fn int version_key(String title)
 
 // Release-note chunks are long bullet lists: show only the bullets that mention ALL query terms
 // (or any term, when no bullet has all of them).
-fn String matching_lines(String body, String[] terms, bool all)
+// `renamed`, `renaming` and `rename` share `renam`: a word asked for inside one release is looked for by its stem.
+fn String stem_of(String t)
+{
+	foreach (suffix : (String[]){ "ing", "ed", "es", "s", "e" })
+	{
+		if (t.len >= suffix.len + 4 && t.ends_with(suffix)) return t[:t.len - suffix.len];
+	}
+	return t;
+}
+
+fn String matching_lines(String body, String[] terms, bool all, bool stems = false)
 {
 	DString out = dstring::temp();
 	int n = 0;
@@ -54,7 +64,7 @@ fn String matching_lines(String body, String[] terms, bool all)
 		if (terms.len == 0) { out.appendf("%s\n", util::clip(line, 240)); n++; continue; }   // a whole release: its first lines
 		String low = line.to_lower_tcopy();
 		int hit = 0;
-		foreach (t : terms) if (has_word(low, t) || has_word(low, string::tformat("%ss", t))) hit++;
+		foreach (t : terms) if (has_word(low, t) || has_word(low, string::tformat("%ss", t)) || (stems && low.contains(stem_of(t)))) hit++;
 		if (hit == 0 || (all && hit < terms.len)) continue;
 		out.appendf("%s\n", util::clip(line, 240));
 		n++;
@@ -287,7 +297,7 @@ fn String version_changes(String topic, int limit, bool strict)
 		{
 			if (shown >= clamp(limit, 1, 5)) break;
 			Entry* e = &corpus::entries[i];
-			String lines = matching_lines(e.body, terms, pass == 0);
+			String lines = matching_lines(e.body, terms, pass == 0, true);
 			if (lines.len == 0) continue;
 			out.appendf("### %s\n%s", strip_prefix(e.title, "C3C Release Notes > "), lines);
 			shown++;

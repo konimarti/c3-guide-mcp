@@ -364,6 +364,13 @@ fn void a_version_query_returns_that_releases_notes() @test
 	// the words filter within the release
 	String words = tools::changes_reply("0.8.5 removed", 3);
 	assert(words.contains("Removed experimental support") && !words.contains("### 0.8.4"), "%s", words);
+	// a word is found by its stem inside a release: renamed, rename and renaming
+	foreach (w : (String[]){ "renamed", "rename", "renaming" })
+	{
+		String ren = tools::changes_reply(string::tformat("0.8.0 %s", w), 3);
+		assert(ren.starts_with("### 0.8.0") && ren.contains("renamed `has_equals`") && !ren.contains("### 0.8.1"), "%s: %s", w, ren);
+	}
+	assert(tools::changes_reply("0.8.5 renamed", 3).starts_with("nothing in the release notes of 0.8.5"), "0.8.5 renames nothing");
 	String none = tools::changes_reply("0.8.5 zzzzqq", 3);
 	assert(none.starts_with("nothing in the release notes of 0.8.5"), "%s", none);
 	// a release the snapshot does not have says so and names the ones it has
