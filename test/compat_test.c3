@@ -84,6 +84,15 @@ fn void the_tools_of_the_old_set_are_forwarded() @test
 }
 
 // 0.5.6 gave c3_changes and c3_syntax one argument, `topic`; and a call may leave `arguments` out
+fn String call_raw(String params) @local
+{
+	mcp::Server s = mcp::new_server("t", "0");
+	tools::register(&s);
+	check::register(&s);
+	defer s.free();
+	return compat::handle(&s, tmem, string::tformat(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":%s}`, params));
+}
+
 fn void topic_is_the_query_of_the_old_tools_and_an_alias() @test
 {
 	String a = call("c3_changes", `{"topic":"faultdef"}`);
@@ -94,4 +103,16 @@ fn void topic_is_the_query_of_the_old_tools_and_an_alias() @test
 	assert(!c.contains("does not take") && !c.contains("give query"), "%s", c);
 	String d = call("c3_lookup", `{"query":"printfn","topic":"zzzqqq"}`);
 	assert(d.contains("printfn") && !d.contains("zzzqqq"), "%s", d);
+}
+
+fn void an_old_tool_without_arguments_is_forwarded() @test
+{
+	String a = call_raw(`{"name":"c3_syntax"}`);
+	assert(a.contains("c3_syntax is called c3_search") && a.contains("attributes") && !a.contains("unknown tool"), "%s", a);
+	String b = call_raw(`{"name":"c3_changes","arguments":null}`);
+	assert(!b.contains("unknown tool"), "%s", b);
+	// a name that never was a tool, with and without arguments
+	assert(call_raw(`{"name":"c3_nothing"}`).contains("unknown tool"));
+	// a current tool without arguments is the library's business, as before
+	assert(call_raw(`{"name":"c3_lookup"}`).contains("give query"));
 }

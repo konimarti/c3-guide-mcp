@@ -180,7 +180,6 @@ fn String handle(mcp::Server* s, Allocator a, String line)
 	mcp::Tool* t = s.find_tool(name);
 	if (!t)
 	{
-		if (!args) return s.handle(a, line);
 		String note;
 		String forwarded = forward_legacy(a, id, name, args, &note);
 		if (forwarded.len == 0) return s.handle(a, line);
