@@ -1,5 +1,5 @@
 module c3guide::test::live;
-import c3guide::live, c3guide::corpus, c3guide::check, c3guide::search, c3guide::test::support;
+import c3guide::live, c3guide::corpus, c3guide::check, c3guide::search, c3guide::util, c3guide::test::support;
 import std::io::path;
 import std::core::string, std::collections::map, std::os::env, std::io;
 
@@ -140,4 +140,37 @@ fn void a_build_tree_with_two_copies_of_the_library_still_works() @test
 	Entry[] live = live::read_live(fake)!!;
 	defer free_live(live);
 	assert(live.len == 1200, "%d entries", (int)live.len);
+}
+
+// docgen runs in our scratch directory (proc::neutral_cwd) and evaluates `env::PROJECT_PATH` to it: the answer must
+// say `<project>`, not /tmp/c3guide-<digits> (CI saw exactly that leak once the run moved out of the server's directory).
+fn void the_directory_docgen_ran_in_is_redacted() @test
+{
+	Entry[] got = live::entries_from_json(`{"modules": {"std::core::env": {"variables": [
+		{"name": "PROJECT_PATH", "kind": "variable", "uid": "std::core::env::PROJECT_PATH", "type": {"name": "String"},
+		 "value": "/tmp/c3guide-1/x", "file": "lib/std/core/env.c3:176:14"}]}}}`, "/tmp/c3guide-1")!!;
+	defer free_live(got);
+	assert(got.len == 1, "%d entries", (int)got.len);
+	assert(got[0].body.contains("<project>/x"), "body: %s", got[0].body);
+	assert(!got[0].body.contains("c3guide-"), "body: %s", got[0].body);
+}
+
+// docgen may print the directory with its links resolved (macOS: /var/folders/... is /private/var/folders/...).
+fn void the_real_path_of_that_directory_is_redacted_too() @test
+{
+	Path dir = support::make_temp_dir("c3cwd");
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	support::sh(string::tformat("mkdir -p '%s/real' && ln -s '%s/real' '%s/link'", root, root, root));
+	String real = util::canonical(string::tformat("%s/real", root));
+	assert(real.len > 0);
+	String json_text = string::tformat(`{"modules": {"std::x": {"variables": [
+		{"name": "P", "kind": "variable", "uid": "std::x::P", "type": {"name": "String"}, "value": "%s/y", "file": "lib/std/x.c3:1:1"}]}}}`, real);
+	Entry[] got = live::entries_from_json(json_text, string::tformat("%s/link", root))!!;
+	defer free_live(got);
+	assert(got.len == 1, "%d entries", (int)got.len);
+	assert(got[0].body.contains("<project>/y") && !got[0].body.contains(root), "body: %s", got[0].body);
+	// the longer one first: the shorter inside it must not leave a fragment
+	assert(live::redact_cwd("/private/var/x/y", "/var/x", "/private/var/x") == "<project>/y");
+	assert(live::redact_cwd("/private/var/x/y", "/private/var/x", "/var/x") == "<project>/y");
 }

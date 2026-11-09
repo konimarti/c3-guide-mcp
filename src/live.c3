@@ -165,8 +165,9 @@ fn Entry make_entry(String kind, String title, String body, String loc)
 	return { kind.copy(mem), title.copy(mem), body.copy(mem), loc.copy(mem) };
 }
 
-// The public symbols of one module of the docgen output, appended to `out`.
-fn void add_module(Object* mod, String cwd, List{Entry}* out)
+// The public symbols of one module of the docgen output, appended to `out`. `cwd` and `real_cwd` are the directory
+// docgen ran in, as given and with links resolved ("" when the same): both are replaced by `<project>`.
+fn void add_module(Object* mod, String cwd, String real_cwd, List{Entry}* out)
 {
 	foreach (k : KINDS)
 	{
@@ -181,7 +182,7 @@ fn void add_module(Object* mod, String cwd, List{Entry}* out)
 			String doc = doc_text(it);
 			String body = doc.len > 0 ? string::tformat("%s\n%s", signature(it), doc) : signature(it);
 			// `env::PROJECT_PATH` evaluates to the directory docgen ran in: keep that machine's path out of the answers
-			if (cwd.len > 1) body = util::redact(body, cwd, "<project>");
+			body = redact_cwd(body, cwd, real_cwd);
 			// docgen prints the path relative to where the server runs, or absolute, or through a symlink: every
 			// standard library file lives under lib/std, so keep the path from there
 			String file = text(it, "file");
@@ -192,18 +193,32 @@ fn void add_module(Object* mod, String cwd, List{Entry}* out)
 	}
 }
 
-// The symbol entries of a docgen JSON text.
-fn Entry[]? entries_from_json(String json_text)
+// `s` with the two spellings of the docgen directory replaced by `<project>`, the longer first: one may contain the
+// other (macOS: /var/folders/... is /private/var/folders/...), and the shorter first would leave a fragment behind.
+fn String redact_cwd(String s, String a, String b)
+{
+	if (b.len > a.len) { String t = a; a = b; b = t; }
+	if (a.len > 1) s = util::redact(s, a, "<project>");
+	if (b.len > 1) s = util::redact(s, b, "<project>");
+	return s;
+}
+
+// The symbol entries of a docgen JSON text. `cwd`: the directory docgen ran in (default: ours).
+fn Entry[]? entries_from_json(String json_text, String cwd = "")
 {
 	Object* dg = json::parse(tmem, json_text)!;
 	Object* modules = child(dg, "modules");
 	List{Entry} out;
 	out.init(mem);
-	String cwd = "";
-	if (try here = path::tcwd()) cwd = (String)here;
+	if (cwd.len == 0)
+	{
+		if (try here = path::tcwd()) cwd = (String)here;
+	}
+	String real_cwd = cwd.len > 0 ? util::canonical(cwd) : "";
+	if (real_cwd == cwd) real_cwd = "";
 	modules.@each_entry(; String key, Object* mod)
 	{
-		add_module(mod, cwd, &out);
+		add_module(mod, cwd, real_cwd, &out);
 	};
 	return out.array_view();
 }
@@ -262,13 +277,17 @@ fn Entry[]? read_live(String binary)
 
 fn Entry[]? docgen_entries(String binary, String libstd) => @pool()
 {
+	// docgen runs in our scratch directory (never our own: c3c reads every *.c3l there), and `env::PROJECT_PATH`
+	// evaluates to it: entries_from_json must redact that directory, not ours
+	String cwd = proc::neutral_cwd();
+	if (cwd.len == 0) return NO_STDLIB~;
 	String[] argv = { binary, "--trust=none", "docgen", libstd, "--json" };
 	int status = 0;
 	bool timed_out = false;
-	String? out = proc::run_capped(argv, &status, &timed_out, { .deadline_ms = DOCGEN_MS, .max_output = MAX_DOCGEN });
+	String? out = proc::run_capped(argv, &status, &timed_out, { .deadline_ms = DOCGEN_MS, .max_output = MAX_DOCGEN, .cwd = cwd });
 	if (catch out) return NO_STDLIB~;
 	if (timed_out || status != 0 || out.len == 0) return NO_STDLIB~;
-	Entry[] live = entries_from_json(out)!;
+	Entry[] live = entries_from_json(out, cwd)!;
 	if (live.len < 1000) return NO_STDLIB~;   // an empty or partial answer is not a standard library
 	return live;
 }
