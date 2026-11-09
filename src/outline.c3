@@ -374,16 +374,24 @@ fn void rank_into(String text, String query, String[] terms, List{Found}* acc)
 
 // The directories a path stands for: a project is its src/ plus its libraries (dependency-search-paths of project.json,
 // else deps/); anything else is the path itself.
-fn void scan_roots(String root, List{String}* bases)
+// `deep`: the folder and everything below it (`dir/**`), else only the files in it (`dir/*`, `./*`). A `dir` that is a file
+// is that one source (`sources` may name one).
+struct Base
+{
+	String dir;
+	bool deep;
+}
+
+fn void scan_roots(String root, List{Base}* bases)
 {
 	String manifest = string::tformat("%s/project.json", root);
 	if (!file::exists(manifest))
 	{
-		bases.push(root);
+		bases.push({ root, true });
 		return;
 	}
 	String src = string::tformat("%s/src", root);
-	bases.push(file::is_dir(src) ? src : root);
+	bases.push({ file::is_dir(src) ? src : root, true });
 	bool has_deps = false;
 	char[]? data = file::load_temp(manifest);
 	if (try data)
@@ -407,7 +415,13 @@ fn void scan_roots(String root, List{String}* bases)
 						String folder = string::tformat("%s/%s", root, pattern[:cut]);
 						String real = util::canonical(folder);
 						String home = util::canonical(root);
-						if (real.len > 0 && util::inside(home, real) && file::is_dir(real) && real != util::canonical(src) && real != home) bases.push(real);
+						if (real.len == 0 || !util::inside(home, real)) continue;
+						bool deep = pattern.ends_with("**");
+						bool wildcard = cut < pattern.len;
+						// `./*` and `*` are the project's own folder (its files, not what is below), `**` all of it
+						if (file::is_dir(real) && (real != util::canonical(src) || !deep) && real != home) { bases.push({ real, deep }); }
+						else if (real == home && wildcard && file::is_dir(real)) { bases.push({ real, deep }); }
+						else if (!wildcard && file::is_file(real) && util::is_c3_file(real)) { bases.push({ real, false }); }
 					}
 				}
 			}
@@ -428,7 +442,7 @@ fn void scan_roots(String root, List{String}* bases)
 						String home = util::canonical(root);
 						String parent = home[:home.rindex_of("/") ?? 0];
 						if (real.len == 0 || !(util::inside(home, real) || (parent.len > 1 && util::inside(parent, real) && real != "/"))) continue;
-						if (file::is_dir(full)) { bases.push(full); has_deps = true; }
+						if (file::is_dir(full)) { bases.push({ full, true }); has_deps = true; }
 					}
 				}
 			}
@@ -439,16 +453,68 @@ fn void scan_roots(String root, List{String}* bases)
 		foreach (name : (String[]){ "deps", "lib" })
 		{
 			String dir = string::tformat("%s/%s", root, name);
-			if (file::is_dir(dir)) bases.push(dir);
+			if (file::is_dir(dir)) bases.push({ dir, true });
 		}
+	}
+}
+
+// The source files and library archives a path stands for, each once: a project's `src` and the folders and files its
+// `sources` name (`./*` the project's own folder), its libraries; a file or any other folder as it is.
+fn void scan_files(String base, List{String}* files)
+{
+	if (!file::is_dir(base))
+	{
+		files.push(base);
+		return;
+	}
+	List{Base} bases;
+	bases.init(tmem);
+	scan_roots(base, &bases);
+	foreach (b : bases)
+	{
+		if (!file::is_dir(b.dir))
+		{
+			push_unique(files, b.dir);
+			continue;
+		}
+		Path? bp = path::new(tmem, b.dir);
+		if (catch bp) continue;
+		List{String} found;
+		found.init(tmem);
+		if (b.deep) { collect(bp, &found, 0); }
+		else { collect_here(bp, &found); }
+		foreach (f : found) push_unique(files, f);
+	}
+}
+
+fn void push_unique(List{String}* files, String f)
+{
+	foreach (x : files) if (x == f) return;
+	files.push(f);
+}
+
+// The sources and archives directly in `dir`.
+fn void collect_here(Path dir, List{String}* files)
+{
+	PathList? entries = path::ls(tmem, dir, no_dirs: true, relative: true);
+	if (catch entries) return;
+	foreach (e : entries)
+	{
+		String name = e.basename();
+		Path? full = dir.tappend(name);
+		if (catch full) continue;
+		if (files.len() >= MAX_FILES) return;
+		if (path::is_link(full) || path::is_dir(full)) continue;
+		if (util::is_c3_file(name) || is_archive(name)) files.push(string::tformat("%s", (String)full));
 	}
 }
 
 const int MAX_FOUND = 200;
 
 // Declarations in the project at `root` (a project directory, or any path) that match `query`: a name or a description.
-// Best matches first, at most `max` lines of the form "file:row  declaration -- doc". *count gets how many matched.
-fn String project_lookup(String root_arg, String query, int max, int* count, String* scope)
+// Best matches first, at most `max` lines of the form "file:row  declaration -- doc". *count gets how many matched, *best_rank
+// how well the best one matches a name (0 declares it, 1 contains it, 2 mentions it).
+fn String project_lookup(String root_arg, String query, int max, int* count, String* scope, int* best_rank = null)
 {
 	String root = root_arg.len > 0 ? root_arg : context::project();
 	*count = 0;
@@ -478,30 +544,23 @@ fn String project_lookup(String root_arg, String query, int max, int* count, Str
 	}
 	else
 	{
-		List{String} bases;
-		bases.init(tmem);
-		scan_roots(r, &bases);
+		List{String} files;
+		files.init(tmem);
+		scan_files(r, &files);
 		int scanned = 0;
-		foreach (b : bases)
+		foreach (f : files)
 		{
-			List{String} files;
-			files.init(tmem);
-			Path? bp = path::new(tmem, b);
-			if (catch bp) continue;
-			collect(bp, &files, 0);
-			foreach (f : files)
-			{
-				if (scanned++ >= (int)MAX_FILES || acc.len() >= MAX_FOUND) break;
-				String shown = f.starts_with(r) && f.len > r.len + 1 ? f[r.len + 1..] : f;
-				String text = is_archive(f) ? archive_outline(f, shown, needle) : outline_file(f, shown, needle);
-				rank_into(text, query, terms, &acc);
-			}
+			if (scanned++ >= (int)MAX_FILES || acc.len() >= MAX_FOUND) break;
+			String shown = f.starts_with(r) && f.len > r.len + 1 ? f[r.len + 1..] : f;
+			String text = is_archive(f) ? archive_outline(f, shown, needle) : outline_file(f, shown, needle);
+			rank_into(text, query, terms, &acc);
 		}
 	}
 	if (acc.len() == 0) return "";
 	Found[] sorted = acc.array_view();
 	sort::quicksort(sorted, fn int(Found a, Found b) => a.rank != b.rank ? a.rank - b.rank : a.seq - b.seq);
 	int best = sorted[0].rank;
+	if (best_rank) *best_rank = terms.len > 0 ? 0 : best;   // 0 = a declaration of exactly this name (a description has no such thing: 0)
 	// declarations that merely mention the name in their parameters are shown only when nothing declares it
 	DString out = dstring::temp();
 	foreach (f : sorted)
@@ -703,22 +762,13 @@ fn String refs_reply(String query, String root_arg, bool stdlib, int limit, Stri
 		if (!file::exists(base)) return string::tformat("'%s' does not exist", util::clip(root, 100));
 		label = base;
 	}
-	List{String} bases;
-	bases.init(tmem);
-	if (stdlib || !file::is_dir(base)) { bases.push(base); }
-	else { scan_roots(base, &bases); }
 	DString out = dstring::temp();
-	foreach (b : bases)
+	if (stdlib)
 	{
-		if (!stdlib && !file::is_dir(b))
-		{
-			files.push(b);
-			continue;
-		}
-		Path? bp = path::new(tmem, b);
-		if (catch bp) continue;
-		collect(bp, &files, 0);
+		Path? bp = path::new(tmem, base);
+		if (try bp) collect(bp, &files, 0);
 	}
+	else { scan_files(base, &files); }
 	RefState st = { .out = &out, .limit = limit, .rename_to = rename_to };
 	int archives = 0;
 	foreach (f : files)

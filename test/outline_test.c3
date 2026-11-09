@@ -382,3 +382,67 @@ fn void a_project_whose_sources_are_not_in_src_is_searched() @test
 	assert(tools::c3_refs("entry_point", root).contains("2 use(s)"), "%s", tools::c3_refs("entry_point", root));
 	assert(tools::c3_lookup("entry_point", root).contains("main.c3"));
 }
+
+// A project the way yaml.c3l is laid out: `"sources": ["./*", "v2/*", "src/test/**"]`, sources at the root, in v2 and in src/test.
+fn Path root_sources_project() @local
+{
+	Path dir = proc::scratch_dir()!!;
+	String root = (String)dir;
+	path::mkdir(path::new(tmem, string::tformat("%s/src/test/parser", root))!!, recursive: true)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/v2", root))!!)!!;
+	path::mkdir(path::new(tmem, string::tformat("%s/other", root))!!)!!;
+	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"./*\", \"v2/*\", \"src/test/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
+	file::save(string::tformat("%s/scanner.c3", root), "module yaml::scanner;\nstruct Scanner { int pos; }\nfn int? Scanner.next_token(&self) => 1;\nfn void use_it(Scanner* s) { s.next_token()!!; }\n")!!;
+	file::save(string::tformat("%s/parser.c3", root), "module yaml::parser;\nstruct Parser { int depth; }\nfn int Parser.next(&self) => 2;\n")!!;
+	file::save(string::tformat("%s/v2/event.c3", root), "module yaml::v2;\nconst int QUEUE_SIZE = 16;\nfn int Event.next(&self) => 3;\n")!!;
+	file::save(string::tformat("%s/src/test/parser/queue_test.c3", root), "module yaml::queue_test;\nfn void next_token_does_not_shift_the_queue() @test { Scanner s; s.next_token()!!; }\n")!!;
+	file::save(string::tformat("%s/other/not_a_source.c3", root), "module yaml::other;\nfn int next_token_elsewhere() => 4;\n")!!;
+	return dir;
+}
+
+fn void lookup_honours_root_level_sources_and_lists_a_hit_once() @test
+{
+	Path dir = root_sources_project();
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	int count;
+	String scope;
+	String r = outline::project_lookup(root, "next_token", 10, &count, &scope);
+	assert(r.contains("scanner.c3:3") && r.contains("Scanner.next_token"), "the root-level source: %s", r);
+	assert(r.contains("queue_test.c3:2"), "%s", r);
+	// src/test/** is read twice by a naive scan (src and the pattern): the hit is listed once
+	int at = 0;
+	int times = 0;
+	while (at >= 0)
+	{
+		sz? i = r[at..].index_of("queue_test.c3:2");
+		if (catch i) break;
+		times++;
+		at += (int)i + 1;
+	}
+	assert(times == 1, "listed %d times: %s", times, r);
+	String p = outline::project_lookup(root, "Parser.next", 10, &count, &scope);
+	assert(p.contains("parser.c3:3"), "%s", p);
+	// the folder `other` is not named by any pattern, and v2/* is read
+	assert(!r.contains("not_a_source"), "%s", r);
+	String v = outline::project_lookup(root, "Event.next", 10, &count, &scope);
+	assert(v.contains("v2/event.c3:3"), "%s", v);
+	// c3_refs reads the same files, each once
+	String u = outline::refs_reply("next_token", root, false, 30);
+	assert(u.contains("3 use(s) of 'next_token' in 2 file(s)") && u.contains("scanner.c3") && u.contains("queue_test.c3"), "%s", u);
+}
+
+fn void an_exact_library_method_comes_before_a_weak_project_hit() @test
+{
+	Path dir = root_sources_project();
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	String r = tools::c3_lookup("File.size", path: root, examples: 0);
+	sz? std_at = r.index_of("std::io::file::File.size");
+	sz? proj_at = r.index_of("QUEUE_SIZE");
+	assert(@ok(std_at) && @ok(proj_at), "%s", r);
+	assert(std_at!! < proj_at!!, "%s", r);
+	// a declaration of the project that is exactly the name stays first
+	String own = tools::c3_lookup("Scanner.next_token", path: root, examples: 0);
+	assert(own.starts_with("In "), "%s", own);
+}

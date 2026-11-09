@@ -439,12 +439,19 @@ fn String lookup_one(String q, String path, int examples, bool source)
 {
 	int pcount = 0;
 	String pscope = "";
-	String proj = outline::project_lookup(path, q, 10, &pcount, &pscope);
+	int pbest = 0;
+	String proj = outline::project_lookup(path, q, 10, &pcount, &pscope, &pbest);
 	bool found_std = false;
 	int exact = 0;
 	String std = symbol_reply(q, &found_std, &exact);
 	DString out = dstring::temp();
-	if (pcount > 0)
+	if (pcount > 0 && pbest > 0 && found_std && exact >= 1 && exact <= 2 && !q.contains(" "))
+	{
+		// nothing in the project declares this name, only names that contain it; the library has exactly it
+		out.append(std);
+		out.appendf("\nIn %s%s, names that merely contain '%s' (%d):\n%s", pscope, path.len == 0 ? " (the project you last used; give path for another)" : "", util::clip(q, 40), pcount, proj);
+	}
+	else if (pcount > 0)
 	{
 		out.appendf("In %s%s (%d match%s):\n%s", pscope, path.len == 0 ? " (the project you last used; give path for another)" : "", pcount, pcount == 1 ? "" : "es", proj);
 		if (found_std && exact > 2)
