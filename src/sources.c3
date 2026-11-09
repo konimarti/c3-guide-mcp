@@ -118,35 +118,49 @@ fn void project_libraries(String root, List{String}* dirs, List{String}* names)
 	if (m) strings_of(m, "dependencies", names);
 }
 
-// True when the text defines a function called `main`: `fn void main(`, `fn int main (String[] args)`, `fn int? main(`.
+// True when the text defines a function called `main`: `fn void main(`, `fn int? main (String[] args)`, also with the return
+// type and the name on different lines. Comments (line, block, doc) and string literals are not code.
 fn bool defines_main(String src)
 {
-	sz at = 0;
-	while (at < src.len)
+	sz i = 0;
+	while (i < src.len)
 	{
-		sz? hit = src[at..].index_of("main");
-		if (catch hit) return false;
-		sz i = at + hit;
-		at = i + 4;
-		if (i == 0 || !(src[i - 1] == ' ' || src[i - 1] == '\t')) continue;   // `x.main`, `domain`
-		sz k = at;
-		while (k < src.len && (src[k] == ' ' || src[k] == '\t')) k++;
-		if (k >= src.len || src[k] != '(') continue;
-		sz line = i;
-		while (line > 0 && src[line - 1] != '\n') line--;
-		String before = src[line:i - line];
-		if (before.contains("//")) continue;
-		// `fn` starts the declaration: what lies between it and `main` is the return type, which has no `(`, `;` or `=`
-		sz fn_at = -1;
-		for (sz w = 0; w + 2 <= before.len; w++)
+		i = util::skip_blank(src, i);
+		if (i >= src.len) break;
+		char c = src[i];
+		if (c == '"' || c == '\'' || c == '`')
 		{
-			bool word_start = w == 0 || before[w - 1] == ' ' || before[w - 1] == '\t';
-			if (word_start && before[w] == 'f' && before[w + 1] == 'n' && (w + 2 == before.len || before[w + 2] == ' ' || before[w + 2] == '\t')) fn_at = w;
+			bool plain;
+			i = util::skip_literal(src, i, &plain);
+			continue;
 		}
-		if (fn_at < 0) continue;
-		String between = before[fn_at + 2..];
-		if (between.contains("(") || between.contains(";") || between.contains("=")) continue;
-		return true;
+		if (!util::ident_char(c)) { i++; continue; }
+		sz start = i;
+		while (i < src.len && util::ident_char(src[i])) i++;
+		if (src[start:i - start] != "fn" || (start > 0 && src[start - 1] == '.')) continue;
+		// the declaration: up to its `(`, the last name before it is the function's
+		String last = "";
+		int depth = 0;
+		sz j = i;
+		while (j < src.len)
+		{
+			j = util::skip_blank(src, j);
+			if (j >= src.len) break;
+			char d = src[j];
+			if (d == '"') break;
+			if (d == '{') depth++;
+			if (d == '}') { if (--depth < 0) break; }
+			if (d == '(' && depth == 0) { if (last == "main") return true; break; }
+			if ((d == ';' || d == '=') && depth == 0) break;
+			if (util::ident_char(d) || d == '.' || d == ':')
+			{
+				sz w = j;
+				while (j < src.len && (util::ident_char(src[j]) || src[j] == '.' || src[j] == ':')) j++;
+				last = src[w:j - w];
+				continue;
+			}
+			j++;
+		}
 	}
 	return false;
 }

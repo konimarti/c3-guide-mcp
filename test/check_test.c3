@@ -1084,4 +1084,24 @@ fn void defines_main_reads_function_definitions_only() @test
 	assert(sources::defines_main("fn int? main (String[] args) { return 0; }"));
 	assert(!sources::defines_main("module a;\nfn void domain() {}\nfn void f() { x.main(); main(); }"));
 	assert(!sources::defines_main("// fn void main() {}\nfn void f() {}"));
+	// the name on another line than `fn`
+	assert(sources::defines_main("module a;\nfn void\nmain() {}"));
+	assert(sources::defines_main("fn\n\tint?\n\tmain\n\t(String[] args) => 0;"));
+	// comments and strings are not code
+	assert(!sources::defines_main("module h;\n/* fn void main() {} */\nfn int answer() => 42;"));
+	assert(!sources::defines_main("<* Example:\n fn void main() {} *>\nfn int answer() => 42;"));
+	assert(!sources::defines_main("const String S = \"fn void main() {}\";\nfn int answer() => 42;"));
+	assert(!sources::defines_main("fn void Foo.main(&self) {}"));
+}
+
+// A project file that holds only the text `fn void main` in a comment is not dropped, and a main split over lines is.
+fn void a_snippet_main_does_not_misread_project_files() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String proj = snippet_project((String)dir, "p");
+	file::save(string::tformat("%s/src/helper.c3", proj), "module helper2;\n/* fn void main() {} */\nfn int answer() => 42;\n")!!;
+	file::save(string::tformat("%s/src/main.c3", proj), "module app;\nfn void\nmain() {}\n")!!;
+	String r = check::c3_run("import helper2, std::io;\nfn void main() { io::printfn(\"%d\", helper2::answer()); }", path: proj);
+	assert(r.starts_with("42"), "%s", r);
 }
