@@ -346,3 +346,33 @@ fn void an_alias_shows_its_target_and_the_methods_of_it() @test
 	// and the same by the short name
 	assert(tools::symbol_reply("Path").contains("Alias for"), "%s", tools::symbol_reply("Path"));
 }
+
+// scope=changes with a version asks for that release (it used to rank 0.8.4 and 0.6.0 first for "0.8.5")
+fn void a_version_query_returns_that_releases_notes() @test
+{
+	foreach (q : (String[]){ "0.8.5", "v0.8.5", "0.8.5_1" })
+	{
+		String r = tools::changes_reply(q, 3);
+		assert(r.starts_with("### 0.8.5 Change list"), "%s: %s", q, r);
+		assert(!r.contains("### 0.8.4") && !r.contains("### 0.6.0"), "%s: %s", q, r);
+	}
+	String one = tools::changes_reply("0.8.5", 1);
+	assert(one.starts_with("### 0.8.5 Change list > Changes") && !one.contains("Stdlib changes") && !one.contains("> Fixes"), "the limit applies, changes before fixes: %s", one);
+	// a minor version is all its releases, newest first
+	String minor = tools::changes_reply("0.8", 5);
+	assert(minor.starts_with("### 0.8.5"), "%s", minor);
+	// the words filter within the release
+	String words = tools::changes_reply("0.8.5 removed", 3);
+	assert(words.contains("Removed experimental support") && !words.contains("### 0.8.4"), "%s", words);
+	String none = tools::changes_reply("0.8.5 zzzzqq", 3);
+	assert(none.starts_with("nothing in the release notes of 0.8.5"), "%s", none);
+	// a release the snapshot does not have says so and names the ones it has
+	String newer = tools::changes_reply("0.8.6", 3);
+	assert(newer.contains("no notes for it") && newer.contains("0.8.5") && newer.contains("newer than the snapshot"), "%s", newer);
+	assert(!newer.contains("### 0.8.4"), "%s", newer);
+	String older = tools::changes_reply("0.2.0", 3);
+	assert(older.contains("no notes for it") && older.contains("0.3.0"), "%s", older);
+	// through the tool, and a question that merely holds a version still gets the general answer
+	assert(tools::c3_search("0.8.5", "changes").starts_with("### 0.8.5"));
+	assert(!tools::c3_search("what was renamed in 0.7 for fault", "all").contains("nothing in the release notes of"));
+}

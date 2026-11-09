@@ -50,7 +50,8 @@ fn String matching_lines(String body, String[] terms, bool all)
 	int n = 0;
 	foreach (line : body.tsplit("\n"))
 	{
-		if (!line.starts_with("-") || n >= 6) continue;
+		if (!line.starts_with("-") || n >= (terms.len == 0 ? 8 : 6)) continue;
+		if (terms.len == 0) { out.appendf("%s\n", util::clip(line, 240)); n++; continue; }   // a whole release: its first lines
 		String low = line.to_lower_tcopy();
 		int hit = 0;
 		foreach (t : terms) if (has_word(low, t) || has_word(low, string::tformat("%ss", t))) hit++;
@@ -103,7 +104,7 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 	// a question about what changed is answered by the release notes too
 	if (asks_about_change(q))
 	{
-		String notes = changes_reply(q, 2);
+		String notes = changes_reply(q, 2, false);
 		if (!notes.starts_with("nothing in the release notes")) reply = string::tformat("%s\nRelease notes:\n%s", reply, notes);
 	}
 	return string::tformat("%s%s", reply, manual_note());
@@ -182,8 +183,109 @@ fn String search_all(String query, int limit, String file)
 	return util::clip(out.str_view(), MAX_REPLY);
 }
 
-fn String changes_reply(String topic, int limit = 3)
+// `0.8.5`, `v0.8.5`, `0.8.5_1`, `0.8` -> `0.8.5` / `0.8` (the release notes are kept by release, a `_1` is a rebuild of it).
+// "" for a word that is not a version.
+fn String version_token(String t)
 {
+	String v = t.starts_with("v") || t.starts_with("V") ? t[1..] : t;
+	v = v[:v.index_of_char('_') ?? v.len];
+	String[] parts = v.tsplit(".");
+	if (parts.len < 2 || parts.len > 3) return "";
+	foreach (p : parts)
+	{
+		if (p.len == 0 || p.len > 3) return "";
+		foreach (c : p) if (!c.is_digit()) return "";
+	}
+	return v;
+}
+
+// The release of a release-notes entry: "C3C Release Notes > 0.8.5 Change list > Fixes" -> "0.8.5".
+fn String entry_version(String title)
+{
+	String[] parts = title.tsplit(" > ");
+	return parts.len < 2 ? "" : parts[1].tsplit(" ")[0];
+}
+
+// A query that holds a version (`0.8.5`, `v0.8.5 renamed`) asks for that release: its sections, newest release first,
+// the rest of the query filtering their lines. "" when the query holds no version.
+fn String version_changes(String topic, int limit, bool strict)
+{
+	String ver = "";
+	DString rest = dstring::temp();
+	foreach (t : topic.tsplit(" "))
+	{
+		String w = t.trim(" ,;\t");
+		if (w.len == 0) continue;
+		String v = ver.len == 0 ? version_token(w) : "";
+		if (v.len > 0) { ver = v; }
+		else { rest.appendf("%s ", w); }
+	}
+	if (ver.len == 0) return "";
+	String[] terms = search::query_terms(search::words(rest.str_view().trim(), false));
+	int newest = 0;
+	int oldest = 1000000;
+	String newest_name = "";
+	String oldest_name = "";
+	List{int} picked;
+	picked.init(tmem);
+	foreach (i, &e : corpus::entries)
+	{
+		if (e.kind != "change") continue;
+		String v = entry_version(e.title);
+		if (v.len == 0) continue;
+		int key = version_key(e.title);
+		if (key > newest) { newest = key; newest_name = v; }
+		if (key < oldest) { oldest = key; oldest_name = v; }
+		if (v == ver || v.starts_with(string::tformat("%s.", ver))) picked.push((int)i);
+	}
+	if (picked.len() == 0)
+	{
+		return string::tformat("nothing in the release notes for %s: the snapshot (c3c %s) has no notes for it; it has %s to %s.%s", ver, corpus::snapshot_version, oldest_name, newest_name,
+			version_key_of(ver) > newest ? " That release is newer than the snapshot: its changes are in the compiler's own release notes (c3c --version says which one you run), and c3_check has the last word." : "");
+	}
+	int[] order = picked.array_view();
+	// the newest release first; in one release the changes before the fixes
+	sort::quicksort(order, fn int(int a, int b) {
+		String ta = corpus::entries[a].title;
+		String tb = corpus::entries[b].title;
+		int ka = version_key(ta);
+		int kb = version_key(tb);
+		if (ka != kb) return kb - ka;
+		int fa = ta.contains("> Fixes") ? 1 : 0;
+		int fb = tb.contains("> Fixes") ? 1 : 0;
+		return fa != fb ? fa - fb : a - b;
+	});
+	DString out = dstring::temp();
+	int shown = 0;
+	for (int pass = 0; pass < 2 && shown == 0; pass++)
+	{
+		foreach (i : order)
+		{
+			if (shown >= clamp(limit, 1, 5)) break;
+			Entry* e = &corpus::entries[i];
+			String lines = matching_lines(e.body, terms, pass == 0);
+			if (lines.len == 0) continue;
+			out.appendf("### %s\n%s", strip_prefix(e.title, "C3C Release Notes > "), lines);
+			shown++;
+		}
+		if (terms.len == 0) break;
+	}
+	if (out.len() == 0 && !strict) return "";   // a question that happens to hold a version: the general search answers
+	if (out.len() == 0) return string::tformat("nothing in the release notes of %s matches '%s'", ver, util::clip(rest.str_view().trim(), 80));
+	return util::clip(out.str_view(), MAX_REPLY);
+}
+
+fn int version_key_of(String ver)
+{
+	int key = 0;
+	foreach (n : ver.tsplit(".")) key = key * 100 + (n.to_int() ?? 0);
+	return ver.tsplit(".").len == 2 ? key * 100 : key;
+}
+
+fn String changes_reply(String topic, int limit = 3, bool strict = true)
+{
+	String by_version = version_changes(topic, limit, strict);
+	if (by_version.len > 0) return by_version;
 	String words = search::words(topic, false);   // `int.sizeof`, `String.split`, `0.8.0`: the punctuation is not part of a word
 	String[] terms = search::query_terms(words);
 	Hit[] hits = search::search(words, { "change" }, 24);
