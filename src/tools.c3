@@ -209,12 +209,14 @@ fn String search_all(String query, int limit, String file)
 
 // `0.8.5`, `v0.8.5`, `0.8.5_1`, `0.8` -> `0.8.5` / `0.8` (the release notes are kept by release, a `_1` is a rebuild of it).
 // "" for a word that is not a version.
-fn String version_token(String t)
+fn String version_token(String t, bool alone)
 {
 	String v = t.starts_with("v") || t.starts_with("V") ? t[1..] : t;
 	v = v[:v.index_of_char('_') ?? v.len];
 	String[] parts = v.tsplit(".");
 	if (parts.len < 2 || parts.len > 3) return "";
+	// `1.5` in "multiply by 1.5" is a number: two parts are a release only with a `v` or when they are the whole query
+	if (parts.len == 2 && !alone && !(t.starts_with("v") || t.starts_with("V"))) return "";
 	foreach (p : parts)
 	{
 		if (p.len == 0 || p.len > 3) return "";
@@ -240,7 +242,7 @@ fn String version_changes(String topic, int limit, bool strict)
 	{
 		String w = t.trim(" ,;\t");
 		if (w.len == 0) continue;
-		String v = ver.len == 0 ? version_token(w) : "";
+		String v = ver.len == 0 ? version_token(w, topic.trim().tsplit(" ").len == 1) : "";
 		if (v.len > 0) { ver = v; }
 		else { rest.appendf("%s ", w); }
 	}
@@ -264,6 +266,7 @@ fn String version_changes(String topic, int limit, bool strict)
 	}
 	if (picked.len() == 0)
 	{
+		if (!strict) return "";
 		return string::tformat("nothing in the release notes for %s: the snapshot (c3c %s) has no notes for it; it has %s to %s.%s", ver, corpus::snapshot_version, oldest_name, newest_name,
 			version_key_of(ver) > newest ? " That release is newer than the snapshot: its changes are in the compiler's own release notes (c3c --version says which one you run), and c3_check has the last word." : "");
 	}

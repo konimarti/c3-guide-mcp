@@ -403,3 +403,18 @@ fn void a_name_in_no_syntax_list_points_to_where_it_is() @test
 	assert(r.contains("none of the lists") && r.contains("c3_search") && r.contains("c3_lookup") && r.contains("builtins"), "%s", r);
 	assert(tools::syntax_reply("zzzqqqxx").contains("no such list"));
 }
+
+// a decimal number in a question is not a release
+fn void a_decimal_in_a_query_is_not_a_version() @test
+{
+	String r = tools::changes_reply("multiply by 1.5", 3);
+	assert(!r.contains("no notes for it") && !r.contains("newer than the snapshot"), "%s", r);
+	// but these are releases
+	assert(tools::changes_reply("0.8", 3).starts_with("### 0.8"));
+	assert(tools::changes_reply("v0.8", 3).starts_with("### 0.8"));
+	assert(tools::changes_reply("0.8.5", 3).starts_with("### 0.8.5"));
+	assert(tools::changes_reply("v0.8 removed", 3).starts_with("### 0.8") || tools::changes_reply("v0.8 removed", 3).contains("Removed"));
+	assert(tools::changes_reply("0.8.0 renamed", 3).starts_with("### 0.8.0"));
+	// a question with a release the snapshot lacks still falls back to the general search
+	assert(!tools::c3_search("what changed for fault in 9.9", "all").contains("no notes for it"));
+}
