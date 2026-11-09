@@ -34,6 +34,7 @@ check("initialize carries instructions", "instructions" in r[0]["result"], json.
 names = sorted(t["name"] for t in r[1]["result"]["tools"])
 check("tools/list = 6 tools", names == ["c3_check", "c3_lookup", "c3_refs", "c3_run", "c3_search", "c3_test"], str(names))
 check("instructions name every tool", all(n in r[0]["result"]["instructions"] for n in names))
+check("instructions say the tools are called directly", "directly" in r[0]["result"]["instructions"] and "no resources" in r[0]["result"]["instructions"], r[0]["result"]["instructions"][:200])
 check("tool call returns text", "fn sz? printfn" in r[2]["result"]["content"][0]["text"], json.dumps(r[2]))
 check("reply is capped", len(r[3]["result"]["content"][0]["text"]) <= MAX_TEXT)
 check("no argument is a plain message, not a protocol error", "query" in r[4]["result"]["content"][0]["text"], json.dumps(r[4]))
