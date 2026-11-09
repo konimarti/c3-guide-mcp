@@ -1,6 +1,6 @@
 module c3guide::test::tools;
 import c3guide::compiler;
-import c3guide::tools, c3guide::util, c3guide::search, c3guide::check, c3guide::test::support;
+import c3guide::tools, c3guide::util, std::os::env, c3guide::search, c3guide::check, c3guide::test::support;
 import std::core::string, std::time::clock;
 
 const sz MAX_TEXT = 3600;   // reply cap (3200) plus the cut marker
@@ -315,4 +315,34 @@ fn void several_names_in_one_lookup_are_answered_one_by_one() @test
 	assert(r.contains("to_upper_tcopy(") && !r.contains("Weak matches"), "%s", r);
 	String w = tools::c3_lookup("read a line from stdin", "", 0, false);   // plain words stay a description
 	assert(!w.contains("== "), "%s", w);
+}
+
+// `File` is declared in std::io and its methods in std::io::file: a type lists its methods whatever module declares them.
+fn void a_type_lists_methods_declared_in_another_module() @test
+{
+	String r = tools::symbol_reply("std::io::File");
+	assert(r.contains("Methods (") && r.contains("size") && r.contains("read_byte"), "%s", r);
+	// a type of the same name in an unrelated module does not take them
+	assert(tools::method_of("std::io::file::File.size", "std::io::File", false), "a module inside the other");
+	assert(tools::method_of("std::io::File.close", "std::io::File", false), "the same module");
+	assert(!tools::method_of("std::net::File.size", "std::io::File", false), "an unrelated module, two types of the name");
+	assert(tools::method_of("std::net::File.size", "std::io::File", true), "one type has the name: the methods are its");
+	assert(!tools::method_of("std::io::file::FileInfo.size", "std::io::File", true), "another type");
+	// a type with its methods in its own module is listed as before
+	String h = tools::symbol_reply("HashMap");
+	assert(h.contains("Methods (") && h.contains("get_ref"), "%s", h);
+}
+
+fn void an_alias_shows_its_target_and_the_methods_of_it() @test
+{
+	if (compiler::stdlib_root().len == 0) return;   // the source of the library is what says what the alias stands for
+	String r = tools::symbol_reply("std::io::path::Path");
+	$if env::WIN32:
+		assert(r.contains("Alias for PathWin"), "%s", r);
+	$else
+		assert(r.contains("Alias for PathPosix") && r.contains("this platform"), "%s", r);
+		assert(r.contains("Methods (") && r.contains("basename") && r.contains("tappend"), "%s", r);
+	$endif
+	// and the same by the short name
+	assert(tools::symbol_reply("Path").contains("Alias for"), "%s", tools::symbol_reply("Path"));
 }

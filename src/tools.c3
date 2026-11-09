@@ -594,19 +594,56 @@ fn bool alike(String a, String b)
 	return common >= 3 && common * 10 >= longer * 7;
 }
 
-// The names a type has as methods (`prefix.name`) or a module has as functions and macros (`prefix::name`), as one line.
+// How many types have this short name (`File`) in the library.
+fn int types_named(String name)
+{
+	int n = 0;
+	foreach (&e : corpus::entries) if (e.kind == "type" && util::last_part(e.title) == name) n++;
+	return n;
+}
+
+// Is `title` (`std::io::file::File.size`) a method of the type `type_uid` (`std::io::File`)? A method belongs to a type by the
+// type's name, whatever module declares it: `File` is in std::io, its methods are declared in std::io::file. Another type
+// of the same name in an unrelated module (`Socket` twice) does not get them: then the modules must be the same or one
+// inside the other.
+fn bool method_of(String title, String type_uid, bool only_one_type_has_the_name)
+{
+	sz dot = title.index_of_char('.') ?? -1;
+	if (dot < 0) return false;
+	String receiver = title[:dot];
+	if (receiver == type_uid) return true;
+	sz a = receiver.rindex_of("::") ?? -2;
+	sz b = type_uid.rindex_of("::") ?? -2;
+	if (receiver[a + 2..] != type_uid[b + 2..]) return false;
+	if (only_one_type_has_the_name) return true;
+	String rmod = a >= 0 ? receiver[:a] : "";
+	String tmod = b >= 0 ? type_uid[:b] : "";
+	return rmod == tmod || rmod.starts_with(string::tformat("%s::", tmod)) || tmod.starts_with(string::tformat("%s::", rmod));
+}
+
+// The names a type has as methods (`prefix.name`, whatever module declares them) or a module has as functions and macros
+// (`prefix::name`), as one line.
 fn String members_of(String prefix, bool methods)
 {
 	DString names = dstring::temp();
 	int count = 0;
+	bool single = methods && types_named(util::last_part(prefix)) <= 1;
 	foreach (&e : corpus::entries)
 	{
-		if (!corpus::is_symbol_kind(e.kind) || !e.title.starts_with(prefix) || e.title.len <= prefix.len + 1) continue;
-		String rest = e.title[prefix.len + 1..];
-		bool is_method = e.title[prefix.len] == '.';
-		if (methods ? !is_method : (e.title[prefix.len] != ':' || rest.contains("::") || rest.contains("."))) continue;
-		if (methods ? !(e.kind == "method" || e.kind == "mmethod") : false) continue;
-		rest = methods ? rest : rest[(rest.index_of(":") ?? -1) + 1..];
+		if (!corpus::is_symbol_kind(e.kind)) continue;
+		String rest;
+		if (methods)
+		{
+			if (!(e.kind == "method" || e.kind == "mmethod") || !method_of(e.title, prefix, single)) continue;
+			rest = e.title[(e.title.index_of_char('.') ?? 0) + 1..];
+		}
+		else
+		{
+			if (!e.title.starts_with(prefix) || e.title.len <= prefix.len + 1) continue;
+			rest = e.title[prefix.len + 1..];
+			if (e.title[prefix.len] != ':' || rest.contains("::") || rest.contains(".")) continue;
+			rest = rest[(rest.index_of(":") ?? -1) + 1..];
+		}
 		if (count++ > 0) names.append(", ");
 		names.append(rest);
 	}
@@ -625,6 +662,76 @@ fn String inherited_methods(String body)
 	base = base[:base.index_of("{") ?? base.len];   // `List{String}`: the methods are listed under `List`
 	String methods = members_of(base, true);
 	return methods.len == 0 ? "" : string::tformat("Inherited from %s: %s", base, methods);
+}
+
+// The declaration of the alias `e` as the installed library's source has it (its row is looked up by name, because the
+// snapshot's row belongs to another release), up to the first `;`, at most 6 lines. "" when the source is not there.
+fn String declaration_text(Entry* e)
+{
+	sz c1 = e.loc.rindex_of(":") ?? -1;
+	if (c1 <= 0) return "";
+	sz c2 = e.loc[:c1].rindex_of(":") ?? -1;
+	if (c2 <= 0) return "";
+	String root = compiler::stdlib_root();
+	if (root.len == 0) return "";
+	char[]? data = file::load_temp(string::tformat("%s/%s", root, e.loc[:c2]));
+	if (catch data) return "";
+	String[] lines = ((String)data).tsplit("\n");
+	String start = string::tformat("alias %s ", util::last_part(e.title));
+	DString out = dstring::temp();
+	bool found = false;
+	for (int i = 0; i < (int)lines.len && i < 100000; i++)
+	{
+		String l = lines[i][:lines[i].index_of("//") ?? lines[i].len];
+		if (!found && !l.trim().starts_with(start)) continue;
+		found = true;
+		out.appendf("%s ", l.trim());
+		if (l.contains(";") || out.len() > 600) break;
+	}
+	return out.str_view();
+}
+
+// An alias says what it stands for: `alias Path = env::WIN32 ? PathWin : PathPosix;` is PathPosix on every system but Windows.
+// The target's methods come with it. "" for a type that is not an alias.
+fn String alias_target(Entry* e)
+{
+	if (!e.body.starts_with("alias ") || e.body.contains("=")) return "";
+	String decl = declaration_text(e);
+	sz eq = decl.index_of_char('=') ?? -1;
+	if (eq < 0) return "";
+	String rhs = decl[eq + 1..];
+	rhs = rhs[:rhs.index_of_char(';') ?? rhs.len].trim();
+	if (rhs.len == 0) return "";
+	String target = rhs;
+	String how = "";
+	sz q = rhs.index_of_char('?') ?? -1;
+	if (q > 0)
+	{
+		String cond = rhs[:q].trim();
+		String[] branches = rhs[q + 1..].tsplit(" : ");
+		if (cond == "env::WIN32" && branches.len == 2)
+		{
+			bool win = false;
+			$if env::WIN32:
+				win = true;
+			$endif
+			target = (win ? branches[0] : branches[1]).trim();
+			how = win ? " (on Windows; elsewhere the other branch)" : " (on this platform; Windows has the other branch)";
+		}
+		else { return string::tformat("Alias: %s\n", util::clip(rhs, 200)); }
+	}
+	DString out = dstring::temp();
+	out.appendf("Alias for %s%s: `%s`\n", util::clip(target, 80), how, util::clip(rhs, 200));
+	String name = target[:target.index_of_char('{') ?? target.len];
+	foreach (&t : corpus::entries)
+	{
+		if (t.kind != "type" || t == e || !uid_matches(t.title, name)) continue;
+		out.appendf("  %s  (%s)\n  %s\n", t.title, t.loc, util::clip(t.body.tsplit("\n")[0], 160));
+		out.append(members_of(t.title, true));
+		out.append(inherited_methods(t.body));
+		break;
+	}
+	return out.str_view();
 }
 
 // `std::io::path`, `io::path`, `path`: the module, when it is one. Its functions and macros, names only.
@@ -671,6 +778,7 @@ fn String symbol_reply(String name, bool* found_out = null, int* exact_out = nul
 			if (e.kind != "type" || !uid_matches(e.title, n)) continue;
 			out.append(members_of(e.title, true));
 			out.append(inherited_methods(e.body));
+			out.append(alias_target(e));
 		}
 		return util::clip(out.str_view(), MAX_REPLY);
 	}
