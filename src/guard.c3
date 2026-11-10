@@ -362,6 +362,13 @@ fn String whole_tree_escape(String root, Scan* scan)
 	return "";
 }
 
+// True when a component of the path is `..`.
+fn bool has_dotdot(String p)
+{
+	foreach (part : p.tsplit("/")) if (part == "..") return true;
+	return false;
+}
+
 fn bool is_symlink(String f)
 {
 	Path? p = path::new(tmem, f);
@@ -384,10 +391,20 @@ fn String scan_patterns(String cwd, String home, List{String} patterns, Scan* sc
 		String why = sources::expand_pattern(cwd, pattern, &files, MAX_SCAN_FILES, &base, &entered);
 		if (why.len > 0) { *unsure = why; return ""; }
 		String tree = home;
+		// a pattern that stays inside by its spelling (not absolute, no `..`) is the project's own: where it really ends must be
+		// inside too (a link out is refused, never made a tree of its own). One that is spelled to leave (`../shared/**`, an
+		// absolute path) names a tree of its own.
+		bool spelled_inside = !pattern.starts_with("/") && !has_dotdot(pattern);
 		if (base.len > 0)
 		{
 			String real_base = util::canonical(base);
-			if (real_base.len > 0 && !util::inside(home, real_base)) tree = real_base;
+			String shown_base = base.ends_with("/") ? base[:base.len - 1] : base;
+			if (real_base.len == 0 && is_symlink(shown_base)) return at(shown_base, 0, "link that ends nowhere");
+			if (real_base.len > 0 && !util::inside(home, real_base))
+			{
+				if (spelled_inside) return at(shown_base, 0, "link leaves the project");
+				tree = real_base;
+			}
 		}
 		// a link to a folder is followed by c3c: where it ends must be inside the tree, even if only data lies there now
 		foreach (d : entered)
@@ -407,9 +424,17 @@ fn String scan_patterns(String cwd, String home, List{String} patterns, Scan* sc
 			String one_tree = tree;
 			if (base.len == 0)
 			{
-				// a file named as it is: one outside the project is a source of its own (read in its own folder)
-				if (real.len == 0) continue;   // it does not exist: c3c says so
-				if (!util::inside(home, real)) one_tree = real[:real.rindex_of("/") ?? 0];
+				// a file named as it is: one that is spelled to leave the project is a source of its own (read in its own folder)
+				if (real.len == 0)
+				{
+					if (is_symlink(f)) return at(f, 0, "link that ends nowhere");
+					continue;   // it does not exist: c3c says so
+				}
+				if (!util::inside(home, real))
+				{
+					if (spelled_inside) return at(f, 0, "link leaves the project");
+					one_tree = real[:real.rindex_of("/") ?? 0];
+				}
 			}
 			else if (real.len == 0)
 			{

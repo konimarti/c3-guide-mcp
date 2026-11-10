@@ -254,3 +254,38 @@ fn void c3_run_with_a_project_says_when_the_whole_tree_was_read() @test
 	String r = check::c3_run("import std::io;\nfn void main() { io::printn(\"hi\"); }", path: proj);
 	assert(r.starts_with("(scanned the whole tree because"), "%s", r);
 }
+
+// A link at the root of a pattern, or named as a source, that leaves the project (or ends nowhere) is refused: c3c compiles
+// what it points to, and the target's folder is not a tree of the project's own. A pattern that is spelled to leave
+// (`../shared/**`, an absolute path) is another thing: it names a folder of its own.
+fn void a_link_named_by_a_pattern_that_leaves_the_project_is_refused() @test
+{
+	$if !env::WIN32:
+		Path dir = proc::scratch_dir()!!;
+		defer (void)path::rmtree(dir);
+		String root = (String)dir;
+		put(root, "ext/secret.txt", "S3CRET");
+		put(root, "ext/evil.c3", "module evil;\nconst char[*] S = $embed(\"secret.txt\");\n");
+		String[] sources = { "\"link.c3\"", "\"sym_dir/**\"", "\"sym_dir/*\"", "\"sym_dir\"", "\"dangle.c3\"", "\"dangle_dir/**\"", "\"src/main.c3\", \"link.c3\"" };
+		String[] expect = { "link.c3: link leaves the project", "sym_dir: link leaves the project", "sym_dir: link leaves the project", "sym_dir: link leaves the project", "dangle.c3: link that ends nowhere", "dangle_dir: link that ends nowhere", "link.c3: link leaves the project" };
+		foreach (i, one : sources)
+		{
+			String proj = string::tformat("%s/p%d", root, i);
+			put(proj, "project.json", string::tformat("{ \"sources\": [%s], \"targets\": { \"app\": { \"type\": \"executable\" } } }", one));
+			put(proj, "src/main.c3", CLEAN_MAIN);
+			support::sh(string::tformat("cd '%s' && ln -s '%s/ext/evil.c3' link.c3 && ln -s '%s/ext' sym_dir && ln -s nowhere.c3 dangle.c3 && ln -s nowhere dangle_dir", proj, root, root));
+			String why = guard::project_escape(proj);
+			assert(why == expect[i], "%s: %s", one, why);
+			assert(has(check::c3_check(path: proj), "rejected"), "%s", one);
+		}
+		// spelled to leave: a folder and a file of their own, read in their own tree (clean here, so accepted)
+		String own = string::tformat("%s/own", root);
+		put(own, "project.json", "{ \"sources\": [\"src/**\", \"../shared/**\", \"../one.c3\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }");
+		put(own, "src/main.c3", CLEAN_MAIN);
+		put(root, "shared/s.c3", "module s;\nfn void f() {}\n");
+		put(root, "one.c3", "module one;\nfn void g() {}\n");
+		assert(guard::project_escape(own) == "", "%s", guard::project_escape(own));
+		put(root, "shared/bad.c3", "module bad;\nconst char C = $embed(\"/etc/passwd\")[0];\n");
+		assert(has(guard::project_escape(own), "bad.c3:2: $embed path"), "%s", guard::project_escape(own));
+	$endif
+}
