@@ -54,7 +54,7 @@ The `@test` functions in `test/*.c3` call the tool functions directly, so no bin
 
 ## Where the advice is written
 
-The same advice appears in four places: each tool's `@Desc` (`src/tools.c3`, `src/check.c3`), `INSTRUCTIONS` in `src/main.c3`, `integrations/claude-code/CLAUDE.md` (also compiled into the binary for `--setup`), and the README. The `@Desc` is canonical: change it first, then bring the other three in line. `src/main.c3` also dispatches the command line modes handled by `src/setup.c3`.
+The same advice appears in four places: each tool's `@Desc` (`src/tools.c3`, `src/check.c3`), `INSTRUCTIONS` in `src/main.c3`, `integrations/claude-code/CLAUDE.md` (also compiled into the binary for `--setup`), and the README. The `@Desc` is canonical: change it first, then bring the other three in line. The first line of `INSTRUCTIONS` is the action ("Before writing C3: c3_lookup every name, c3_check the code. Renames: c3_refs rename_to. Tests: c3_test."; Claude Code loads the tools deferred, so this line is what an agent sees first; `test/stdio_test.py` pins it). `c3_lookup source=true` shows the whole declaration (to its closing brace, at most 300 lines, a cut one says so): the advice says to use it instead of reading `lib/std` with sed. A compile error that names another platform gets one line about `platform=` (`check::platform_note`), and a refusal has a `Way out:` or an `If you trust it:` line; `test/next_step_test.c3` pins them. `src/main.c3` also dispatches the command line modes handled by `src/setup.c3`.
 
 ## Corpus checks
 

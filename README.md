@@ -46,7 +46,7 @@ It checks a snippet, a file or a whole project, for this platform or another (`p
 
 ### 2. A name is looked up once, wherever it lives
 
-`c3_lookup("allocator::free")` answers for the standard library, your project and its libraries in one call. For the standard library it returns the exact signature, source location, a working example, and with `source: true` the implementation:
+`c3_lookup("allocator::free")` answers for the standard library, your project and its libraries in one call. For the standard library it returns the exact signature, source location, a working example, and with `source: true` the whole implementation (use it instead of reading `lib/std` files with `sed`):
 
 ```
 c3_lookup("bits::ctz")
@@ -57,7 +57,7 @@ It exists on 20 types: char, char[<*>], ichar, ichar[<*>], int, ...
   macro int ctz(char self)  (lib/std/bits.c3:126:16)
 ```
 
-A name that does not exist says so, and says where it went: another module, a method of a type, a compiler builtin, or a release-note line about the rename. Do not know the name? Describe it: `c3_lookup("get environment variable")`. A description that matches little says so, instead of returning the nearest unrelated names. A type or module (`List`, `std::io::path`) lists its methods or functions.
+A name that does not exist says so, suggests the closest names (`did you mean:`, at most three, by the words of the name: `String.trepeat` gives `DString.append_repeat`), and says where it went: another module, a method of a type, a compiler builtin, or a release-note line about the rename. Do not know the name? Describe it: `c3_lookup("get environment variable")`. A description that matches little says so, instead of returning the nearest unrelated names. A type or module (`List`, `std::io::path`) lists its methods or functions.
 
 For your own code give `path` (or just call `c3_check` on the project first and the session remembers it):
 

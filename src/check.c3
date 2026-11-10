@@ -24,10 +24,23 @@ const sz MAX_RUN_OUTPUT = 6 * 1024;
 const sz MAX_RUN_CAPTURE = 64 * 1024;
 
 // The hints and, when the compile failed and the compilers differ, the note above.
-fn String after_compile(String shown)
+fn String after_compile(String shown, bool platform_given = false)
 {
 	String note = shown.contains("error:") ? compiler::path_mismatch_note() : "";
-	return string::tformat("%s%s", hints::diagnostics(shown), note);
+	return string::tformat("%s%s%s", hints::diagnostics(shown), note, platform_given ? "" : platform_note(shown));
+}
+
+// An error in code that names an operating system (`env::WIN32`, `std::os::posix`, `$if env::DARWIN`) may be an error of this
+// platform only: one line says how to type-check the other ones.
+fn String platform_note(String shown)
+{
+	if (!shown.contains("error:")) return "";
+	String[*] marks = { "WIN32", "win32", "Win32", "POSIX", "posix", "DARWIN", "darwin", "MACOS", "macos", "LINUX", "linux", "ANDROID", "WASI" };
+	foreach (m : marks)
+	{
+		if (shown.contains(m)) return "\nThis error may be specific to this platform (the code or the message names another): c3_check with platform=windows-x64 (or macos-aarch64, linux-x64) type-checks for it, c3_test takes platform too.\n";
+	}
+	return "";
 }
 
 // c3c prints colour codes for tests; a model reads them as noise.
@@ -153,7 +166,7 @@ fn String exclusive_args(String code, String path)
 	if (code.len > MAX_CODE) return string::tformat("give 1 to %d bytes of code", (int)MAX_CODE);
 	foreach (f : guard::COMPILE_TIME_READS)
 	{
-		if (code.contains(f)) return string::tformat("rejected: %s reads files or runs programs at compile time and is not allowed here", f);
+		if (code.contains(f)) return string::tformat("rejected: %s reads files or runs programs at compile time and is not allowed in a snippet\nWay out: put the code in a file of a project and c3_check path=<project> (the project's own files may $embed files inside it), or c3_test / c3_run it.", f);
 	}
 	return "";
 }
@@ -367,7 +380,7 @@ fn String compile_only(String file, String hide, String replacement, String plat
 	if (catch out) return NO_C3C;
 	if (proc::could_not_start(status)) return NO_C3C;
 	String shown = report(out, status, timed_out, hide, replacement, "OK: no errors", proc::DEADLINE_MS, also_hide);
-	return string::tformat("%s%s", shown, after_compile(shown));
+	return string::tformat("%s%s", shown, after_compile(shown, platform.len > 0));
 }
 
 fn String check_path(String target_path, String target, String platform = "", String[] extra = {})
@@ -471,7 +484,9 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
 	// where it ran: a path that was defaulted or relative is the one thing a caller cannot see
 	String footer = where.len > 0 ? string::tformat("\n[c3c %s, %s]", compiler::compiler_version(), where) : "";
-	return string::tformat("%s%s%s", shown, after_compile(shown), footer);
+	bool platform_given = false;
+	foreach (arg : mode_args) if (arg == "--target") platform_given = true;
+	return string::tformat("%s%s%s", shown, after_compile(shown, platform_given), footer);
 }
 
 fn String c3_test(String path @Desc("a project directory (with project.json) or a .c3 file with @test functions") = "",

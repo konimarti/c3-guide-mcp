@@ -31,6 +31,7 @@ def check(label, cond, detail=""):
 r = session([("c3_lookup", {"query": "printfn", "examples": 0}), ("c3_search", {"query": "defer", "limit": 99}), ("c3_search", {}),
              ("no_such_tool", {}), ("c3_lookup", {"query": "a" * 3190 + "\U0001F980" * 4}), ("c3_lookup", {})])
 check("initialize carries instructions", "instructions" in r[0]["result"], json.dumps(r[0]))
+check("the instructions start with the action", r[0]["result"].get("instructions", "").startswith("Before writing C3: c3_lookup every name, c3_check the code. Renames: c3_refs rename_to. Tests: c3_test."), json.dumps(r[0])[:300])
 names = sorted(t["name"] for t in r[1]["result"]["tools"])
 check("tools/list = 6 tools", names == ["c3_check", "c3_lookup", "c3_refs", "c3_run", "c3_search", "c3_test"], str(names))
 check("instructions name every tool", all(n in r[0]["result"]["instructions"] for n in names))

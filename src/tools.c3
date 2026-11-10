@@ -537,8 +537,8 @@ const String LOOKUP_HELP = "give query: a name (printfn, String.split, HashMap, 
 fn String c3_lookup(String query @Desc("a name ('printfn', 'io::printfn', 'String.split', 'HashMap', 'std::io::path') or, when you do not know the name, what it does ('read a line from a file', 'trim whitespace')") = "",
 	String path @Desc("where your code is: a project directory (its src and libraries are searched), a .c3 file, a .c3l library or a directory of libraries. Default: the project you last gave to c3_check, c3_test or c3_run. Without a query it lists the declarations there") = "",
 	int examples @Desc("working code that calls a library name (0..3, default 1)") = 1,
-	bool source @Desc("also show the implementation of a library function or macro") = false)
-	@Desc("Look up a name wherever it lives: your project, its libraries (deps) or the C3 standard library. A standard library name gives the exact signature, docs, source location and a working example; a description ('read a line from stdin') gives the functions that do it; a type or module (`List`, `std::io::path`) lists its methods or functions; a name that does not exist says what it became (renamed, a method, a compiler builtin). Never guess a signature, look it up.")
+	bool source @Desc("also show the whole implementation of a library function, macro or type (instead of reading lib/std files)") = false)
+	@Desc("Look up a name wherever it lives: your project, its libraries (deps) or the C3 standard library. A standard library name gives the exact signature, docs, source location and a working example; a description ('read a line from stdin') gives the functions that do it; a type or module (`List`, `std::io::path`) lists its methods or functions; a name that does not exist says what it became (renamed, a method, a compiler builtin). Never guess a signature, look it up. With source=true the whole implementation of a library function, macro or type is shown: use it instead of reading lib/std files with sed or cat.")
 	@ReadOnly
 {
 	String q = query.trim(" \t\n");
@@ -639,7 +639,7 @@ fn String lookup_one(String q, String path, int examples, bool source)
 			if (examples > 0) out.append(examples_for(q, clamp(examples, 0, 3), 18));
 		}
 	}
-	return util::clip(out.str_view(), source ? 5200 : 4000);
+	return util::clip(out.str_view(), source ? 16000 : 4000);
 }
 
 // `std::collections::map::HashMap.init` -> `HashMap.init`; `std::io::printfn` -> `io::printfn`
@@ -671,8 +671,10 @@ fn Entry* first_symbol(String name)
 	return null;
 }
 
-// The implementation of a standard library function, macro or type: its lines in the installed library, cut at the end of
-// the declaration or after 40 lines.
+// The implementation of a standard library function, macro or type: its lines in the installed library, up to the end of
+// the declaration (its closing brace, or the `;` of a one-liner), at most MAX_SOURCE_LINES; a longer one says where it was cut.
+const int MAX_SOURCE_LINES = 300;
+
 fn String source_excerpt(Entry* e)
 {
 	String loc = e.loc;
@@ -690,20 +692,23 @@ fn String source_excerpt(Entry* e)
 	DString out = dstring::temp();
 	int depth = 0;
 	bool opened = false;
-	for (int i = row - 1; i < (int)lines.len && i < row - 1 + 40; i++)
+	bool done = false;
+	int shown = 0;
+	for (int i = row - 1; i < (int)lines.len && shown < MAX_SOURCE_LINES; i++)
 	{
 		String l = lines[i];
-		out.appendf("%d: %s\n", i + 1, util::clip(util::sanitize_utf8(l), 160));
+		out.appendf("%d: %s\n", i + 1, util::clip(util::sanitize_utf8(l), 200));
+		shown++;
 		String code = l[:l.index_of("//") ?? l.len];
 		foreach (c : code)
 		{
 			if (c == '{') { depth++; opened = true; }
 			if (c == '}') depth--;
 		}
-		if (opened && depth <= 0) break;
-		if (!opened && code.trim().ends_with(";")) break;
-		if (!opened && code.contains("=>") && code.trim().ends_with(";")) break;
+		if (opened && depth <= 0) { done = true; break; }
+		if (!opened && code.trim().ends_with(";")) { done = true; break; }
 	}
+	if (!done) out.appendf("[cut after %d lines: the rest is in %s]\n", shown, loc[:c2]);
 	return string::tformat("\nSource (%s):\n%s", e.loc, out.str_view());
 }
 

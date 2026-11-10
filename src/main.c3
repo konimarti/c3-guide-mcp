@@ -4,9 +4,10 @@ import c3guide::compat, c3guide::proc, c3guide::corpus, c3guide::tools, c3guide:
 import std::io;
 
 // Sent to the model in `initialize`: this is what makes a model use the tools without being told.
-const String INSTRUCTIONS = `Your memory of C3 is probably outdated (most training data is C3 0.6/0.7; the language changed a lot in 0.8).
+const String INSTRUCTIONS = `Before writing C3: c3_lookup every name, c3_check the code. Renames: c3_refs rename_to. Tests: c3_test.
+Your memory of C3 is probably outdated (most training data is C3 0.6/0.7; the language changed a lot in 0.8).
 Do not write C3 from memory. Call the tools below directly by name (this server has no resources to list or read, and the tool schemas come with tools/list). To check, test or run code use these tools and not "c3c compile", "c3c test" or "c3c run" typed by hand: they run the real compiler and add what its messages lack. Use c3c directly when you need a shell: "c3c build" for a binary, creating a project, running the built app in its own directory.
-- c3_lookup before you use any name: one call for your project, its libraries and the standard library. A name gives the exact signature, docs, location and an example, or says it does not exist and what it became. Describe what you need ("read line from stdin") when you do not know the name. A path alone lists the declarations of a project.
+- c3_lookup before you use any name: one call for your project, its libraries and the standard library. A name gives the exact signature, docs, location and an example, or says it does not exist and what it became. Describe what you need ("read line from stdin") when you do not know the name. A path alone lists the declarations of a project. source=true shows the whole implementation of a library function: use it instead of reading lib/std files with sed or cat.
 - c3_check on every snippet before you show it, and on a project or file with path; code together with path=<project directory> checks a snippet that imports the project's own modules. Old 0.7 syntax is rewritten for you; format=true also runs the formatter c3f.
 - c3_test runs the @test functions of a project or file and returns the failures (sanitize=address|memory|thread).
 - c3_run builds and runs a program (arguments, stdin; sanitize=address|memory|thread).
