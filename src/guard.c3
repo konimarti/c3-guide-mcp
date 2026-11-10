@@ -392,11 +392,17 @@ fn String scan_patterns(String cwd, String home, List{String} patterns, Scan* sc
 		// a link to a folder is followed by c3c: where it ends must be inside the tree, even if only data lies there now
 		foreach (d : entered)
 		{
+			$if env::WIN32:
+				if (is_symlink(d)) return at(d, 0, "link that cannot be shown to stay inside the project on this system");   // util::canonical cannot resolve a link here
+			$endif
 			String real_dir = util::canonical(d);
 			if (real_dir.len > 0 && !util::inside(tree, real_dir)) return at(d, 0, "link leaves the project");
 		}
 		foreach (f : files)
 		{
+			$if env::WIN32:
+				if (is_symlink(f)) return at(f, 0, "link that cannot be shown to stay inside the project on this system");
+			$endif
 			String real = util::canonical(f);
 			String one_tree = tree;
 			if (base.len == 0)
@@ -444,6 +450,9 @@ fn String scan_libraries(String root, List{String} dirs, Scan* scan, String* uns
 			String lib = string::tformat("%s/%s", real, name);
 			if (is_symlink(lib))
 			{
+				$if env::WIN32:
+					return at(lib, 0, "link that cannot be shown to stay inside the project on this system");
+				$endif
 				String target = util::canonical(lib);
 				if (target.len == 0) return at(lib, 0, "link that ends nowhere");
 				if (!util::inside(tree, target)) return at(lib, 0, "link leaves the project");
