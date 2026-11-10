@@ -214,3 +214,43 @@ fn void quicksort_strings(String[] a) @local
 		a[j] = x;
 	}
 }
+
+// The folders c3c can find libraries in are not only the top level's `dependency-search-paths`: code + path gives it lib and
+// deps when the top level has none, a target can have search paths of its own, and a target without any (or with an empty
+// `-override`) searches the project's own folder. A library in any of them is read.
+fn void a_library_in_a_folder_c3c_can_search_is_read_wherever_the_key_is() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	// 1) search paths only inside a target; code + path hands c3c `--libdir lib` all the same
+	String a = string::tformat("%s/a", root);
+	put(a, "project.json", "{ \"sources\": [\"src/**\"], \"dependencies\": [\"evil\"], \"targets\": { \"app\": { \"type\": \"executable\", \"dependency-search-paths\": [\"libs\"] } } }");
+	put(a, "src/main.c3", CLEAN_MAIN);
+	put(a, "libs/.keep", "");
+	put(a, "lib/evil.c3l/manifest.json", "{ \"provides\": \"evil\", \"sources\": [\"src/**\"] }");
+	put(a, "lib/evil.c3l/src/evil.c3", EVIL);
+	String r = check::c3_check("import evil;", path: a);
+	assert(has(r, "rejected: lib/evil.c3l/src/evil.c3:2: $embed path"), "%s", r);
+	r = check::c3_run("import evil;\nfn void main() {}", path: a);
+	assert(has(r, "rejected: lib/evil.c3l/src/evil.c3:2: $embed path"), "%s", r);
+	// 2) a library in the project's own folder, found by a target that has no search paths of its own
+	String b = string::tformat("%s/b", root);
+	put(b, "project.json", "{ \"sources\": [\"src/**\"], \"dependency-search-paths\": [\"lib\"], \"dependencies\": [\"evil\"], \"targets\": { \"app\": { \"type\": \"executable\" }, \"other\": { \"type\": \"executable\", \"dependency-search-paths-override\": [] } } }");
+	put(b, "src/main.c3", CLEAN_MAIN);
+	put(b, "lib/.keep", "");
+	put(b, "evil.c3l/manifest.json", "{ \"provides\": \"evil\", \"sources\": [\"src/**\"] }");
+	put(b, "evil.c3l/src/evil.c3", EVIL);
+	r = check::c3_check(path: b, target: "other");
+	assert(has(r, "rejected: evil.c3l/src/evil.c3:2: $embed path"), "%s", r);
+}
+
+// The whole-tree fallback is said in the answer of c3_run with a project too.
+fn void c3_run_with_a_project_says_when_the_whole_tree_was_read() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String proj = c3f_like((String)dir, "p", "\"src/c3f/**\", \"src/c3f/zz?\"");
+	String r = check::c3_run("import std::io;\nfn void main() { io::printn(\"hi\"); }", path: proj);
+	assert(r.starts_with("(scanned the whole tree because"), "%s", r);
+}

@@ -548,6 +548,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	String replacement = "";
 	String where = "";
 	String also_hide = "";
+	String note = "";
 	bool is_dir = false;
 	if (code.len > 0)
 	{
@@ -561,7 +562,6 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 		replacement = "<code>";
 		if (path.len > 0)   // code with a project directory as path: the project's sources and libraries are compiled in
 		{
-			String note;
 			String refused = project_for_snippet(path, code, &m, &also_hide, &note);
 			if (refused.len > 0) return refused;
 		}
@@ -594,7 +594,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 		m.add("--");
 		foreach (t : tail.list()) m.add(t);
 	}
-	return run_c3c(m.list(), hide, replacement, scratch, is_dir, where, "(no output)", deadline_for(timeout_s), input, true, also_hide);
+	return with_note(note, run_c3c(m.list(), hide, replacement, scratch, is_dir, where, "(no output)", deadline_for(timeout_s), input, true, also_hide));
 }
 
 fn void register(mcp::Server* s)

@@ -525,9 +525,11 @@ fn String project_escape_note(String root_arg, String* note)
 		hit = scan_patterns(root, root, patterns, &scan, &why);
 		if (hit.len == 0 && why.len == 0)
 		{
-			// c3c looks for libraries in `dependency-search-paths`, or in the project's own folder when there are none (the
-			// snippet mode of c3_check also gives it lib and deps)
-			if (lib_dirs.len() == 0) { lib_dirs.push("."); lib_dirs.push("lib"); lib_dirs.push("deps"); }
+			// the folders code + path gives c3c (sources::project_libraries: the top level's, else lib and deps) and the project's own folder
+			// (any target without search paths of its own searches `.`) are read as well: the key can be in a target, or `-override`n empty
+			lib_dirs.push(".");
+			lib_dirs.push("lib");
+			lib_dirs.push("deps");
 			hit = scan_libraries(root, lib_dirs, &scan, &why);
 		}
 	}
