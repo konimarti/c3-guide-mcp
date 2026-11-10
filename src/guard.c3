@@ -182,7 +182,7 @@ struct Scan
 }
 
 // The sources of a library archive are compiled with the project: an entry that reads outside the tree is refused too.
-fn String archive_escape(String archive, String root, Scan* scan) => @pool()
+fn String archive_escape(String archive, String root, Scan* scan)
 {
 	long? size = file::get_size(archive);
 	if (catch size) return at(archive, 0, "cannot be read");

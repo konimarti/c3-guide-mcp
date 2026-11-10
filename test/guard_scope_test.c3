@@ -289,3 +289,18 @@ fn void a_link_named_by_a_pattern_that_leaves_the_project_is_refused() @test
 		assert(has(guard::project_escape(own), "bad.c3:2: $embed path"), "%s", guard::project_escape(own));
 	$endif
 }
+
+// A refusal inside a library archive is a message that must still be there when it is shown (it was built in a pool that
+// was gone on return: the bytes were 0xaa).
+fn void a_refusal_for_a_library_archive_is_readable() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String proj = c3f_like((String)dir, "p", "\"src/c3f/**\"");
+	String z = string::tformat("%s/lib/zip.c3l", proj);
+	support::sh(string::tformat("cd '%s' && printf 'module zipped;\\nconst char C = $embed(\"/etc/passwd\")[0];\\n' > zipped.c3 && python3 -c \"import zipfile; z = zipfile.ZipFile('%s', 'w'); z.write('zipped.c3'); z.write('/dev/null', 'manifest.json'); z.close()\"", (String)dir, z));
+	String why = guard::project_escape(proj);
+	assert(why == "lib/zip.c3l!/zipped.c3:2: $embed path '/etc/passwd' leaves the project", "%s", why);
+	String r = check::c3_check(path: proj);
+	assert(has(r, "rejected: lib/zip.c3l!/zipped.c3:2") && support::valid_utf8(r), "%s", r);
+}
