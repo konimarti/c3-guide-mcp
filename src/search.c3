@@ -18,6 +18,7 @@ struct Hit
 {
 	float score;
 	int idx;
+	int marked;   // how many of the typed `$`, `$$` and `@` words (exact names) the entry has: more goes first, whatever the score
 }
 
 <*
@@ -88,12 +89,14 @@ fn String[] query_terms(String query)
 	foreach (w : query.tsplit(" "))
 	{
 		if (out.len() >= MAX_TERMS) break;
-		String t = w.trim(" \t\n,.?!");
-		bool marked = t.starts_with("@") || t.starts_with("$");   // `$for`, `@require`: a name, not filler
-		String bare = t.trim("@$");
+		String t = w.trim(" \t\n,.?!;:()[]{}\"'`");
+		// `$assignable`, `$$LINE` and `@require` are names: the marker stays, and only the same marked word in the text matches
+		sz mark = 0;
+		while (mark < t.len && mark < 2 && (t[mark] == '$' || (t[mark] == '@' && mark == 0))) mark++;
+		bool marked = mark > 0;
+		String bare = t[mark..].trim("@$");
 		if (bare.len == 0) continue;
-		// a marked term keeps its marker and then only matches the same marked word in the text
-		String low = marked ? string::tformat("%c%s", t[0], canonical(bare.to_lower_tcopy())) : canonical(bare.to_lower_tcopy());
+		String low = marked ? string::tformat("%s%s", t[:mark], canonical(bare.to_lower_tcopy())) : canonical(bare.to_lower_tcopy());
 		bool stop = false;
 		if (!marked) foreach (sw : STOPWORDS) if (sw == low) stop = true;
 		if (!stop) out.push(low);
@@ -164,7 +167,7 @@ fn Hit[] prefer_defining_sections(Hit[] sorted, String[] typed_terms, int limit)
 		}
 		sorted[i].score *= 1.0f + 0.3f * (float)named;
 	}
-	sort::quicksort(sorted[:top], fn int(Hit a, Hit b) => a.score < b.score ? 1 : (a.score > b.score ? -1 : a.idx - b.idx));
+	sort::quicksort(sorted[:top], fn int(Hit a, Hit b) => a.marked != b.marked ? b.marked - a.marked : (a.score < b.score ? 1 : (a.score > b.score ? -1 : a.idx - b.idx)));
 	return sorted;
 }
 
@@ -246,13 +249,14 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 		}
 		float s = 0;
 		float covered = 0;   // how much of the typed words' weight (idf) this entry has
+		int marked_found = 0;
 		for (int k = 0; k < nterms; k++)
 		{
 			int f = tf_all[i * nterms + k];
 			int tt = ttf_all[i * nterms + k];
 			if (f + tt == 0) continue;
 			float idf = math::ln(1.0f + ((float)(total - df[k]) + 0.5f) / ((float)df[k] + 0.5f));
-			if (k < typed) covered += idf;
+			if (k < typed) { covered += idf; if (terms[k][0] == '@' || terms[k][0] == '$') marked_found++; }
 			float norm = f * 2.2f / (f + 1.2f * (0.25f + 0.75f * len_cache[i] / avg));
 			float weight = k < typed ? 1.0f : SYNONYM_WEIGHT;
 				s += weight * idf * (norm + 3.0f * short_bonus[i] * (tt > 0 ? 1.0f : 0.0f));
@@ -262,10 +266,10 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 		if (!symbols && typed >= 2) { float share = covered / typed_weight; s *= e.kind == "recipe" && !question ? math::pow(share, 0.8f) : share * share; }   // a task is answered by a program that ran, whose words are few and chosen: cut less. A question about the language (long, or "what is") is answered by the manual
 		if (symbols) s *= context::boost(e.title);   // a name from a module the session works with
 		if (e.kind == "recipe") s *= RECIPE_BOOST;   // a program that was compiled and run beats prose that says the same
-		if (s > 0) hits.push({ s, (int)i });
+		if (s > 0) hits.push({ s, (int)i, marked_found });
 	}
 	Hit[] sorted = hits.array_view();
-	sort::quicksort(sorted, fn int(Hit a, Hit b) => a.score < b.score ? 1 : (a.score > b.score ? -1 : a.idx - b.idx));   // equal scores: the entry that comes first, so a ranking never depends on the sort
+	sort::quicksort(sorted, fn int(Hit a, Hit b) => a.marked != b.marked ? b.marked - a.marked : (a.score < b.score ? 1 : (a.score > b.score ? -1 : a.idx - b.idx)));   // equal scores: the entry that comes first, so a ranking never depends on the sort
 	if (!symbols && typed >= 2) sorted = prefer_defining_sections(sorted, terms[:typed], limit);
 	return sorted[:(sz)(sorted.len < limit ? sorted.len : limit)];
 }

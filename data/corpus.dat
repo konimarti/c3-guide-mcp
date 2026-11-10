@@ -1,4 +1,4 @@
-metac3c0.8.5_1records=7324docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
+metac3c0.8.5_1records=7325docC3 Programming Language - Combined Documentation# C3 Programming Language - Combined Documentationdoc1 Introduction# 1 Introduction
 
 
 
@@ -17934,7 +17934,46 @@ fn void main()
 	thread::sleep_ms(20);
 	long ms = (long)c.to_now() / 1_000_000;         // nanoseconds to milliseconds
 	io::printfn("elapsed ok: %s", ms >= 20);
-}recipes/clock_time.c3recipeRecipe: calendar date: build a DateTime, weekday name, format a date, parts (year, month, day)// Also: std::time, datetime, day of week, calendar, Date, strftime, timestamp, now, TzDateTime
+}recipes/clock_time.c3recipeRecipe: compile-time checks: $defined (does it compile, and the replacement of the removed $assignable: $defined(int v = x)), $embed("file") ?? default for a file that may be missing, $feat, $if, $switch// Also: compile time if, conditional compilation, $Typeof, $assignable, is assignable, implements, can compile, optional embed, embed fallback, feature flag, platform, $case
+import std::io;
+
+// $defined: true when the expression compiles; nothing is reported when it does not
+macro has_len(x) => $defined(x.len);
+
+// `$assignable(x, int)` was removed in 0.8: ask whether the declaration compiles
+macro fits_int(x) => $defined(int v = x);
+
+// a file that may not exist: an optional on the left side and `??` with the fallback
+const char[] DEFAULT_DATA = "none";
+const char[] DATA = $embed("no_such_file.txt") ?? DEFAULT_DATA;
+
+// $switch on a type picks the code at compile time; only the chosen branch is compiled
+macro describe(x)
+{
+	$switch $Typeof(x):
+		$case int:
+			return "integer";
+		$case String:
+			return "text";
+		$default:
+			return "other";
+	$endswitch
+}
+
+fn void main()
+{
+	int[3] a;
+	io::printfn("%d %s %s", $defined(a.len) ? 1 : 0, fits_int(2) ? "true" : "false", fits_int("two") ? "true" : "false");
+	io::printfn("embed default: %s", (String)DATA);
+	io::printn(describe(1));
+	io::printn(describe("x"));
+	io::printn(describe(1.5));
+	$if $feat(WIN32):
+		io::printn("windows");
+	$else
+		io::printn("posix");
+	$endif
+}recipes/compile_time.c3recipeRecipe: calendar date: build a DateTime, weekday name, format a date, parts (year, month, day)// Also: std::time, datetime, day of week, calendar, Date, strftime, timestamp, now, TzDateTime
 import std::io;
 import std::time;
 import std::time::datetime;

@@ -149,6 +149,26 @@ fn String manual_note()
 	return string::tformat("\n(manual, recipes and release notes: c3c %s snapshot; your c3c is %s. Library signatures and the syntax lists come from your compiler, and c3_check has the last word.)\n", corpus::snapshot_version, have);
 }
 
+// The compiler's lists (keywords, builtins, attributes...) that hold a `$`, `$$` or `@` word of the query exactly (any case).
+fn String syntax_matches(String query)
+{
+	DString out = dstring::temp();
+	foreach (t : search::query_terms(query))
+	{
+		if (t[0] != '$' && t[0] != '@') continue;
+		foreach (l : SYNTAX_LISTS)
+		{
+			foreach (line : syntax_list(l).tsplit("\n"))
+			{
+				String name = line.trim().tsplit(" ")[0];
+				if (name.len == t.len && name.to_lower_tcopy() == t) out.appendf("%s: %s\n", l, name);
+			}
+		}
+	}
+	if (out.len() == 0) return "";
+	return string::tformat("In the compiler's lists (c3_search scope=syntax):\n%s\n", out.str_view());
+}
+
 fn String search_all(String query, int limit, String file)
 {
 	int n = clamp(limit, 1, 5);
@@ -176,6 +196,7 @@ fn String search_all(String query, int limit, String file)
 	bool show_library = syms.len > 0 && (hits.len == 0 || (library >= 2 && (library_context >= manual || manual * 2 < (int)terms.len)));
 	bool library_first = show_library && library_context > manual;
 	DString out = dstring::temp();
+	out.append(syntax_matches(query));
 	if (library_first)
 	{
 		out.append(hits.len == 0 ? "not in the manual; closest standard library names:\n" : "Standard library (c3_lookup has the full signature):\n");
