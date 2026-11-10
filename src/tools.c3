@@ -1,7 +1,7 @@
 module c3guide::tools;
 import c3guide::compiler, c3guide::proc;
 import mcp, std::core::string;
-import c3guide::corpus, c3guide::context, c3guide::search, c3guide::util, c3guide::live, c3guide::outline;
+import c3guide::corpus, c3guide::context, c3guide::search, c3guide::util, c3guide::live, c3guide::outline, c3guide::suggest;
 import std::sort, std::math, std::collections::list, std::io::file, libc;
 
 // Every reply is capped: a docs server that dumps pages into the context is worse than none.
@@ -1010,6 +1010,9 @@ fn String symbol_reply(String name, bool* found_out = null, int* exact_out = nul
 	// not found: say so (a model must not assume a guessed API exists), then offer close names
 	out.append(legacy_note(n));
 	out.appendf("'%s' does not exist in the standard library of c3c %s. (Your own or library code: give path.)\n", n, corpus::symbols_version);
+	String suggestion = suggest::did_you_mean(n);
+	out.append(suggestion);
+	if (suggestion.len == 0) out.append(suggest::extern_hint(n));
 	// `allocator::free` is asked for by its old module: the same name in another module is the likely answer
 	String q = util::last_part(n).to_lower_tcopy();
 	String module_hint = "";
