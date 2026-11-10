@@ -214,7 +214,8 @@ fn String parse_files(String files, FileList* out)
 		if (catch abs) return "files: invalid path";
 		String full = (String)abs;
 		if (!file::is_file(full)) return string::tformat("files: '%s' does not exist", util::clip(t, 80));
-		if (guard::file_escape(full, project_dir(full)).len > 0) return reads_outside(full);
+		String escaped = guard::file_escape(full, project_dir(full));
+		if (escaped.len > 0) return reads_outside(escaped);
 		out.items[out.n++] = full;
 	}
 	return "";
@@ -226,13 +227,13 @@ fn String parse_files(String files, FileList* out)
 // theirs are left out (a project that keeps its `main` in a file with other code loses that code; give such code as
 // `files` or move it). The project-level `sources` are used, not a target's; the project's c-sources, cflags and
 // link-args are not (they are code that cc and the linker would run). Returns "" or the message to show.
-fn String project_for_snippet(String path, String code, Args* out, String* root_out)
+fn String project_for_snippet(String path, String code, Args* out, String* root_out, String* note)
 {
 	bool is_dir;
 	String? where = resolve_target(path, &is_dir);
 	if (catch where) return BAD_TARGET_TEXT;
 	if (!is_dir) return CODE_AND_PATH;
-	String outside = guard::project_escape(where);
+	String outside = guard::project_escape_note(where, note);
 	if (outside.len > 0) return reads_outside(outside);
 	outline::note_project(path);
 	List{String} found;
@@ -278,7 +279,7 @@ fn String c3_check(String code @Desc("a C3 snippet or file content; a main funct
 	String target @Desc("with a project path: the build target, default the first") = "",
 	String platform @Desc("check for another platform without linking, e.g. 'windows-x64', 'macos-aarch64', 'linux-x64' (c3c --list-targets lists them)") = "",
 	bool format @Desc("also run the formatter c3f: a snippet comes back formatted, a file or project as a diff of what would change (nothing is written)") = false)
-	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. Code in old 0.6/0.7 syntax that fails is rewritten mechanically (`int.sizeof` -> `int::size`, `isz` -> `sz`...) and the rewritten code is checked too. A project (path) is type-checked, never compiled with cc or linked (its c-sources, cflags and link-args are code); c3_test and c3_run build it. A file that belongs to a project is checked with that project; a snippet or a file outside any project is only type-checked. To check a usage snippet against your own library, give both code and path=<project directory>. `platform` checks for another OS without linking. It type-checks only: a clean result says nothing about leaks, double frees or use-after-free; run those with c3_test or c3_run and sanitize=address. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
+	@Desc("USE THIS TO CHECK CODE instead of `c3c compile`. Compiles a snippet (code) or a real project/file (path) with the installed c3c, nothing is run, and returns the compiler's diagnostics plus hints that point to the right stdlib signature or release note. Code in old 0.6/0.7 syntax that fails is rewritten mechanically (`int.sizeof` -> `int::size`, `isz` -> `sz`...) and the rewritten code is checked too. A project (path) is type-checked, never compiled with cc or linked (its c-sources, cflags and link-args are code); c3_test and c3_run build it. A project is first read for compile-time reads ($embed, $include, $exec) in the files c3c compiles (what its sources, test-sources and dependency libraries stand for; scratch and fixture folders are not read) and refused in one line (file:line and reason) when one can leave it. A file that belongs to a project is checked with that project; a snippet or a file outside any project is only type-checked. To check a usage snippet against your own library, give both code and path=<project directory>. `platform` checks for another OS without linking. It type-checks only: a clean result says nothing about leaks, double frees or use-after-free; run those with c3_test or c3_run and sanitize=address. Check code before showing it. To get the binary itself, run `c3c build` in the shell.")
 	@Timeout(30000)
 {
 	String reply = check_any(code, path, files, target, platform);
@@ -312,13 +313,20 @@ fn String check_any(String code, String path, String files, String target, Strin
 	// code with a project directory as path: the project's sources and libraries go on the command line after the files
 	Args project;
 	String hide_project = "";
+	String note = "";
 	if (path.len > 0)
 	{
-		String refused = project_for_snippet(path, code, &project, &hide_project);
+		String refused = project_for_snippet(path, code, &project, &hide_project, &note);
 		if (refused.len > 0) return refused;
 		foreach (x : extra.list()) project.add(x);
 	}
 	String[] with = path.len > 0 ? project.list() : extra.list();
+	return with_note(note, check_snippet(code, platform, with, hide_project));
+}
+
+// The snippet checked with `with` (the files and the project's sources and libraries on the command line).
+fn String check_snippet(String code, String platform, String[] with, String hide_project)
+{
 	// No @pool here: the result lives in the caller's temp memory (a nested pool would free it on return).
 	Path? dir = proc::scratch_dir();
 	if (catch dir) return "cannot create a temp directory";
@@ -371,7 +379,8 @@ fn String check_path(String target_path, String target, String platform = "", St
 	if (is_dir)
 	{
 		if (extra.len > 0) return "files goes with code or a single .c3 path, not with a project directory (the project lists its own sources)";
-		String outside = guard::project_escape(where);
+		String note;
+		String outside = guard::project_escape_note(where, &note);
 		if (outside.len > 0) return reads_outside(outside);
 		// `--no-obj` only exists for single files. A project is built (not run) in a scratch directory.
 		Path? scratch = proc::scratch_dir();
@@ -390,7 +399,7 @@ fn String check_path(String target_path, String target, String platform = "", St
 		// type-check only, never `cc` or the linker: a project's cflags, c-sources and link-args are code that would run
 		m.add("-C");
 		String ok = "OK: no errors (type-checked; c3_test or c3_run builds, links and runs)";
-		return run_c3c(m.list(), base, "", scratch, true, where, ok, PROJECT_CHECK_MS);
+		return with_note(note, run_c3c(m.list(), base, "", scratch, true, where, ok, PROJECT_CHECK_MS));
 	}
 	// A file checked on its own cannot see the other modules or the dependencies of its project: check the project
 	String project = extra.len > 0 ? "" : project_dir(where);
@@ -405,10 +414,14 @@ fn String check_path(String target_path, String target, String platform = "", St
 }
 
 // $embed, $include and $exec can read any file the server can read, and $echo prints it into the reply: not at check time.
-fn String reads_outside(String file)
+// `why` is the guard's one line (file, line, reason).
+fn String reads_outside(String why)
 {
-	return string::tformat("rejected: %s cannot be shown to stay inside its project: it reads at compile time ($embed/$include/$exec) with a path that leaves it or one that is computed, or it is a link that leaves the project or ends nowhere, an unreadable or oversized file, a tree too large to check, or a library manifest (manifest.json) that is unreadable or names sources outside its library. c3_check does not compile it. If you trust it, build it yourself with `c3c`.", util::clip(file, 200));
+	return string::tformat("rejected: %s\nIf you trust it: c3_test builds and runs the project, or build it yourself with `c3c build`.", util::clip(why, 300));
 }
+
+// A reply with the guard's note in front of it (the note is "" when the guard read what c3c compiles).
+fn String with_note(String note, String reply) => note.len > 0 ? string::tformat("%s\n%s", note, reply) : reply;
 
 // The directory of the project.json above a file, "" when the file belongs to no project.
 fn String project_dir(String file)
@@ -548,7 +561,8 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 		replacement = "<code>";
 		if (path.len > 0)   // code with a project directory as path: the project's sources and libraries are compiled in
 		{
-			String refused = project_for_snippet(path, code, &m, &also_hide);
+			String note;
+			String refused = project_for_snippet(path, code, &m, &also_hide, &note);
 			if (refused.len > 0) return refused;
 		}
 	}

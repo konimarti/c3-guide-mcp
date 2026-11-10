@@ -978,20 +978,16 @@ fn void links_that_leave_the_project_or_hide_a_source_are_refused() @test
 		path::mkdir(path::new(tmem, string::tformat("%s/outdir", root))!!)!!;
 		file::save(string::tformat("%s/outdir/evil.c3", root), "module evil;\n")!!;
 		String[] scripts = {
-			"ln -s ../../outdir data/dir_out",                                          // a directory outside
-			"ln -s ../../outside.txt data/file_out.txt",                                // a file outside
-			"ln -s ../../../outside.txt src/sub/in_source.txt",                            // a link in a source folder
-			"ln -s nowhere data/dangling",                                              // dangling
+			"ln -s ../../../outdir src/sub/dir_out",                                       // a directory outside, in a source folder
 			"ln -s real/nowhere.c3 src/sub/dangling.c3",                                // dangling, named as a source
-			"ln -s ../../outdir data/hop; ln -s hop data/chain_out",                    // a chain that ends outside
+			"ln -s ../../../outdir src/sub/hop; ln -s hop src/sub/chain_out",              // a chain that ends outside
 			"ln -s ../../../outside.txt src/sub/leak.c3",                                  // a source that is a link outside
 			"ln -s ../../../outdir src/sub/outdir.c3l",                                    // a library directory outside
 			"mkdir lib; ln -s ../data/real lib/fake.c3l",                               // a library name for a plain directory
 			"echo 'module a; const char C = $embed(\"/etc/passwd\")[0];' > data/notes.txt; ln -s ../../data/notes.txt src/sub/sneaky.c3",   // a source whose text is not read under its own name
 			// a link whose target is deeper: c3c reads `$embed("../../../../outside.txt")` from the target's folder (data/real/x), where it reaches the secret; from the link's folder it names nothing
 			"mkdir data/real/x; echo 'module a; const char C = $embed(\"../../../../outside.txt\")[0];' > data/real/x/t.txt; ln -s ../../data/real/x/t.txt src/sub/via.c3",
-			"ln -s ../../../outside.txt data/real/deep",                                   // below another folder
-			"ln -s ../../../outdir/../outside.txt data/real/deeper",                           // the same with a .. in the middle
+			"ln -s ../../../outdir/../outdir src/sub/deeper",                                   // the same with a .. in the middle
 		};
 		int n = 0;
 		foreach (s : scripts)
@@ -999,6 +995,22 @@ fn void links_that_leave_the_project_or_hide_a_source_are_refused() @test
 			String proj = link_project(root, string::tformat("bad%d", n++), s);
 			String r = check::c3_check(path: proj);
 			assert(has(r, "rejected") && !has(r, "S3CRET"), "%s: %s", s, r);
+		}
+		// what c3c never compiles is not read: a link that leaves the project, or ends nowhere, in a folder that is no source
+		// folder, and a link to a file that is no source in a source folder (c3c skips every name but .c3, .c3t and .c3i)
+		String[] unread = {
+			"ln -s ../../outdir data/dir_out",
+			"ln -s ../../outside.txt data/file_out.txt",
+			"ln -s nowhere data/dangling",
+			"ln -s ../../../outside.txt data/real/deep",
+			"ln -s ../../../outside.txt src/sub/in_source.txt",
+			"ln -s ../../../outdir/evil.c3 data/evil_link.c3",
+		};
+		foreach (s : unread)
+		{
+			String proj = link_project(root, string::tformat("unread%d", n++), s);
+			String r = check::c3_check(path: proj);
+			assert(has(r, "OK: no errors"), "%s: %s", s, r);
 		}
 		// a link to an archive that is a directory of the project is the project's own directory: fine
 		String proj = link_project(root, "arch", "mkdir -p lib/real.c3l; echo '{ \"provides\": \"real\" }' > lib/real.c3l/manifest.json; ln -s real.c3l lib/alias.c3l");
