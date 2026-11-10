@@ -3,11 +3,20 @@ import c3guide::util;
 import std::sort, std::core::string, std::io::file, std::io::path, std::collections::list, std::collections::object, std::encoding::json;
 
 // What project.json says a project is made of: the files its `sources` patterns stand for and the libraries it depends on.
-// c3c expands only a trailing `*` (the files of one folder) or `**` (the folder and everything below it); anything else is
-// a file. `./*` is the project's own folder, `**` all of it.
+// The patterns are expanded the way c3c 0.8.6 expands them (target_expand_source_names and file_add_wildcard_files in
+// its src/utils/file_utils.c; the probes are in docs/MAINTAINING.md): this is also what the guard (src/guard.c3) reads, so
+// a file c3c compiles is a file the guard sees.
+//  - a name that ends in `/*` (or is `*`) stands for the files of that folder, one ending in `/**` (or `**`) for the folder
+//    and everything below it; the folder part is used as it is (`./`, `..`, an absolute path, `//` all work)
+//  - a name that ends in .c3, .c3t or .c3i (case matters) is a file; a name that is a folder (`src`, `src/`) is a folder
+//    with everything below it; anything else (`src/*.c3`, `src/a*`, `src/**/`) c3c refuses: nothing is compiled
+//  - in a folder, names that start with `.` are skipped (files and folders), links are followed (`stat`), a folder whose
+//    name ends in .c3 is not entered, and only names ending in .c3, .c3t or .c3i are sources
+//  - `${NAME}` in a string of project.json is replaced by the environment before it is used: not expanded here
 
 const int MAX_SOURCES = 600;   // a command line must stay within what a process can be started with
 const int MAX_DEPTH = 40;
+const String[*] C3C_SUFFIXES = { ".c3", ".c3t", ".c3i" };
 
 // The strings of the array `key` at the top level of a manifest.
 fn void strings_of(Object* m, String key, List{String}* out)
@@ -22,10 +31,42 @@ fn void strings_of(Object* m, String key, List{String}* out)
 	}
 }
 
-// The manifest of the project in `root`, or null (missing, too large, not JSON).
-fn Object* manifest_of(String root)
+// The strings of every array called one of `keys` anywhere in the manifest (the project and each of its targets: c3c adds a
+// target's to the project's, or lets it replace them with `-override`, so all of them together are a superset).
+fn void strings_everywhere(Object* o, String[] keys, List{String}* out, int depth)
 {
-	String file = string::tformat("%s/project.json", root);
+	if (depth > 5 || !o.is_map()) return;
+	o.@each_entry(; String key, Object* value)
+	{
+		bool wanted = false;
+		foreach (k : keys) if (k == key) wanted = true;
+		if (wanted && value.is_array())
+		{
+			for (sz i = 0; i < value.get_len(); i++)
+			{
+				Object* one = value.get_at(i);
+				if (one.is_string() && one.s.len > 0) out.push(one.s);
+			}
+		}
+		else { strings_everywhere(value, keys, out, depth + 1); }
+	};
+}
+
+// True when a key called `key` is in the manifest, at any depth.
+fn bool has_key(Object* o, String key, int depth)
+{
+	if (depth > 5 || !o.is_map()) return false;
+	bool found = false;
+	o.@each_entry(; String k, Object* value)
+	{
+		if (k == key || has_key(value, key, depth + 1)) found = true;
+	};
+	return found;
+}
+
+// The JSON object in `file`, or null (missing, too large, not JSON).
+fn Object* json_of(String file)
+{
 	long? size = file::get_size(file);
 	if (catch size) return null;
 	if (size > 4 * 1024 * 1024) return null;
@@ -36,44 +77,106 @@ fn Object* manifest_of(String root)
 	return m.is_map() ? m : null;
 }
 
+// The manifest of the project in `root`, or null (missing, too large, not JSON).
+fn Object* manifest_of(String root) => json_of(string::tformat("%s/project.json", root));
+
 fn void add_file(String f, List{String}* out)
 {
 	foreach (x : out) if (x == f) return;   // `src/**` and `src/test/**` name the same file once
 	out.push(string::tformat("%s", f));
 }
 
-fn void add_dir(String dir, bool deep, int depth, List{String}* out)
+// What c3c takes for a source by its name: .c3, .c3t or .c3i after at least one more character.
+fn bool c3c_source_name(String name)
 {
-	if (depth > MAX_DEPTH || out.len() >= MAX_SOURCES) return;
+	foreach (s : C3C_SUFFIXES) if (name.len >= s.len + 1 && name.ends_with(s)) return true;
+	return false;
+}
+
+// Adds the sources in `dir` (and below it when `deep`) the way c3c finds them, at most `limit` in all; every folder entered
+// goes to `seen` (when given). A link to a folder that holds the walk (a loop) is not entered again: c3c would read its files
+// a second time under other names, which adds nothing. `above` is the real paths of the folders being walked. Returns "" or
+// why the answer is not exact (more than `limit` files, folders nested too deep).
+fn String walk(String dir, bool deep, int depth, List{String}* out, int limit, List{String}* seen, List{String}* above)
+{
+	if (depth > MAX_DEPTH) return "folders nested deeper than 40 levels";
 	Path? dp = path::new(tmem, dir);
-	if (catch dp) return;
+	if (catch dp) return "";
 	PathList? entries = path::ls(tmem, dp, no_dirs: false, relative: true);
-	if (catch entries) return;
+	if (catch entries) return "";   // c3c cannot open it either
 	String[] names = mem::talloc_array(String, entries.len());
 	foreach (i, e : entries) names[i] = e.basename();
 	// a stable order: the same project reads the same on every system
 	sort::quicksort(names, fn int(String a, String b) => a.compare_to(b));
 	foreach (name : names)
 	{
-		if (out.len() >= MAX_SOURCES) return;
-		String full = string::tformat("%s/%s", dir, name);
-		if (file::is_dir(full))
+		if (name.len == 0 || name[0] == '.') continue;
+		String full = dir.ends_with("/") ? string::tformat("%s%s", dir, name) : string::tformat("%s/%s", dir, name);
+		if (c3c_source_name(name))
 		{
-			if (deep)
-			{
-				Path? sub = path::new(tmem, full);
-				if (try sub) { if (!path::is_link(sub)) add_dir(full, true, depth + 1, out); }
-			}
-		}
-		else if (util::is_c3_file(name))
-		{
+			if (file::is_dir(full)) continue;   // a folder called x.c3 is not entered
+			if (out.len() >= limit) return string::tformat("more than %d sources", limit);
 			add_file(full, out);
 		}
+		else if (deep && file::is_dir(full))
+		{
+			String real = util::canonical(full);
+			bool loop = false;
+			foreach (x : above) if (x == real) loop = true;
+			if (loop) continue;
+			if (seen) seen.push(full);
+			above.push(real);
+			String why = walk(full, true, depth + 1, out, limit, seen, above);
+			above.pop()!!;
+			if (why.len > 0) return why;
+		}
 	}
+	return "";
+}
+
+// Adds the files one `sources` pattern stands for, for a c3c that runs in `root`. *base is the folder it walks from ("" for a
+// file named as it is); `seen` collects the folders below it that were entered. Returns "" or why the guard cannot give the exact files: a form c3c does not expand (it refuses
+// the build), `${` (c3c fills it from the environment), too many files. A file or folder that does not exist adds nothing
+// (c3c says so).
+fn String expand_pattern(String root, String pattern, List{String}* out, int limit, String* base, List{String}* seen = null)
+{
+	*base = "";
+	if (pattern.len == 0) return "an empty pattern";
+	if (pattern.contains("$")) return string::tformat("sources pattern '%s' uses $ (c3c fills ${NAME} from the environment)", pattern);
+	if (pattern.ends_with(".o") || pattern.ends_with(".obj") || pattern.ends_with(".ll") || pattern.ends_with(".bc")) return "";   // linked, not compiled from text
+	sz len = pattern.len;
+	String folder = "";
+	bool deep = false;
+	bool folder_form = false;
+	if (pattern[len - 1] == '*')
+	{
+		if (len == 1 || pattern[len - 2] == '/') { folder = pattern[:len - 1]; folder_form = true; }
+		else if (pattern[len - 2] == '*' && (len == 2 || pattern[len - 3] == '/')) { folder = pattern[:len - 2]; deep = true; folder_form = true; }
+	}
+	else if (c3c_source_name(pattern))
+	{
+		add_file(pattern.starts_with("/") ? pattern : string::tformat("%s/%s", root, pattern), out);
+		return "";
+	}
+	if (!folder_form)
+	{
+		String as_is = pattern.starts_with("/") ? pattern : string::tformat("%s/%s", root, pattern);
+		if (!file::is_dir(as_is)) return string::tformat("sources pattern '%s' is not a form the guard can expand like c3c (c3c refuses it)", pattern);
+		folder = pattern;
+		deep = true;
+	}
+	String full = folder.starts_with("/") ? folder : string::tformat("%s/%s", root, folder);
+	*base = full;
+	if (!file::is_dir(full)) return "";
+	List{String} above;
+	above.init(tmem);
+	above.push(util::canonical(full));
+	return walk(full, deep, 0, out, limit, seen, &above);
 }
 
 // The files the project-level `sources` of the project in `root` stand for (absolute, in the order of the patterns, each
-// once). `src/**` when the manifest names none. Patterns outside the project (`../shared/**`) count as well.
+// once). `src/**` when the manifest names none. Patterns outside the project (`../shared/**`) count as well. At most
+// MAX_SOURCES: a pattern the guard could not expand (see expand_pattern) adds nothing.
 fn void project_files(String root, List{String}* out)
 {
 	Object* m = manifest_of(root);
@@ -83,20 +186,8 @@ fn void project_files(String root, List{String}* out)
 	if (patterns.len() == 0) patterns.push("src/**");
 	foreach (p : patterns)
 	{
-		bool deep = p.ends_with("**");
-		bool shallow = !deep && p.ends_with("*");
-		String base = deep ? p[:p.len - 2] : (shallow ? p[:p.len - 1] : p);
-		String full = base.starts_with("/") ? base : string::tformat("%s/%s", root, base);
-		if (deep || shallow)
-		{
-			String dir = util::canonical(full);
-			if (dir.len > 0 && file::is_dir(dir)) add_dir(dir, deep, 0, out);
-		}
-		else
-		{
-			String f = util::canonical(full);
-			if (f.len > 0 && file::is_file(f) && util::is_c3_file(f)) add_file(f, out);
-		}
+		String base;
+		(void)expand_pattern(root, p, out, MAX_SOURCES, &base);
 	}
 }
 
