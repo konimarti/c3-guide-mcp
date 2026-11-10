@@ -144,6 +144,9 @@ fn String expand_pattern(String root, String pattern, List{String}* out, int lim
 	if (pattern.len == 0) return "an empty pattern";
 	if (pattern.contains("$")) return string::tformat("sources pattern '%s' uses $ (c3c fills ${NAME} from the environment)", pattern);
 	if (pattern.ends_with(".o") || pattern.ends_with(".obj") || pattern.ends_with(".ll") || pattern.ends_with(".bc")) return "";   // linked, not compiled from text
+	// a wildcard anywhere but at the very end is not a form c3c expands: whatever it would match, the guard reads the whole tree
+	String stem = pattern.ends_with("**") ? pattern[:pattern.len - 2] : (pattern.ends_with("*") ? pattern[:pattern.len - 1] : pattern);
+	if (stem.contains("*") || stem.contains("?") || stem.contains("[")) return string::tformat("sources pattern '%s' has a wildcard that c3c does not expand (only a trailing * or **)", pattern);
 	sz len = pattern.len;
 	String folder = "";
 	bool deep = false;

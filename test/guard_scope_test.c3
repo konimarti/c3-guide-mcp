@@ -180,7 +180,7 @@ fn void patterns_are_expanded_like_c3c() @test
 			"other/o.c3 src/a.c3 src/b.c3t src/c.c3i src/fl.c3 src/lk/o.c3 src/sub/d.c3 top.c3",
 			"src/a.c3",
 			"!",
-			"src/*.c3",   // a file name like any other (it does not exist: c3c says "Failed to resolve")
+			"!",   // a wildcard before the end: not a form c3c expands
 			"!",
 			"src/sub/d.c3 src/sub/up/a.c3 src/sub/up/b.c3t src/sub/up/c.c3i src/sub/up/fl.c3 src/sub/up/lk/o.c3",   // up -> .. is entered once; its own way back (up/sub) is the loop
 			"!",
@@ -303,4 +303,23 @@ fn void a_refusal_for_a_library_archive_is_readable() @test
 	assert(why == "lib/zip.c3l!/zipped.c3:2: $embed path '/etc/passwd' leaves the project", "%s", why);
 	String r = check::c3_check(path: proj);
 	assert(has(r, "rejected: lib/zip.c3l!/zipped.c3:2") && support::valid_utf8(r), "%s", r);
+}
+
+// A wildcard in the folder part of a pattern is not a form c3c expands, so the whole tree is read, also when no folder of
+// that name exists (nothing matches, and the build fails: but the guard must not have taken "no files" for "clean").
+fn void a_wildcard_in_a_folder_part_reads_the_whole_tree_even_when_nothing_matches() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	String[] odd = { "\"src/su?/**\"", "\"src/[s]ub/**\"", "\"src/*/x/**\"", "\"s*c/**\"", "\"src/**/x.c3\"", "\"src/su?/*\"" };
+	foreach (i, pattern : odd)
+	{
+		String proj = c3f_like(root, string::tformat("w%d", i), pattern);
+		put(proj, ".work/evil.c3", EVIL);
+		String note;
+		String why = guard::project_escape_note(proj, &note);
+		assert(why == ".work/evil.c3:2: $embed path '/etc/passwd' leaves the project", "%s: %s", pattern, why);
+		assert(has(note, "scanned the whole tree because") && has(note, "wildcard"), "%s: %s", pattern, note);
+	}
 }
