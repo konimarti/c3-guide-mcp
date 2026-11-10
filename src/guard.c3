@@ -317,7 +317,7 @@ fn void manifest_paths(Object* o, List{String}* out, int depth)
 	if (depth > 4 || !o.is_map()) return;
 	o.@each_entry(; String key, Object* value)
 	{
-		if ((key == "sources" || key == "dependency-search-paths") && value.is_array())
+		if ((key == "sources" || key == "sources-override" || key == "dependency-search-paths" || key == "dependency-search-paths-override") && value.is_array())
 		{
 			for (sz i = 0; i < value.get_len(); i++)
 			{
@@ -494,7 +494,7 @@ fn String scan_libraries(String root, List{String} dirs, Scan* scan, String* uns
 			Object* m = sources::json_of(string::tformat("%s/manifest.json", lib));
 			List{String} patterns;
 			patterns.init(tmem);
-			if (m) sources::strings_everywhere(m, { "sources" }, &patterns, 0);
+			if (m) sources::strings_everywhere(m, { "sources", "sources-override" }, &patterns, 0);
 			patterns.push("*");   // a target without `sources` takes the files of the library's own folder
 			String inner_unsure = "";
 			String hit = scan_patterns(lib, tree, patterns, scan, &inner_unsure);

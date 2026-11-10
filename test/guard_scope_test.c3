@@ -323,3 +323,22 @@ fn void a_wildcard_in_a_folder_part_reads_the_whole_tree_even_when_nothing_match
 		assert(has(note, "scanned the whole tree because") && has(note, "wildcard"), "%s: %s", pattern, note);
 	}
 }
+
+// A library target can replace its sources (`sources-override`): both what it names and where it names it are read.
+fn void a_library_manifest_sources_override_is_read() @test
+{
+	Path dir = proc::scratch_dir()!!;
+	defer (void)path::rmtree(dir);
+	String root = (String)dir;
+	// inside the library: the folder it names is read
+	String proj = c3f_like(root, "in", "\"src/c3f/**\"");
+	put(proj, "lib/lexer.c3l/manifest.json", "{ \"provides\": \"lexer\", \"sources\": [\"src/**\"], \"targets\": { \"linux-x64\": { \"sources-override\": [\"alt/**\"] } } }");
+	put(proj, "lib/lexer.c3l/alt/evil.c3", EVIL);
+	assert(guard::project_escape(proj) == "lib/lexer.c3l/alt/evil.c3:2: $embed path '/etc/passwd' leaves the project", "%s", guard::project_escape(proj));
+	// outside the library: the manifest is refused
+	String out = c3f_like(root, "out", "\"src/c3f/**\"");
+	path::mkdir(path::new(tmem, string::tformat("%s/outside", root))!!)!!;
+	put(out, "lib/lexer.c3l/manifest.json", "{ \"provides\": \"lexer\", \"targets\": { \"linux-x64\": { \"sources-override\": [\"../../../outside/**\"] } } }");
+	String why = guard::project_escape(out);
+	assert(why == "lib/lexer.c3l/manifest.json: library manifest names sources outside its library ('../../../outside/**')", "%s", why);
+}
