@@ -96,19 +96,20 @@ fn void a_very_deep_expression_does_not_crash_the_rewrite() @test
 	assert(n.len > 0, "survived deep nesting of the old form");
 }
 
-// How many .c3 files under `dir` the vendored grammar does not parse cleanly (and the first few names).
+// The .c3 files under `dir` that the vendored grammar does not parse cleanly, as paths relative to `dir`.
 // This is what tells you whether the grammar has caught up with a c3c release.
-fn int unparsed_files(String dir, DString* names)
+fn String[] unparsed_files(String dir)
 {
 	List{String} files;
 	files.init(tmem);
 	Path? p = path::new(tmem, dir);
-	if (catch p) return -1;
+	if (catch p) return {};
 	outline::collect(p, &files, 0);
 	TSParser* parser = ts::ts_parser_new();
 	defer ts::ts_parser_delete(parser);
 	ts::ts_parser_set_language(parser, ts::tree_sitter_c3());
-	int bad = 0;
+	List{String} bad;
+	bad.init(tmem);
 	foreach (f : files)
 	{
 		char[]? data = file::load_temp(f);
@@ -116,9 +117,31 @@ fn int unparsed_files(String dir, DString* names)
 		TSTree* tree = ts::ts_parser_parse_string(parser, null, data.ptr, (uint)data.len);
 		defer ts::ts_tree_delete(tree);
 		if (!ts::ts_node_has_error(ts::ts_tree_root_node(tree))) continue;
-		if (bad++ < 5) names.appendf("  %s\n", f);
+		bad.push(f.starts_with(dir) ? f[dir.len..].trim("/") : f);
 	}
-	return bad;
+	return bad.array_view();
+}
+
+struct KnownUnparsed
+{
+	String file;        // relative to lib/std
+	String construct;   // what the vendored grammar does not understand
+	String since;       // the c3c release it was found with
+}
+
+// Standard library files the vendored grammar (tree-sitter-c3 v0.13.0, upstream HEAD) cannot parse yet. The test below fails for any OTHER
+// file, and fails when a listed file does parse (the grammar caught up: delete its entry here). See MAINTAINING.md, "grammar".
+const KnownUnparsed[*] KNOWN_UNPARSED = {
+	{ "libc/libc.c3", "`$feat(WIN32 & X86_64)`: `&` inside `$feat(...)` (macro jmpbuf_alignment)", "0.8.6" },
+};
+
+// the smallest program with it: while this stays incomplete, the entry above is needed
+const String KNOWN_CONSTRUCT = "macro int f() => $feat(WIN32 & X86_64);\nfn void after() {}\n";
+
+fn bool is_known(String f) @local
+{
+	foreach (k : KNOWN_UNPARSED) if (k.file == f) return true;
+	return false;
 }
 
 fn void the_grammar_parses_the_stdlib_of_the_c3c_it_targets() @test
@@ -126,9 +149,27 @@ fn void the_grammar_parses_the_stdlib_of_the_c3c_it_targets() @test
 	// Run with C3_DIR=<the c3c install> (CI sets it). Skipped without it: there is no stdlib to read.
 	String? dir = env::tget_var("C3_DIR");
 	if (catch dir) return;
-	DString names = dstring::temp();
-	int bad = unparsed_files(string::tformat("%s/lib/std", dir), &names);
-	assert(bad == 0, "%d stdlib files do not parse with the vendored grammar: it has not caught up with this c3c. Keep the old grammar (git checkout vendor/) until it does, or see scripts/update_treesitter.py.\n%s", bad, names.str_view());
+	String root = string::tformat("%s/lib/std", dir);
+	String[] bad = unparsed_files(root);
+	DString unknown = dstring::temp();
+	int n = 0;
+	foreach (f : bad) if (!is_known(f)) { n++; unknown.appendf("  %s\n", f); }
+	assert(n == 0, "%d stdlib files do not parse with the vendored grammar and are not in KNOWN_UNPARSED: it has not caught up with this c3c. Keep the old grammar (git checkout vendor/) until it does, or see scripts/update_treesitter.py.\n%s", n, unknown.str_view());
+	// a listed file that parses again: the grammar caught up, remove the entry
+	foreach (k : KNOWN_UNPARSED)
+	{
+		bool still = false;
+		foreach (f : bad) if (f == k.file) still = true;
+		bool exists = file::is_file(string::tformat("%s/%s", root, k.file));
+		assert(!exists || still, "%s parses now: remove it from KNOWN_UNPARSED (it was: %s, c3c %s)", k.file, k.construct, k.since);
+	}
+}
+
+fn void the_known_unparsed_construct_is_still_unparsed() @test
+{
+	// without C3_DIR: the entry in KNOWN_UNPARSED is only right while this is incomplete
+	assert(outline::outline_source(KNOWN_CONSTRUCT).contains("may be incomplete"), "the grammar parses `$feat(A & B)` now: remove libc/libc.c3 from KNOWN_UNPARSED");
+	assert(!outline::outline_source("macro int f() => $feat(WIN32);\nfn void after() {}\n").contains("incomplete"), "the plain form must parse");
 }
 
 fn void a_file_the_grammar_rejects_is_marked_incomplete() @test
