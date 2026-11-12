@@ -23,6 +23,9 @@ const Miss[*] MISSES = {
 	{ "String.to_upper", "String.convert_to_upper" },
 	{ "String.tsplit_x", "String.tsplit" },
 	{ "Path.exists", "path::exists" },
+	// the names of other languages
+	{ "List.append", "List.push" },
+	{ "HashMap.put", "HashMap.set" },
 };
 
 fn String first_suggestion(String reply) @local
@@ -68,4 +71,15 @@ fn void a_missing_libc_function_says_to_declare_an_extern() @test
 {
 	String r = tools::c3_lookup("libc::fstat");
 	assert(r.contains("extern fn") && r.contains("@extern(\"fstat\")") && !r.contains("did you mean"), "%s", r);
+}
+
+// `String.length` suggested `String.count` (it counts occurrences): the length is the `.len` member
+fn void the_length_of_a_string_is_a_member_not_a_method() @test
+{
+	foreach (n : (String[]){ "String.length", "String.size", "char[].length" })
+	{
+		String r = tools::c3_lookup(n);
+		assert(r.contains("does not exist") && r.contains("`.len` member"), "%s: %s", n, r);
+		assert(!r.contains("did you mean") && !r.contains("String.count   ") && !r.contains("String.count_"), "%s: %s", n, r);
+	}
 }

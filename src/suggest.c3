@@ -16,6 +16,12 @@ const String[*] FILLER = { "get", "set", "new", "is", "to", "as", "try", "from",
 // types that are made of another or build it, where the library keeps what a plain `String` does not have
 const String[2][*] BUILDS = { { "String", "DString" }, { "String", "ZString" }, { "String", "WString" }, { "ZString", "String" }, { "DString", "String" } };
 
+// Names other languages (and 0.6/0.7) use for what C3 calls something else, where the words say nothing: `List.append` is
+// `List.push`. { owner, missing name, the name in C3 }
+const String[3][*] RENAMED_MEMBERS = { { "List", "append", "push" }, { "List", "add", "push" }, { "HashMap", "put", "set" }, { "HashMap", "insert", "set" } };
+// the length of a String or a slice is a member, not a method: `s.len`
+const String[*] LENGTH_NAMES = { "length", "size", "count", "len" };
+
 struct Cand
 {
 	Entry* e;
@@ -137,6 +143,8 @@ fn String did_you_mean(String n)
 {
 	Missing m = parse(n);
 	if (m.name.len < 3) return "";
+	String known = known_member(&m);
+	if (known.len > 0) return known;
 	List{Cand} found;
 	found.init(tmem);
 	if (m.owner.len == 0 && m.mod_name.len == 0) { type_candidates(&m, &found); }
@@ -153,6 +161,29 @@ fn String did_you_mean(String n)
 		out.appendf("  %s   %s\n", shown(sorted[i].e), signature(sorted[i].e));
 	}
 	return out.str_view();
+}
+
+// A member the table above knows: its answer replaces the suggestions by words (`String.length` would suggest `String.count`,
+// which counts occurrences).
+fn String known_member(Missing* m)
+{
+	if (m.owner.len == 0) return "";
+	String lower = m.name.to_lower_tcopy();
+	if (m.owner == "String" || m.owner.ends_with("[]"))
+	{
+		foreach (w : LENGTH_NAMES) if (w == lower) return string::tformat("not a method: the length of a %s is its `.len` member (`s.len`, no parentheses), `%s.%s` does not exist.\n", m.owner == "String" ? "String" : "slice", m.owner, m.name);
+	}
+	foreach (row : RENAMED_MEMBERS)
+	{
+		if (row[0] != m.owner || row[1] != lower) continue;
+		String want = string::tformat("%s.%s", row[0], row[2]);
+		foreach (&e : corpus::entries)
+		{
+			if (e.kind != "method" && e.kind != "mmethod") continue;
+			if (member_of(e.title) == want) return string::tformat("did you mean:\n  %s   %s\n", want, signature(e));
+		}
+	}
+	return "";
 }
 
 // `Arena` is `ArenaAllocator`: a type whose name starts with the word, or has it as one of its words.
