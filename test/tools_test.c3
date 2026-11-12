@@ -360,7 +360,7 @@ fn void a_version_query_returns_that_releases_notes() @test
 	assert(one.starts_with("### 0.8.5 Change list > Changes") && !one.contains("Stdlib changes") && !one.contains("> Fixes"), "the limit applies, changes before fixes: %s", one);
 	// a minor version is all its releases, newest first
 	String minor = tools::changes_reply("0.8", 5);
-	assert(minor.starts_with("### 0.8.5"), "%s", minor);
+	assert(minor.starts_with("### 0.8.6"), "%s", minor);
 	// the words filter within the release
 	String words = tools::changes_reply("0.8.5 removed", 3);
 	assert(words.contains("Removed experimental support") && !words.contains("### 0.8.4"), "%s", words);
@@ -374,8 +374,8 @@ fn void a_version_query_returns_that_releases_notes() @test
 	String none = tools::changes_reply("0.8.5 zzzzqq", 3);
 	assert(none.starts_with("nothing in the release notes of 0.8.5"), "%s", none);
 	// a release the snapshot does not have says so and names the ones it has
-	String newer = tools::changes_reply("0.8.6", 3);
-	assert(newer.contains("no notes for it") && newer.contains("0.8.5") && newer.contains("newer than the snapshot"), "%s", newer);
+	String newer = tools::changes_reply("0.8.7", 3);
+	assert(newer.contains("no notes for it") && newer.contains("0.8.6") && newer.contains("newer than the snapshot"), "%s", newer);
 	assert(!newer.contains("### 0.8.4"), "%s", newer);
 	String older = tools::changes_reply("0.2.0", 3);
 	assert(older.contains("no notes for it") && older.contains("0.3.0"), "%s", older);

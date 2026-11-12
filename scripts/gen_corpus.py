@@ -63,8 +63,16 @@ CWD = os.getcwd()
 
 # Statements of the manual that the compiler contradicts, checked by hand. (old text, corrected text). A correction
 # whose old text is gone (the manual was fixed) is reported, then dropped from this list.
-ERRATA = [('* Every other module whose path shares the same top-level component as the current module. Within a module `foo::abc`, the modules `foo`, `foo::cde`, and so on are implicitly imported.',
-           '* The parent modules of the current module, used with their module name: within `foo::abc::x`, `foo::f()` and `abc::g()` need no `import`. Sibling modules (`foo::cde`) are not implicitly imported ("lateral implicit imports removed" in the release notes): import them. [Corrected by c3-guide-mcp: the c3c 0.8.5 manual says every module under the same top-level component is imported; c3c 0.8.6 rejects a call into a sibling module without `import`.]')]
+ERRATA = [
+    # `$assignable` was removed in 0.8.0 ("Removed deprecated `$assignable`" in the release notes); the 0.8.6 manual still uses it
+    # in two examples. `$defined(Type v = expr)` asks the same thing (checked with c3c 0.8.6: both examples compile and run).
+    ('@require $assignable(resource.open(), void*)',
+     '@require $defined(void* p = resource.open())   // [c3-guide-mcp: the manual wrote $assignable(resource.open(), void*); $assignable was removed in 0.8.0]'),
+    ('@require $assignable(1, TypeB) && $assignable(1, TypeC)\n @require $assignable((TypeB)1, TypeA) && $assignable((TypeC)1, TypeA)',
+     '@require $defined(TypeB b = 1) && $defined(TypeC c = 1)\n @require $defined(TypeA a1 = (TypeB)1) && $defined(TypeA a2 = (TypeC)1)\n// [c3-guide-mcp: the manual wrote $assignable(x, T); $assignable was removed in 0.8.0, $defined(T v = x) asks the same]'),
+    ('@require "$assignable((TypeB)1, TypeA) && $assignable((TypeC)1, TypeA)" violated.',
+     '@require "$defined(TypeA a1 = (TypeB)1) && $defined(TypeA a2 = (TypeC)1)" violated.'),
+]
 
 def apply_errata(text):
     for old, new in ERRATA:
@@ -108,8 +116,9 @@ def sig(it):
     return f"{kind} {name}{gen}" + (f" ({ifs})" if ifs else "") + (f" {{ {mem} }}" if mem and len(mem) < 300 else "")
 
 def symbols(c3):
-    # run inside the install dir: docgen prints locations relative to the working directory
-    r = subprocess.run([os.path.join(c3, "c3c"), "docgen", "lib/std", "--json"],
+    # run inside the install dir: docgen prints locations relative to the working directory. --stdlib names that same
+    # library: without it c3c also finds a lib/ next to the install dir (a c3/ folder inside an unpacked release, 0.8.6) and loads the std twice
+    r = subprocess.run([os.path.join(c3, "c3c"), "--stdlib", "lib/std", "docgen", "lib/std", "--json"],
                        capture_output=True, text=True, check=True, cwd=c3)
     dg = json.loads(r.stdout.replace(os.path.realpath(c3), "<project>"))
     root = os.path.join(c3, "")
