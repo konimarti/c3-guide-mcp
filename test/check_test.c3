@@ -932,7 +932,7 @@ fn void the_guard_reads_git_folders_too() @test
 	assert(has(r, "rejected") && has(r, ".git/x/evil.c3"), "%s", r);
 }
 
-// A data folder full of links to places inside the project (the yaml-test-suite layout: `name/x -> ../A2M4`) is not an
+// A data folder full of links to places inside the project (a test-data layout: `name/x -> ../A2M4`) is not an
 // escape: the target is read where it lies. A link that ends outside the project, or nowhere, or that c3c would compile
 // under a name the scan does not read, still is. Each case below is one project in a fresh folder.
 fn String link_project(String root, String name, String script) @local
@@ -942,7 +942,7 @@ fn String link_project(String root, String name, String script) @local
 	path::mkdir(path::new(tmem, string::tformat("%s/data/real", proj))!!, recursive: true)!!;
 	file::save(string::tformat("%s/project.json", proj), "{ \"sources\": [\"src/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
 	file::save(string::tformat("%s/src/main.c3", proj), "module app;\nfn void main() {}\n")!!;
-	file::save(string::tformat("%s/data/real/in.yaml", proj), "a: 1\n")!!;
+	file::save(string::tformat("%s/data/real/in.txt", proj), "a: 1\n")!!;
 	file::save(string::tformat("%s/outside.txt", root), "S3CRET")!!;
 	support::sh(string::tformat("cd '%s' && %s", proj, script));
 	return proj;
@@ -957,7 +957,7 @@ fn void links_that_stay_inside_the_project_are_accepted() @test
 		// 1500 links to sibling directories, a link to a file, a chain, a link to an ancestor (a loop if it were entered),
 		// and a link from outside the source folder into it
 		String script = "mkdir data/name; for i in 1 2 3 4 5 6 7 8; do ln -s ../real data/name/x$i; done; "
-			"ln -s real/in.yaml data/file.yaml; ln -s file.yaml data/chain.yaml; ln -s .. data/real/up; ln -s ../src/sub data/into_src";
+			"ln -s real/in.txt data/file.txt; ln -s file.txt data/chain.txt; ln -s .. data/real/up; ln -s ../src/sub data/into_src";
 		String proj = link_project(root, "ok", script);
 		String r = check::c3_check(path: proj);
 		assert(has(r, "OK: no errors"), "%s", r);

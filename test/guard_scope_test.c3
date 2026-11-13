@@ -20,12 +20,12 @@ fn void put(String proj, String rel, String text) @local
 	file::save(f, text)!!;
 }
 
-// Like c3f: sources and test-sources by pattern, a library in lib/, a work folder and a review folder next to them.
-fn String c3f_like(String root, String name, String sources) @local
+// Like a typical application: sources and test-sources by pattern, a library in lib/, a work folder and a review folder next to them.
+fn String app_like(String root, String name, String sources) @local
 {
 	String proj = string::tformat("%s/%s", root, name);
 	put(proj, "project.json", string::tformat("{ \"langrev\": \"1\", \"sources\": [%s], \"test-sources\": [\"test/**\"], \"dependency-search-paths\": [\"lib\"], \"dependencies\": [\"lexer\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }", sources));
-	put(proj, "src/c3f/main.c3", "module app;\nimport lexer;\nfn void main() { lexer::tok(); }\n");
+	put(proj, "src/app/main.c3", "module app;\nimport lexer;\nfn void main() { lexer::tok(); }\n");
 	put(proj, "test/t.c3", "module app_test;\nfn void helper() {}\n");
 	put(proj, "lib/lexer.c3l/manifest.json", LIB_MANIFEST);
 	put(proj, "lib/lexer.c3l/src/lexer.c3", "module lexer;\nfn void tok() {}\n");
@@ -37,7 +37,7 @@ fn void scratch_folders_and_fixtures_do_not_get_a_project_refused() @test
 	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
-	String proj = c3f_like(root, "c3f", "\"src/c3f/**\"");
+	String proj = app_like(root, "app", "\"src/app/**\"");
 	// a stdlib copy and a source that reads /etc/passwd in an ignored work folder, a library that names sources outside
 	// itself and an evil source in review fixtures: none of it is compiled
 	put(proj, ".work/prev/round1/unit-stdlib/std/libc/x.c3", EVIL);
@@ -60,16 +60,16 @@ fn void the_same_evil_file_in_a_compiled_place_is_refused_in_one_line() @test
 		Path dir = proc::scratch_dir()!!;
 		defer (void)path::rmtree(dir);
 		String root = (String)dir;
-		String proj = c3f_like(root, "c3f", "\"src/c3f/**\"");
+		String proj = app_like(root, "app", "\"src/app/**\"");
 		put(proj, "review/evil.c3", EVIL);
 		assert(guard::project_escape(proj) == "");
 		// 1) in a source folder
-		put(proj, "src/c3f/sub/evil.c3", EVIL);
+		put(proj, "src/app/sub/evil.c3", EVIL);
 		String why = guard::project_escape(proj);
-		assert(why == "src/c3f/sub/evil.c3:2: $embed path '/etc/passwd' leaves the project", "%s", why);
+		assert(why == "src/app/sub/evil.c3:2: $embed path '/etc/passwd' leaves the project", "%s", why);
 		String r = check::c3_check(path: proj);
-		assert(has(r, "rejected: src/c3f/sub/evil.c3:2: $embed path") && has(r, "c3c build") && !has(r, "cannot be shown"), "%s", r);
-		(void)file::delete(string::tformat("%s/src/c3f/sub/evil.c3", proj));
+		assert(has(r, "rejected: src/app/sub/evil.c3:2: $embed path") && has(r, "c3c build") && !has(r, "cannot be shown"), "%s", r);
+		(void)file::delete(string::tformat("%s/src/app/sub/evil.c3", proj));
 		// 2) in a test-sources folder
 		put(proj, "test/evil.c3", EVIL);
 		assert(guard::project_escape(proj) == "test/evil.c3:2: $embed path '/etc/passwd' leaves the project", "%s", guard::project_escape(proj));
@@ -80,19 +80,19 @@ fn void the_same_evil_file_in_a_compiled_place_is_refused_in_one_line() @test
 		(void)file::delete(string::tformat("%s/lib/lexer.c3l/src/evil.c3", proj));
 		// 4) in a folder a source pattern names through a link (the target is inside the project, read where it is compiled)
 		support::sh(string::tformat("cd '%s' && ln -s review linked", proj));
-		put(proj, "project.json", "{ \"sources\": [\"src/c3f/**\", \"linked/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }");
+		put(proj, "project.json", "{ \"sources\": [\"src/app/**\", \"linked/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }");
 		String linked = guard::project_escape(proj);
 		assert(linked == "linked/evil.c3:2: $embed path '/etc/passwd' leaves the project", "%s", linked);
 		// 5) named as a file, by a plain sources entry
-		put(proj, "project.json", "{ \"sources\": [\"src/c3f/**\", \"review/evil.c3\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }");
+		put(proj, "project.json", "{ \"sources\": [\"src/app/**\", \"review/evil.c3\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }");
 		assert(guard::project_escape(proj) == "review/evil.c3:2: $embed path '/etc/passwd' leaves the project", "%s", guard::project_escape(proj));
 		// 6) a folder the target adds (a target's sources are compiled for it)
-		put(proj, "project.json", "{ \"sources\": [\"src/c3f/**\"], \"targets\": { \"app\": { \"type\": \"executable\", \"sources\": [\"review\"] } } }");
+		put(proj, "project.json", "{ \"sources\": [\"src/app/**\"], \"targets\": { \"app\": { \"type\": \"executable\", \"sources\": [\"review\"] } } }");
 		assert(guard::project_escape(proj) == "review/evil.c3:2: $embed path '/etc/passwd' leaves the project", "%s", guard::project_escape(proj));
 		// 7) .c3t and .c3i are sources too
-		put(proj, "project.json", "{ \"sources\": [\"src/c3f/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }");
-		put(proj, "src/c3f/x.c3t", EVIL);
-		assert(guard::project_escape(proj) == "src/c3f/x.c3t:2: $embed path '/etc/passwd' leaves the project", "%s", guard::project_escape(proj));
+		put(proj, "project.json", "{ \"sources\": [\"src/app/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }");
+		put(proj, "src/app/x.c3t", EVIL);
+		assert(guard::project_escape(proj) == "src/app/x.c3t:2: $embed path '/etc/passwd' leaves the project", "%s", guard::project_escape(proj));
 	$endif
 }
 
@@ -101,7 +101,7 @@ fn void the_messages_say_what_is_wrong() @test
 	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
-	String proj = c3f_like(root, "p", "\"src/c3f/**\"");
+	String proj = app_like(root, "p", "\"src/app/**\"");
 	String[] bodies = {
 		"module a;\nconst String N = \"x\";\nconst char C = $embed(N)[0];\n",
 		"module a;\nconst char C = $embed(\"a\" +++ \"b\")[0];\n",
@@ -111,12 +111,12 @@ fn void the_messages_say_what_is_wrong() @test
 	String[] reasons = { "$embed with a computed path", "$embed with a path built from parts", "$embed with a path written with escapes", "$exec runs a program" };
 	foreach (i, body : bodies)
 	{
-		put(proj, "src/c3f/bad.c3", body);
+		put(proj, "src/app/bad.c3", body);
 		String why = guard::project_escape(proj);
-		assert(why.starts_with("src/c3f/bad.c3:") && has(why, reasons[i]), "%s: %s", reasons[i], why);
+		assert(why.starts_with("src/app/bad.c3:") && has(why, reasons[i]), "%s: %s", reasons[i], why);
 	}
 	// a library whose manifest names sources outside it
-	put(proj, "src/c3f/bad.c3", CLEAN_MAIN);
+	put(proj, "src/app/bad.c3", CLEAN_MAIN);
 	put(proj, "lib/lexer.c3l/manifest.json", "{ \"provides\": \"lexer\", \"sources\": [\"../../../outside/**\"] }");
 	path::mkdir(path::new(tmem, string::tformat("%s/outside", root))!!)!!;
 	String why = guard::project_escape(proj);
@@ -129,11 +129,11 @@ fn void a_pattern_the_guard_cannot_expand_reads_the_whole_tree_and_says_so() @te
 	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
-	String[] odd = { "\"src/c3f/m*\"", "\"src/c3f/m?in\"", "\"src/**/\"", "\"${HOME}/x/**\"" };
+	String[] odd = { "\"src/app/m*\"", "\"src/app/m?in\"", "\"src/**/\"", "\"${HOME}/x/**\"" };
 	int n = 0;
 	foreach (pattern : odd)
 	{
-		String proj = c3f_like(root, string::tformat("p%d", n++), pattern);
+		String proj = app_like(root, string::tformat("p%d", n++), pattern);
 		String note;
 		String why = guard::project_escape_note(proj, &note);
 		assert(why == "", "%s: %s", pattern, why);
@@ -147,11 +147,11 @@ fn void a_pattern_the_guard_cannot_expand_reads_the_whole_tree_and_says_so() @te
 		assert(has(check::c3_check(path: proj), "rejected"), "%s", pattern);
 	}
 	// a template and a project.json that is not JSON
-	String t = c3f_like(root, "tpl", "\"src/c3f/**\"");
-	put(t, "project.json", "{ \"sources\": [\"src/c3f/**\"], \"targets\": { \"app\": { \"type\": \"executable\", \"template\": \"x/y\" } } }");
+	String t = app_like(root, "tpl", "\"src/app/**\"");
+	put(t, "project.json", "{ \"sources\": [\"src/app/**\"], \"targets\": { \"app\": { \"type\": \"executable\", \"template\": \"x/y\" } } }");
 	String note;
 	assert(guard::project_escape_note(t, &note) == "" && has(note, "template"), "%s", note);
-	put(t, "project.json", "{ \"sources\": [\"src/c3f/**\" ");
+	put(t, "project.json", "{ \"sources\": [\"src/app/**\" ");
 	String why = guard::project_escape_note(t, &note);
 	assert(has(note, "scanned the whole tree") && has(why, "project.json"), "%s %s", note, why);
 }
@@ -250,7 +250,7 @@ fn void c3_run_with_a_project_says_when_the_whole_tree_was_read() @test
 {
 	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
-	String proj = c3f_like((String)dir, "p", "\"src/c3f/**\", \"src/c3f/zz?\"");
+	String proj = app_like((String)dir, "p", "\"src/app/**\", \"src/app/zz?\"");
 	String r = check::c3_run("import std::io;\nfn void main() { io::printn(\"hi\"); }", path: proj);
 	assert(r.starts_with("(scanned the whole tree because"), "%s", r);
 }
@@ -296,7 +296,7 @@ fn void a_refusal_for_a_library_archive_is_readable() @test
 {
 	Path dir = proc::scratch_dir()!!;
 	defer (void)path::rmtree(dir);
-	String proj = c3f_like((String)dir, "p", "\"src/c3f/**\"");
+	String proj = app_like((String)dir, "p", "\"src/app/**\"");
 	String z = string::tformat("%s/lib/zip.c3l", proj);
 	support::sh(string::tformat("cd '%s' && printf 'module zipped;\\nconst char C = $embed(\"/etc/passwd\")[0];\\n' > zipped.c3 && python3 -c \"import zipfile; z = zipfile.ZipFile('%s', 'w'); z.write('zipped.c3'); z.write('/dev/null', 'manifest.json'); z.close()\"", (String)dir, z));
 	String why = guard::project_escape(proj);
@@ -315,7 +315,7 @@ fn void a_wildcard_in_a_folder_part_reads_the_whole_tree_even_when_nothing_match
 	String[] odd = { "\"src/su?/**\"", "\"src/[s]ub/**\"", "\"src/*/x/**\"", "\"s*c/**\"", "\"src/**/x.c3\"", "\"src/su?/*\"" };
 	foreach (i, pattern : odd)
 	{
-		String proj = c3f_like(root, string::tformat("w%d", i), pattern);
+		String proj = app_like(root, string::tformat("w%d", i), pattern);
 		put(proj, ".work/evil.c3", EVIL);
 		String note;
 		String why = guard::project_escape_note(proj, &note);
@@ -331,12 +331,12 @@ fn void a_library_manifest_sources_override_is_read() @test
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
 	// inside the library: the folder it names is read
-	String proj = c3f_like(root, "in", "\"src/c3f/**\"");
+	String proj = app_like(root, "in", "\"src/app/**\"");
 	put(proj, "lib/lexer.c3l/manifest.json", "{ \"provides\": \"lexer\", \"sources\": [\"src/**\"], \"targets\": { \"linux-x64\": { \"sources-override\": [\"alt/**\"] } } }");
 	put(proj, "lib/lexer.c3l/alt/evil.c3", EVIL);
 	assert(guard::project_escape(proj) == "lib/lexer.c3l/alt/evil.c3:2: $embed path '/etc/passwd' leaves the project", "%s", guard::project_escape(proj));
 	// outside the library: the manifest is refused
-	String out = c3f_like(root, "out", "\"src/c3f/**\"");
+	String out = app_like(root, "out", "\"src/app/**\"");
 	path::mkdir(path::new(tmem, string::tformat("%s/outside", root))!!)!!;
 	put(out, "lib/lexer.c3l/manifest.json", "{ \"provides\": \"lexer\", \"targets\": { \"linux-x64\": { \"sources-override\": [\"../../../outside/**\"] } } }");
 	String why = guard::project_escape(out);

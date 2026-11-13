@@ -424,7 +424,7 @@ fn void a_project_whose_sources_are_not_in_src_is_searched() @test
 	assert(tools::c3_lookup("entry_point", root).contains("main.c3"));
 }
 
-// A project the way yaml.c3l is laid out: `"sources": ["./*", "v2/*", "src/test/**"]`, sources at the root, in v2 and in src/test.
+// A project the way geom.c3l is laid out: `"sources": ["./*", "v2/*", "src/test/**"]`, sources at the root, in v2 and in src/test.
 fn Path root_sources_project() @local
 {
 	Path dir = proc::scratch_dir()!!;
@@ -433,11 +433,11 @@ fn Path root_sources_project() @local
 	path::mkdir(path::new(tmem, string::tformat("%s/v2", root))!!)!!;
 	path::mkdir(path::new(tmem, string::tformat("%s/other", root))!!)!!;
 	file::save(string::tformat("%s/project.json", root), "{ \"sources\": [\"./*\", \"v2/*\", \"src/test/**\"], \"targets\": { \"app\": { \"type\": \"executable\" } } }")!!;
-	file::save(string::tformat("%s/scanner.c3", root), "module yaml::scanner;\nstruct Scanner { int pos; }\nfn int? Scanner.next_token(&self) => 1;\nfn void use_it(Scanner* s) { s.next_token()!!; }\n")!!;
-	file::save(string::tformat("%s/parser.c3", root), "module yaml::parser;\nstruct Parser { int depth; }\nfn int Parser.next(&self) => 2;\n")!!;
-	file::save(string::tformat("%s/v2/event.c3", root), "module yaml::v2;\nconst int QUEUE_SIZE = 16;\nfn int Event.next(&self) => 3;\n")!!;
-	file::save(string::tformat("%s/src/test/parser/queue_test.c3", root), "module yaml::queue_test;\nfn void next_token_does_not_shift_the_queue() @test { Scanner s; s.next_token()!!; }\n")!!;
-	file::save(string::tformat("%s/other/not_a_source.c3", root), "module yaml::other;\nfn int next_token_elsewhere() => 4;\n")!!;
+	file::save(string::tformat("%s/scanner.c3", root), "module geom::scanner;\nstruct Scanner { int pos; }\nfn int? Scanner.next_token(&self) => 1;\nfn void use_it(Scanner* s) { s.next_token()!!; }\n")!!;
+	file::save(string::tformat("%s/parser.c3", root), "module geom::parser;\nstruct Parser { int depth; }\nfn int Parser.next(&self) => 2;\n")!!;
+	file::save(string::tformat("%s/v2/event.c3", root), "module geom::v2;\nconst int QUEUE_SIZE = 16;\nfn int Event.next(&self) => 3;\n")!!;
+	file::save(string::tformat("%s/src/test/parser/queue_test.c3", root), "module geom::queue_test;\nfn void next_token_does_not_shift_the_queue() @test { Scanner s; s.next_token()!!; }\n")!!;
+	file::save(string::tformat("%s/other/not_a_source.c3", root), "module geom::other;\nfn int next_token_elsewhere() => 4;\n")!!;
 	return dir;
 }
 
@@ -493,7 +493,7 @@ fn void a_std_qualified_query_skips_weak_project_names() @test
 	Path dir = root_sources_project();
 	defer (void)path::rmtree(dir);
 	String root = (String)dir;
-	file::save(string::tformat("%s/v2/files.c3", root), "module yaml::files;\nfn int from_file() => 1;\nfn int check_alloc_file() => 2;\n")!!;
+	file::save(string::tformat("%s/v2/files.c3", root), "module geom::files;\nfn int from_file() => 1;\nfn int check_alloc_file() => 2;\n")!!;
 	String r = tools::c3_lookup("std::io::File", path: root, examples: 0);
 	assert(r.contains("std::io::File") && !r.contains("from_file") && !r.contains("merely contain"), "%s", r);
 	// the same name without std:: still shows the project's names after the library's
