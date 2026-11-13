@@ -472,11 +472,14 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	String[] argv = a.list();
 	int status = 0;
 	bool timed_out = false;
+	bool sanitized = false;
+	foreach (arg : mode_args) if (arg.starts_with("--sanitize=")) sanitized = true;
 	// capture more than is shown: the [PASS] lines are dropped below, and they must not push the
 	// failures and the summary line past the cap
-	String? out = proc::run_capped(argv, &status, &timed_out, { .deadline_ms = deadline_ms, .max_output = MAX_RUN_CAPTURE, .input = input, .cwd = sd, .sweep = sd });
+	String? out = proc::run_capped(argv, &status, &timed_out, { .deadline_ms = deadline_ms, .max_output = MAX_RUN_CAPTURE, .input = input, .cwd = sd, .sweep = sd, .raise_limits = sanitized });
 	if (catch out) return NO_C3C;
 	if (proc::could_not_start(status)) return NO_C3C;
+	if (sanitized && out.contains("ReserveShadowMemoryRange failed")) return sanitizer_blocked(out);
 	// a program's own output is shown as it is, with its exit code; a test run drops the runtime's frames and passing lines
 	String shown = report(out, program ? 0 : status, timed_out, hide, replacement, ok, deadline_ms, also_hide);
 	if (program) { if (status != 0 && !timed_out && !shown.contains("error: ")) shown = string::tformat("%s\n[exit code %d]", shown, status); }
@@ -487,6 +490,26 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	bool platform_given = false;
 	foreach (arg : mode_args) if (arg == "--target") platform_given = true;
 	return string::tformat("%s%s%s", shown, after_compile(shown, platform_given), footer);
+}
+
+// The sanitizer could not reserve its shadow memory even with the soft limits raised: say which limit is in the way, in one line
+// (the raw report is neither short nor a result).
+fn String sanitizer_blocked(String out)
+{
+	String limits = "";
+	$if !env::WIN32:
+		int code = 0;
+		bool timed_out = false;
+		String? l = proc::run_capped({ "/bin/sh", "-c", "echo \"data $(ulimit -S -d) soft, $(ulimit -H -d) hard; address space $(ulimit -S -v) soft, $(ulimit -H -v) hard\"" }, &code, &timed_out);
+		if (try l) limits = string::tformat(" (%s)", l.trim());
+	$endif
+	String which = out.contains("ulimit -v or ulimit -d") ? "the data-segment or address-space limit (ulimit -d / -v)" : "an address-space limit";
+	// a c3c that is a shell script setting `ulimit` itself lowers the limits again after we raised them
+	String wrapper = "";
+	String bin = compiler::c3c_binary();
+	char[]? loaded = file::load_temp(bin);
+	if (try loaded) { String head = (String)loaded; if (head.starts_with("#!") && head.contains("ulimit")) wrapper = string::tformat(" The c3c in use (%s) is a script that sets ulimit itself.", bin); }
+	return string::tformat("The sanitizer could not start: %s is too small for its shadow memory%s. The tests did not run (no sanitizer result).%s Run them where the limit is unlimited.", which, limits, wrapper);
 }
 
 fn String c3_test(String path @Desc("a project directory (with project.json) or a .c3 file with @test functions") = "",

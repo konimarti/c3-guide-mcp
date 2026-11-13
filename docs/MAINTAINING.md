@@ -64,3 +64,4 @@ sh test/version_check.sh                   # version and CI pins
 - A pattern the guard cannot expand like c3c makes it scan the whole tree and say so.
 - `c3_test` and `c3_run` of a project are not guarded, because they run the project's own code anyway.
 - Every c3c run has a deadline and capped output, and everything under the scratch directory is killed at the deadline.
+- Runs with `sanitize` raise the soft data and address-space limits to the hard ones (`proc`); if the sanitizer still cannot start, the answer says which limit blocks it.

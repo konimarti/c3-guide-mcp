@@ -119,6 +119,16 @@ fn bool child_exited(Process* p, int* status)
 	$endif
 }
 
+// A sandbox may set a soft limit on the data segment or the address space far below its hard limit. A sanitizer reserves
+// terabytes of address space for its shadow memory and fails under any such limit, so a run with a sanitizer first raises the
+// soft limits to the hard ones (never above them; a failing `ulimit` is ignored, the sanitizer then says what it could not do).
+const String RAISE_LIMITS = "ulimit -S -d \"$(ulimit -H -d)\" 2>/dev/null; ulimit -S -v \"$(ulimit -H -v)\" 2>/dev/null; ";
+
+const String WRAP_HEAD = "cd \"$1\" || exit 253; shift; ";
+const String WRAP_TAIL = "command -v \"$1\" >/dev/null 2>&1 || exit 252; exec \"$@\"";
+const String WRAP_PLAIN = WRAP_HEAD +++ WRAP_TAIL;
+const String WRAP_RAISED = WRAP_HEAD +++ RAISE_LIMITS +++ WRAP_TAIL;
+
 fn long ms_since(Clock t) => (long)(t.to_now() / 1_000_000);
 
 // What c3c and the C toolchain it calls read (c3c's own getenv calls, plus the loader, locale and sanitizer settings).
@@ -153,6 +163,7 @@ struct RunOpts
 	String input;        // the child's stdin, then end of input (default: end of input at once)
 	String cwd;          // the child's working directory (default: an empty directory of ours, see neutral_cwd)
 	String sweep;        // a scratch directory whose processes are killed too when the run is cut short
+	bool raise_limits;   // Linux and macOS: raise the soft data-segment and address-space limits to the hard ones first (sanitizers)
 }
 
 // Run argv, capture stdout+stderr up to max_output, kill the child past that or past the deadline.
@@ -176,7 +187,7 @@ fn String? run_capped(String[] cmd_in, int* code, bool* timed_out, RunOpts opts 
 			String[] wrapped = mem::talloc_array(String, cmd_in.len + 5);
 			wrapped[0] = "/bin/sh";
 			wrapped[1] = "-c";
-			wrapped[2] = "cd \"$1\" || exit 253; shift; command -v \"$1\" >/dev/null 2>&1 || exit 252; exec \"$@\"";
+			wrapped[2] = opts.raise_limits ? WRAP_RAISED : WRAP_PLAIN;
 			wrapped[3] = "sh";
 			wrapped[4] = cwd;
 			foreach (i, c : cmd_in) wrapped[5 + i] = c;
