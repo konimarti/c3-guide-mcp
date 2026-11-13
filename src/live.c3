@@ -165,6 +165,21 @@ fn Entry make_entry(String kind, String title, String body, String loc)
 	return { kind.copy(mem), title.copy(mem), body.copy(mem), loc.copy(mem) };
 }
 
+// The names inside an enum or a constset: `constset member Errno.EAGAIN = 11 (CInt)`, `enum member State.Idle (ordinal 0)`.
+// "" for a member of anything else (a fault is an entry of its own, a struct's members are its fields). The port of
+// `member_sig` in scripts/gen_corpus.py.
+fn String member_sig(Object* it, Object* m, sz ordinal)
+{
+	String kind = text(it, "kind");
+	String name = text(m, "name");
+	if ((kind != "enum" && kind != "constset") || name.len == 0) return "";
+	String tname = text(it, "name");
+	String base = text(child(it, "base_type"), "name");
+	if (kind == "enum") return string::tformat("enum member %s.%s (ordinal %d)%s", tname, name, (int)ordinal, base.len > 0 ? string::tformat(" of an enum with base type %s", base) : "");
+	String val = m.has_key("value") ? string::tformat(" = %s", text(m, "value")) : "";
+	return string::tformat("%s member %s.%s%s%s", kind, tname, name, val, base.len > 0 ? string::tformat(" (%s)", base) : "");
+}
+
 // The public symbols of one module of the docgen output, appended to `out`. `cwd` and `real_cwd` are the directory
 // docgen ran in, as given and with links resolved ("" when the same): both are replaced by `<project>`.
 fn void add_module(Object* mod, String cwd, String real_cwd, List{Entry}* out)
@@ -189,6 +204,17 @@ fn void add_module(Object* mod, String cwd, String real_cwd, List{Entry}* out)
 			sz at = file.rindex_of("lib/std/") ?? -1;
 			if (at >= 0) file = file[at..];
 			out.push(make_entry(k.code, text(it, "uid"), body, file));
+			Object* members = child_any(it, "members");
+			if (k.key == "types" && members.is_array())
+			{
+				for (sz j = 0; j < members.get_len(); j++)
+				{
+					Object* m = members.get_at(j);
+					if (!m.is_map()) continue;
+					String line = member_sig(it, m, j);
+					if (line.len > 0) out.push(make_entry("member", string::tformat("%s.%s", text(it, "uid"), text(m, "name")), line, file));
+				}
+			}
 		}
 	}
 }

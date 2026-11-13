@@ -12,6 +12,7 @@ For people who change or release the server. Users: see the [README](../README.m
 - `src/live.c3` is a port of `symbols()` in `scripts/gen_corpus.py`: change one, change the other (`test/live_test.c3` compares them).
 - Project lookups and `c3_refs` read source with the vendored tree-sitter grammar, so comments and strings are not uses.
 - `src/doctor.c3` holds one table of where each client keeps its files (`SPECS`, with the source of each location and the unconfirmed ones marked); a new client is a row there. `--doctor` only reads.
+- Enum and constset members are records of kind `member`, written identically by `scripts/gen_corpus.py` and `src/live.c3`, and take no part in `c3_search`.
 - `src/compat.c3` maps old argument and tool names to the current ones; a renamed parameter needs an entry in `alias_of`.
 - Every ranking rule must hold in general; `test/quality_test.c3`, `test/suggest_test.c3` and `test/sessions_test.c3` pin the cases.
 

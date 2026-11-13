@@ -9,6 +9,7 @@ import std::collections::list, std::core::ascii, std::sort;
 // the types that build it, the module of the type, the module that was named. At most 3; below a threshold, nothing.
 
 const int MAX_SUGGESTIONS = 3;
+const float EXACT_NAME = 10.0f;        // added to the score of a candidate that has exactly the missing name
 const float MIN_RELATIVE = 0.88f;      // a suggestion must have this share of the best one's score
 const float MIN_COVER = 0.6f;          // the share of the missing name's words a suggestion must have
 const float SYNONYM_COVER = 0.7f;      // a word the missing name did not use (`size` for `length`) counts for less
@@ -257,6 +258,7 @@ fn void member_candidates(Missing* m, List{Cand}* found)
 		bool has_temp = false;
 		foreach (h : have) if (h == "temp" || h == "tmp") has_temp = true;
 		float score = cov + place + (m.temp && has_temp ? 0.3f : 0) - 0.04f * (float)have.len;
+		if (name == m.name) score += EXACT_NAME;   // the name that was asked for, in the place that was asked for, always first
 		found.push({ e, score });
 	}
 }

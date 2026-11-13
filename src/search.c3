@@ -196,15 +196,20 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 	int[] ttf = mem::talloc_array(int, nterms);
 	df[..] = 0;
 	int total = (int)corpus::entries.len;
+	// enum and constset members are names for c3_lookup: they take no part in a search (not in its statistics either, so a
+	// library that gained members ranks every query as before)
+	foreach (&e : corpus::entries) if (e.kind == "member") total--;
+	int slots = (int)corpus::entries.len;
 
 	// pass 1: document frequency per term and average length (cheap second scan avoided by caching)
-	float[] len_cache = mem::talloc_array(float, total);
-	float[] short_bonus = mem::talloc_array(float, total);   // symbol search: a hit in a short name beats one in a long name
-	int[] tf_all = mem::talloc_array(int, (sz)total * nterms);
-	int[] ttf_all = mem::talloc_array(int, (sz)total * nterms);
+	float[] len_cache = mem::talloc_array(float, slots);
+	float[] short_bonus = mem::talloc_array(float, slots);   // symbol search: a hit in a short name beats one in a long name
+	int[] tf_all = mem::talloc_array(int, (sz)slots * nterms);
+	int[] ttf_all = mem::talloc_array(int, (sz)slots * nterms);
 	double sumlen = 0;
 	foreach (i, &e : corpus::entries)
 	{
+		if (e.kind == "member") continue;
 		tf[..] = 0;
 		ttf[..] = 0;
 		int dl = count_terms(e.body, terms, tf, symbols);
@@ -241,6 +246,7 @@ fn Hit[] search(String query, String[] kinds, int limit, bool symbols = false)
 	hits.init(tmem);
 	foreach (i, &e : corpus::entries)
 	{
+		if (e.kind == "member") continue;
 		if (kinds.len > 0)
 		{
 			bool ok = false;

@@ -176,7 +176,8 @@ fn void a_name_in_the_wrong_module_finds_the_right_one() @test
 {
 	String t = tools::symbol_reply("allocator::free");
 	assert(t.contains("std::core::mem::alloc::free"), "%s", t);
-	String first = t.tsplit("\n")[2];
+	// the answer is the symbol itself now (with a line saying where it is): the first symbol shown is the plain function
+	String first = t[(t.index_of("### ") ?? 0)..].tsplit("\n")[0];
 	assert(first.contains("::free") && !first.contains(".free"), "a plain function leads, not a method of some type: %s", t);
 }
 

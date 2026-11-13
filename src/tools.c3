@@ -538,7 +538,7 @@ fn String c3_lookup(String query @Desc("a name ('printfn', 'io::printfn', 'Strin
 	String path @Desc("where your code is: a project directory (its src and libraries are searched), a .c3 file, a .c3l library or a directory of libraries. Default: the project you last gave to c3_check, c3_test or c3_run. Without a query it lists the declarations there") = "",
 	int examples @Desc("working code that calls a library name (0..3, default 1)") = 1,
 	bool source @Desc("also show the whole implementation of a library function, macro or type (instead of reading lib/std files)") = false)
-	@Desc("Look up a name wherever it lives: your project, its libraries (deps) or the C3 standard library. A standard library name gives the exact signature, docs, source location and a working example; a description ('read a line from stdin') gives the functions that do it; a type or module (`List`, `std::io::path`) lists its methods or functions; a name that does not exist says what it became (renamed, a method, a compiler builtin). Never guess a signature, look it up. With source=true the whole implementation of a library function, macro or type is shown: use it instead of reading lib/std files with sed or cat.")
+	@Desc("Look up a name wherever it lives: your project, its libraries (deps) or the C3 standard library. A standard library name gives the exact signature, docs, source location and a working example; a description ('read a line from stdin') gives the functions that do it; a type or module (`List`, `std::io::path`) lists its methods or functions (an enum or constset lists its members, and a member such as `EAGAIN` or `Type.MEMBER` is answered with its type and value); a built-in type, keyword or attribute (`int`, `defer`, `@inline`, `int::max`) is answered from the compiler's lists; a right name in a wrong module path (`std::time::clock::Clock`) is answered with where it really is; a name that does not exist says what it became (renamed, a method, a compiler builtin). Several names in one call (separated by spaces or commas, also with path) are looked up one by one. Never guess a signature, look it up. With source=true the whole implementation of a library function, macro or type is shown: use it instead of reading lib/std files with sed or cat.")
 	@ReadOnly
 {
 	String q = query.trim(" \t\n");
@@ -561,15 +561,15 @@ fn String c3_lookup(String query @Desc("a name ('printfn', 'io::printfn', 'Strin
 	return string::tformat("%s%s", reply, compiler::version_note(reply.contains("does not exist")));
 }
 
-// A query of two to six tokens that all look like names (no plain words) and of which at least one is a standard library
-// name is a list of names, not a description. Otherwise: empty.
+// A query of two to six tokens (separated by spaces or commas) that all look like names is a list of names, not a description:
+// every token is a standard library name, or has a `::`, `.`, `_`, `@` or `$` in it. A plain word ("lowercase", "read") makes it a
+// description. With or without `path`. Otherwise: empty.
 fn String[] name_list(String q)
 {
 	live::ensure();
-	String[] raw = q.tsplit(" ");
+	String[] raw = q.treplace(",", " ").tsplit(" ");
 	String[] out = mem::talloc_array(String, 6);
 	int n = 0;
-	int known = 0;
 	foreach (r : raw)
 	{
 		String t = r.trim(" ,;\t\n");
@@ -578,11 +578,10 @@ fn String[] name_list(String q)
 		foreach (c : t) if (!(c.is_alnum() || c == '_' || c == ':' || c == '.' || c == '@' || c == '$')) return {};
 		out[n++] = t;
 		bool is_known = first_symbol(t) != null;
-		if (is_known) known++;
 		// a plain word ("lowercase") is a description word, a name has :: . _ @ $ or exists
 		if (!is_known && !t.contains("::") && !t.contains(".") && !t.contains("_") && !t.contains("@") && !t.contains("$")) return {};
 	}
-	return (n >= 2 && known >= 1) ? out[:n] : {};
+	return n >= 2 ? out[:n] : {};
 }
 
 fn String lookup_one(String q, String path, int examples, bool source)
@@ -954,6 +953,250 @@ fn String module_listing(String n)
 	return string::tformat("%s\n%s", full, members_of(full, false));
 }
 
+// ---- names the standard library does not declare: the language itself, and a name in the wrong module ----
+
+// General C3 knowledge, not read from the compiler: the built-in types, with their size in bytes and kind (b bool, i signed
+// integer, u unsigned integer, I and U pointer-sized signed and unsigned, f float, o other). test/lookup_language_test.c3
+// compares the sizes with `T::size` of the compiler that builds the tests.
+struct BuiltinType
+{
+	String name;
+	int bytes;
+	char kind;
+	String what;
+}
+
+const BuiltinType[*] BUILTIN_TYPES = {
+	{ "bool", 1, 'b', "the boolean type (`true`, `false`)" },
+	{ "char", 1, 'u', "an unsigned 8-bit integer (a byte; C3 text is `String`, a slice of `char`)" },
+	{ "ichar", 1, 'i', "a signed 8-bit integer" },
+	{ "short", 2, 'i', "a signed 16-bit integer" },
+	{ "ushort", 2, 'u', "an unsigned 16-bit integer" },
+	{ "int", 4, 'i', "a signed 32-bit integer" },
+	{ "uint", 4, 'u', "an unsigned 32-bit integer" },
+	{ "long", 8, 'i', "a signed 64-bit integer" },
+	{ "ulong", 8, 'u', "an unsigned 64-bit integer" },
+	{ "int128", 16, 'i', "a signed 128-bit integer" },
+	{ "uint128", 16, 'u', "an unsigned 128-bit integer" },
+	{ "sz", 0, 'I', "the signed integer of the size of a pointer (the type of sizes and indexes; `usz` is the unsigned one)" },
+	{ "usz", 0, 'U', "the unsigned integer of the size of a pointer (`sz` is the signed one)" },
+	{ "iptr", 0, 'I', "a signed integer that holds a pointer" },
+	{ "uptr", 0, 'U', "an unsigned integer that holds a pointer" },
+	{ "float16", 2, 'f', "a 16-bit IEEE float" },
+	{ "bfloat", 2, 'f', "a 16-bit brain float" },
+	{ "float", 4, 'f', "a 32-bit float" },
+	{ "double", 8, 'f', "a 64-bit float" },
+	{ "float128", 16, 'f', "a 128-bit float" },
+	{ "void", 0, 'o', "no value (`void?` is an optional that holds only a fault)" },
+	{ "any", 0, 'o', "a pointer to any type together with the typeid of what it points to" },
+	{ "typeid", 0, 'o', "the identity of a type at runtime (`int.typeid`-style values, `$typeof(x)`)" },
+	{ "fault", 0, 'o', "the type of fault values (what `faultdef` declares; `Foo?` carries one)" },
+	{ "untypedlist", 0, 'o', "the compile-time type of an untyped list literal `{ 1, 2 }`" },
+};
+
+// General C3 knowledge, not read from the compiler: which keywords start a statement and which a declaration. The words
+// themselves come from `c3c --list-keywords`; anything in that list that is in neither set is only called a keyword.
+const String[*] STATEMENT_WORDS = { "assert", "break", "case", "catch", "continue", "default", "defer", "do", "else", "for", "foreach",
+	"foreach_r", "if", "nextcase", "return", "switch", "try", "while", "asm" };
+const String[*] DECLARATION_WORDS = { "alias", "attrdef", "bitstruct", "const", "constdef", "constset", "enum", "extern", "faultdef", "fn", "import",
+	"macro", "module", "struct", "union", "attrmacro", "interface", "typedef", "static", "tlocal", "inline" };
+
+fn bool in_words(String[] words, String w)
+{
+	foreach (x : words) if (x == w) return true;
+	return false;
+}
+
+fn bool in_list(String list, String name)
+{
+	foreach (line : syntax_list(list).tsplit("\n")) if (line.trim() == name) return true;
+	return false;
+}
+
+fn BuiltinType* builtin_type(String name)
+{
+	foreach (&t : BUILTIN_TYPES) if (t.name == name) return t;
+	return null;
+}
+
+// The range of an integer type as text; "" when it depends on the target or is no integer.
+fn String range_text(BuiltinType* t)
+{
+	// a pointer-sized integer has the width of a pointer on this machine (the target may differ)
+	char kind = t.kind == 'I' ? 'i' : (t.kind == 'U' ? 'u' : t.kind);
+	int width = t.bytes > 0 ? t.bytes : (int)usz::size;
+	if (kind != 'i' && kind != 'u') return "";
+	if (width == 16) return kind == 'i' ? "-170141183460469231731687303715884105728 .. 170141183460469231731687303715884105727" : "0 .. 340282366920938463463374607431768211455";
+	int bits = width * 8;
+	if (kind == 'u') return string::tformat("0 .. %d", bits == 64 ? (ulong)0xFFFF_FFFF_FFFF_FFFF : ((ulong)1 << bits) - 1);
+	return string::tformat("%d .. %d", -(long)((ulong)1 << (bits - 1)), (long)(((ulong)1 << (bits - 1)) - 1));
+}
+
+fn String type_properties_line(BuiltinType* t)
+{
+	String common = string::tformat("`%s::size`, `%s::alignment`, `%s::name`, `%s::kind`", t.name, t.name, t.name, t.name);
+	if (t.kind == 'i' || t.kind == 'u' || t.kind == 'I' || t.kind == 'U') return string::tformat("%s, `%s::min`, `%s::max`", common, t.name, t.name);
+	if (t.kind == 'f') return string::tformat("%s, `%s::min`, `%s::max`, `%s::inf`, `%s::nan`", common, t.name, t.name, t.name, t.name);
+	return common;
+}
+
+// What the manual says about a word of the language: its best sections, as c3_search shows them.
+fn String manual_sections(String query, int limit)
+{
+	Hit[] hits = search::search(query, { "doc" }, limit);
+	DString out = dstring::temp();
+	foreach (h : hits) out.append(hit_text(&corpus::entries[h.idx], 700));
+	return out.str_view();
+}
+
+// A name the library does not declare but the language does: a built-in type (size, range, type properties), a keyword,
+// an attribute, a `$$` builtin written without its `$$`, or a type property (`int::max`). The words come from the compiler's
+// own lists (`c3c --list-keywords`, `--list-builtins`, ...). "" when the name is none of those.
+fn String language_reply(String n)
+{
+	String t = n;
+	String prop = "";
+	sz sep = n.rindex_of("::") ?? -1;
+	if (sep > 0 && (n.index_of("::") ?? -2) == sep) { t = n[:sep]; prop = n[sep + 2..]; }   // `int::max`
+	BuiltinType* bt = builtin_type(t);
+	if (bt != null && prop.len > 0)
+	{
+		if (!in_list("type-properties", prop)) return "";
+		String r = range_text(bt);
+		String what;
+		switch (prop)
+		{
+			case "max": what = r.len > 0 ? string::tformat("the largest value of %s: %s", t, r[(r.index_of(" .. ") ?? -4) + 4..]) : string::tformat("the largest value of %s (a compile-time constant)", t);
+			case "min": what = r.len > 0 ? string::tformat("the smallest value of %s: %s", t, r[:r.index_of(" .. ") ?? r.len]) : string::tformat("the smallest value of %s (a compile-time constant)", t);
+			case "size": what = bt.bytes > 0 ? string::tformat("the size of %s in bytes: %d", t, bt.bytes) : string::tformat("the size of %s in bytes (a compile-time constant)", t);
+			default: what = string::tformat("a type property: written `%s::%s`, evaluated at compile time (the full list: c3_search scope=syntax topic type-properties)", t, prop);
+		}
+		return string::tformat("`%s` is %s.\n", n, what);
+	}
+	if (prop.len > 0) return "";
+	if (bt != null)
+	{
+		String size = bt.bytes > 0 ? string::tformat("%d byte%s", bt.bytes, bt.bytes == 1 ? "" : "s") : (bt.kind == 'I' || bt.kind == 'U' ? string::tformat("pointer-sized (%d bytes on this machine)", (int)usz::size) : "");
+		String r = range_text(bt);
+		DString out = dstring::temp();
+		out.appendf("`%s` is a built-in type of the language, not a library name: %s.\n", t, bt.what);
+		if (size.len > 0) out.appendf("  size: %s%s\n", size, r.len > 0 ? string::tformat("; range: %s", r) : "");
+		out.appendf("  type properties: %s (all of them: c3_search scope=syntax topic type-properties)\n", type_properties_line(bt));
+		return out.str_view();
+	}
+	if (in_list("keywords", n))
+	{
+		String kind = in_words(STATEMENT_WORDS[..], n) ? "a statement" : (in_words(DECLARATION_WORDS[..], n) ? "a declaration keyword" : "a keyword");
+		return string::tformat("`%s` is %s of the language, not a library name (it is one of the words of `c3c --list-keywords`). From the manual:\n%s", n, kind, manual_sections(n, 2));
+	}
+	if (n.starts_with("@") && in_list("attributes", n))
+	{
+		return string::tformat("`%s` is an attribute of the language (`c3c --list-attributes`), not a library name. From the manual:\n%s", n, manual_sections(n, 2));
+	}
+	if (!n.starts_with("$") && n.len > 2 && in_list("builtins", string::tformat("$$%s", n)))
+	{
+		String wrapped = method_summary(n, "");
+		return string::tformat("`%s` is not a library name; `$$%s` is a compiler builtin (c3_search scope=syntax topic builtins lists them), written with the `$$`. The standard library wraps many of them.\n%s", n, n, wrapped);
+	}
+	return "";
+}
+
+// Do two module path words say the same place: equal, or one the beginning of the other (`alloc`, `allocator`; at least 3
+// letters)? `std` and `core` are in every path and say nothing.
+fn bool related_words(String a, String b)
+{
+	if (a == "std" || a == "core" || b == "std" || b == "core") return false;
+	if (a == b) return true;
+	sz shorter = a.len < b.len ? a.len : b.len;
+	return shorter >= 3 && (a.starts_with(b) || b.starts_with(a));
+}
+
+// How many words of two module paths are related.
+fn int related_count(String[] a, String mod)
+{
+	int n = 0;
+	foreach (part : mod.tsplit("::")) foreach (w : a) if (related_words(w, part)) { n++; break; }
+	return n;
+}
+
+// Is `mod` the parent of the asked module or inside it (`std::core` for the asked `std::core::string`)? A sibling.
+fn bool under_parent(String asked, String mod)
+{
+	sz cut = asked.rindex_of("::") ?? -1;
+	if (cut <= 0) return false;
+	String parent = asked[:cut];
+	return mod == parent || mod.starts_with(string::tformat("%s::", parent));
+}
+
+fn int nearness(String asked, String[] asked_parts, String mod) => related_count(asked_parts, mod) + (under_parent(asked, mod) ? 1 : 0);
+
+// `std::time::clock::Clock` names a module that does not hold `Clock`, but a neighbouring module does: answer that symbol, in
+// one line say where it really is. The rule: the part after the last `::` (a name, or `Type.member`) matches a library name
+// exactly, and the module of that name is near the one asked for (one word of the two paths is the same or the start of the
+// other: `std::time` and `std::time::clock`, `alloc` and `allocator`; or it lies under the asked module's parent: `std::core::dstring`
+// for `std::core::string`; `file::tload` is not answered by the `tload` of json, which has nothing to do with `file`). Several such modules: list them, the closest first. "" when there is none.
+fn String elsewhere(String n, bool* found_out, int* exact_out)
+{
+	sz at = n.rindex_of("::") ?? -1;
+	if (at <= 0 || at + 2 >= n.len) return "";
+	String asked = n[:at];
+	String key = n[at + 2..];
+	String[] asked_parts = asked.tsplit("::");
+	List{Entry*} cands;
+	cands.init(tmem);
+	foreach (&e : corpus::entries)
+	{
+		if (!corpus::is_symbol_kind(e.kind)) continue;
+		String last = e.title[((e.title.rindex_of("::") ?? -2) + 2)..];
+		bool same = last == key || (e.kind == "member" && util::last_part(e.title) == key);
+		if (!same) continue;
+		if (nearness(asked, asked_parts, e.title[:e.title.rindex_of("::") ?? 0]) > 0) cands.push(e);
+	}
+	if (cands.len() == 0) return "";
+	Entry*[] list = cands.array_view();
+	int[] shared = mem::talloc_array(int, list.len);
+	foreach (i, c : list) shared[i] = nearness(asked, asked_parts, c.title[:c.title.rindex_of("::") ?? 0]);
+	for (sz i = 1; i < list.len; i++)   // insertion sort: stable, the most related first
+	{
+		sz j = i;
+		while (j > 0 && shared[j] > shared[j - 1])
+		{
+			Entry* te = list[j]; list[j] = list[j - 1]; list[j - 1] = te;
+			int ts = shared[j]; shared[j] = shared[j - 1]; shared[j - 1] = ts;
+			j--;
+		}
+	}
+	if (found_out) *found_out = true;
+	if (list.len == 1)
+	{
+		String where = list[0].title[:list[0].title.rindex_of("::") ?? 0];
+		String body = symbol_reply(list[0].title, null, exact_out);
+		return string::tformat("(`%s` is in %s, not in %s)\n%s", key, where, asked, body);
+	}
+	if (exact_out) *exact_out = (int)list.len;
+	DString out = dstring::temp();
+	out.appendf("'%s' is not in %s; the name `%s` exists in %d other modules:\n", n, asked, key, (int)list.len);
+	for (sz i = 0; i < list.len && i < 8; i++) out.appendf("  %s   %s\n", list[i].title, util::clip(list[i].body.tsplit("\n")[0], 140));
+	if (list.len > 8) out.appendf("  ... and %d more\n", (int)list.len - 8);
+	out.append("c3_lookup the full name of one for its signature and an example.\n");
+	return out.str_view();
+}
+
+// The members of an enum or a constset, as names with their values: what a type lookup adds to the type itself.
+fn String enum_members(String type_uid)
+{
+	String prefix = string::tformat("%s.", type_uid);
+	DString names = dstring::temp();
+	int count = 0;
+	foreach (&e : corpus::entries)
+	{
+		if (e.kind != "member" || !e.title.starts_with(prefix)) continue;
+		if (count++ < 40) names.appendf("%s%s", count > 1 ? ", " : "", e.title[prefix.len..]);
+	}
+	if (count == 0) return "";
+	return string::tformat("Members (%d): %s%s\n  c3_lookup %s.NAME for one value.\n", count, names.str_view(), count > 40 ? ", ..." : "", util::last_part(type_uid));
+}
+
 fn String symbol_reply(String name, bool* found_out = null, int* exact_out = null)
 {
 	if (found_out) *found_out = false;
@@ -983,6 +1226,7 @@ fn String symbol_reply(String name, bool* found_out = null, int* exact_out = nul
 		{
 			if (e.kind != "type" || !uid_matches(e.title, n)) continue;
 			out.append(members_of(e.title, true));
+			out.append(enum_members(e.title));
 			out.append(inherited_methods(e.body));
 			out.append(alias_target(e));
 		}
@@ -1011,6 +1255,20 @@ fn String symbol_reply(String name, bool* found_out = null, int* exact_out = nul
 	{
 		if (found_out) *found_out = true;
 		return field;
+	}
+	// `int`, `defer`, `@inline`, `int::max`, `volatile_load`: the language, not the library
+	String language = language_reply(n);
+	if (language.len > 0)
+	{
+		if (found_out) *found_out = true;
+		if (exact_out) *exact_out = 1;
+		return language;
+	}
+	// the right name in the wrong module: the one where it is
+	if (n.contains("::"))
+	{
+		String moved = elsewhere(n, found_out, exact_out);
+		if (moved.len > 0) return moved;
 	}
 	// not found: say so (a model must not assume a guessed API exists), then offer close names
 	out.append(legacy_note(n));

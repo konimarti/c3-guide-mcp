@@ -8,7 +8,8 @@ usage: scripts/gen_corpus.py [C3_DIR] [all.md]
 
 Record format (parsed by src/corpus.c3): records end with \\x1e, fields split by \\x1f:
   kind, title, body, loc
-kinds: meta | doc | change | list | recipe | fn | macro | method | mmethod | type | var
+kinds: meta | doc | change | list | recipe | fn | macro | method | mmethod | type | var | member
+  (member: one enum or constdef member, `<type uid>.<NAME>`; src/live.c3 reads the same from docgen: keep the two identical)
 """
 import json, os, re, shutil, subprocess, sys
 
@@ -115,6 +116,19 @@ def sig(it):
     mem = ", ".join(ps)
     return f"{kind} {name}{gen}" + (f" ({ifs})" if ifs else "") + (f" {{ {mem} }}" if mem and len(mem) < 300 else "")
 
+def member_sig(it, m, ordinal):
+    """The names inside an enum or a constdef (libc's errno values are the example): `constset member Errno.EAGAIN = 11 (CInt)` (the word is the compiler's own name for the kind).
+    Faults are entries of their own already; a struct's members are its fields, in its signature."""
+    kind = it["kind"]
+    if kind not in ("enum", "constset") or not m.get("name"):
+        return ""
+    tname = it["name"]
+    base = (it.get("base_type") or {}).get("name", "")
+    if kind == "enum":
+        return f"enum member {tname}.{m['name']} (ordinal {ordinal})" + (f" of an enum with base type {base}" if base else "")
+    val = f" = {m['value']}" if "value" in m else ""
+    return f"{kind} member {tname}.{m['name']}{val}" + (f" ({base})" if base else "")
+
 def symbols(c3):
     # run inside the install dir: docgen prints locations relative to the working directory. --stdlib names that same
     # library: without it c3c also finds a lib/ next to the install dir (a c3/ folder inside an unpacked release, 0.8.6) and loads the std twice
@@ -140,7 +154,13 @@ def symbols(c3):
                 if d.get("deprecated"):
                     doc += " DEPRECATED: " + d["deprecated"]
                 body = sig(it) + (("\n" + doc.strip()) if doc.strip() else "")
-                out.append(rec(code, it["uid"], body, it.get("file", "").replace(root, "")))
+                loc = it.get("file", "").replace(root, "")
+                out.append(rec(code, it["uid"], body, loc))
+                if k == "types":
+                    for n, m in enumerate(it.get("members") or []):
+                        body = member_sig(it, m, n)
+                        if body:
+                            out.append(rec("member", it["uid"] + "." + m.get("name", "?"), body, loc))
     return out
 
 ALIAS = re.compile(r"(?:<\*(?P<doc>.*?)\*>\s*)?^alias\s+(?P<name>\w+)\s*@builtin\s*=\s*(?P<to>[^;]+);", re.S | re.M)

@@ -53,7 +53,7 @@ fn void load()
 // variables the snapshot adds (`mem`, `tmem`: docgen does not list them). Alias *types* are docgen's: they are replaced.
 fn bool keeps_in_overlay(Entry* e) => !is_symbol_kind(e.kind) || (e.kind == "var" && e.body.starts_with("alias "));
 
-fn bool is_symbol_kind(String kind) => kind == "fn" || kind == "macro" || kind == "method" || kind == "mmethod" || kind == "type" || kind == "var";
+fn bool is_symbol_kind(String kind) => kind == "fn" || kind == "macro" || kind == "method" || kind == "mmethod" || kind == "type" || kind == "var" || kind == "member";
 
 // Swap the standard library symbols for ones read from the c3c the user runs (see live.c3). The aliases in the
 // snapshot (`mem`, `tmem`...) stay: docgen does not list them. Everything else is untouched. The snapshot keeps its
