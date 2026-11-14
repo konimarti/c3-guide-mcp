@@ -5,7 +5,6 @@ on:
   pull_request:
 env:
   C3C_VERSION: v0.8.6              # the snapshot in data/corpus.dat and the tests belong to exactly this compiler
-  C3L_REF: 260a63ab7358ccf4fa29ab25be1f394324754b7c   # konimarti/c3l (a shell script), pinned
 permissions:
   contents: read
 jobs:
@@ -17,6 +16,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: c3c ${{ env.C3C_VERSION }}
         shell: bash
         run: |
@@ -46,15 +47,6 @@ jobs:
       - name: c3c version
         shell: bash
         run: c3c --version
-      - name: Dependencies (c3l.lock)
-        shell: bash
-        run: |
-          mkdir -p "$HOME/bin"
-          curl -fsSL -o "$HOME/bin/c3l" "https://raw.githubusercontent.com/konimarti/c3l/$C3L_REF/c3l"
-          chmod +x "$HOME/bin/c3l"
-          export PATH="$HOME/bin:$PATH"
-          c3l sync --frozen
-          c3l verify
       - name: Versions and the c3c hook
         if: runner.os == 'Linux'
         run: |
