@@ -20,8 +20,8 @@ const String VERSION = env::PROJECT_VERSION;
 
 const String USAGE = `c3-guide-mcp %s: C3 knowledge for AI assistants (an MCP server on stdin/stdout).
   c3-guide-mcp             serve (this is how an editor starts it)
-  c3-guide-mcp --doctor    show the compiler, the docs version and what Claude Code integration is in place
-  c3-guide-mcp --setup     install the rules, the hook and the server entry for Claude Code ([--dry-run] shows the plan)
+  c3-guide-mcp --doctor    show the compiler, the docs version and whether the Claude Code rules and server entry are in place
+  c3-guide-mcp --setup     write the rules into Claude Code's CLAUDE.md ([--dry-run] shows the plan)
   c3-guide-mcp --version
 `;
 

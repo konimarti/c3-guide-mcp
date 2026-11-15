@@ -47,11 +47,9 @@ jobs:
       - name: c3c version
         shell: bash
         run: c3c --version
-      - name: Versions and the c3c hook
+      - name: Versions
         if: runner.os == 'Linux'
-        run: |
-          sh test/version_check.sh
-          sh test/hook_test.sh
+        run: sh test/version_check.sh
       - name: Build (-O3)
         shell: bash
         run: c3c build c3-guide-mcp -O3

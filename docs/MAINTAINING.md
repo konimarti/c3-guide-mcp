@@ -43,16 +43,14 @@ python3 test/growth_test.py                # memory over 4,000 calls
 python3 test/setup_test.py                 # --setup and --doctor
 python3 scripts/verify_corpus.py           # code in the corpus compiles
 python3 test/corpus_test.py /path/to/c3    # snapshot matches the c3c install
-sh test/hook_test.sh                       # the Claude Code hook
 sh test/version_check.sh                   # version and CI pins
 ```
 
 - Without `C3_DIR` the grammar and live-docs tests are skipped; CI sets it.
-- With the Claude Code hook installed, run `C3_GUIDE_ALLOW=1 c3c test`.
 
 ## Where the advice is written
 
-- Each tool's `@Desc` is canonical; then update `INSTRUCTIONS` in `src/main.c3`, `integrations/claude-code/CLAUDE.md` and the README.
+- Each tool's `@Desc` is canonical; then update `INSTRUCTIONS` in `src/main.c3`, `integrations/AGENTS.md` (also compiled in for `--setup`) and the README.
 - The first line of `INSTRUCTIONS` is what an agent sees first; `test/stdio_test.py` pins it.
 
 ## Safety
@@ -65,8 +63,3 @@ sh test/version_check.sh                   # version and CI pins
 - A pattern the guard cannot expand like c3c makes it scan the whole tree and say so.
 - `c3_test` and `c3_run` of a project are not guarded, because they run the project's own code anyway.
 - Every c3c run has a deadline and capped output, and everything under the scratch directory is killed at the deadline.
-
-## CI and releases
-
-- `ci.yml` builds and smoke-tests on Linux, macOS and Windows, and runs the full suite on Linux and macOS.
-- `release.yml` builds the three archives and `SHA256SUMS` on a version tag.

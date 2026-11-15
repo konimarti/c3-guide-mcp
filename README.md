@@ -27,20 +27,38 @@ One small binary for any MCP client: Claude Code, Claude Desktop, Cursor, VS Cod
 
 ## Install
 
-Download the binary from [Releases](https://github.com/konimarti/c3-guide-mcp/releases), install [c3c](https://github.com/c3lang/c3c/releases) 0.8.6, and add the server to your client:
+Download the binary from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) and install [c3c](https://github.com/c3lang/c3c/releases) 0.8.6. Then give your client the server entry and the rules in [AGENTS.md](integrations/AGENTS.md), which tell the model to use the tools.
+
+**Claude Code**
 
 ```
-claude mcp add c3-guide -e C3C=/path/to/c3c -- /path/to/c3-guide-mcp
-c3-guide-mcp --setup    # Claude Code: rules in CLAUDE.md and a hook that points c3c test/run to the tools
+claude mcp add c3-guide --scope user -e C3C=/path/to/c3c -- /path/to/c3-guide-mcp
+c3-guide-mcp --setup     # writes the rules into ~/.claude/CLAUDE.md; --doctor shows what is in place
 ```
 
-Other clients take the usual entry; VS Code uses `"servers"` with `"type": "stdio"`:
+**Codex**: server in `~/.codex/config.toml`, rules in `~/.codex/AGENTS.md`.
+
+```toml
+[mcp_servers.c3-guide]
+command = "/path/to/c3-guide-mcp"
+env = { C3C = "/path/to/c3c" }
+```
+
+**Antigravity, Cursor, Claude Desktop**: the same `mcpServers` entry.
+
+- Antigravity: server in `~/.gemini/config/mcp_config.json`, rules in `~/.gemini/config/GEMINI.md`.
+- Cursor: server in `~/.cursor/mcp.json`, rules in the project's `AGENTS.md`.
+- Claude Desktop: server in `claude_desktop_config.json`.
 
 ```json
 { "mcpServers": { "c3-guide": { "command": "/path/to/c3-guide-mcp", "env": { "C3C": "/path/to/c3c" } } } }
 ```
 
-Setting it up by hand, and the rules for other assistants: [integrations/claude-code](integrations/claude-code). `c3-guide-mcp --doctor` shows what is in place.
+**VS Code (Copilot)**: server in `.vscode/mcp.json`, rules in `.github/copilot-instructions.md`.
+
+```json
+{ "servers": { "c3-guide": { "type": "stdio", "command": "/path/to/c3-guide-mcp", "env": { "C3C": "/path/to/c3c" } } } }
+```
 
 ## Good to know
 

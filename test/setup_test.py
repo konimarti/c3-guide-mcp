@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """c3-guide-mcp --setup / --doctor on a throw-away HOME: idempotent, keeps the user's text, writes nothing on --dry-run,
-never writes through a symlink, never rewrites an existing settings.json. Run from the repository root."""
+never writes through a symlink, writes nothing but CLAUDE.md. Run from the repository root."""
 import os, subprocess, sys, tempfile
 
 B = os.path.abspath("build/c3-guide-mcp")
@@ -24,29 +24,29 @@ with tempfile.TemporaryDirectory() as home:
     open(md, "w").write("# Mine\n\nkeep this line\n")
     open(st, "w").write('{"theme": "dark"} // my comment\n')
     rc, out = run(home, "--setup", "--dry-run")
-    check("dry run writes nothing", rc == 0 and not os.path.exists(os.path.join(cfg, "hooks")) and "c3-guide" not in open(md).read(), out)
+    check("dry run writes nothing", rc == 0 and "c3-guide" not in open(md).read(), out)
     rc, out = run(home, "--setup")
     text = open(md).read()
     check("setup adds one block and keeps the user's text", rc == 0 and "keep this line" in text and text.count("c3-guide:begin") == 1, out)
-    hook = os.path.join(cfg, "hooks", "c3-guide-redirect.sh")
-    check("hook is executable", os.access(hook, os.X_OK), out)
-    check("existing settings.json is not rewritten", open(st).read() == '{"theme": "dark"} // my comment\n' and "hooks.PreToolUse" in out, out)
+    rules = open("integrations/AGENTS.md").read().strip()
+    check("the block holds the rules of integrations/AGENTS.md", rules in text, text)
+    check("only CLAUDE.md is touched", sorted(os.listdir(cfg)) == ["CLAUDE.md", "settings.json"] and open(st).read() == '{"theme": "dark"} // my comment\n', os.listdir(cfg))
     before = open(md).read()
     rc, out = run(home, "--setup")
-    check("second run changes nothing", open(md).read() == before and out.count("already up to date") == 2, out)
+    check("second run changes nothing", open(md).read() == before and out.count("already up to date") == 1, out)
     rc, out = run(home, "--doctor")
-    check("doctor reports rules and hook installed", "rules:    installed" in out and "hook:     installed" in out, out)
-    os.remove(hook)
-    target = os.path.join(home, "elsewhere.sh")
+    check("doctor reports the rules installed and no hook", "rules:    installed" in out and "hook" not in out, out)
+    os.remove(md)
+    target = os.path.join(home, "elsewhere.md")
     open(target, "w").write("do not touch\n")
-    os.symlink(target, hook)
+    os.symlink(target, md)
     rc, out = run(home, "--setup")
-    check("a symlinked hook is not written through", open(target).read() == "do not touch\n" and "symbolic link" in out, out)
+    check("a symlinked CLAUDE.md is not written through", open(target).read() == "do not touch\n" and "symbolic link" in out, out)
 
 with tempfile.TemporaryDirectory() as home:
     rc, out = run(home, "--setup")
-    st = os.path.join(home, ".claude", "settings.json")
-    check("a missing settings.json is created with the hook", rc == 0 and os.path.exists(st) and "c3-guide-redirect.sh" in open(st).read(), out)
+    cfg = os.path.join(home, ".claude")
+    check("a missing config folder gets CLAUDE.md only", rc == 0 and os.listdir(cfg) == ["CLAUDE.md"], out)
 
 with tempfile.TemporaryDirectory() as home:
     cfg = os.path.join(home, ".claude")
@@ -64,13 +64,7 @@ with tempfile.TemporaryDirectory() as home:
     cfg = os.path.join(home, "we ird\"dir")
     env = {"PATH": "/usr/bin:/bin", "HOME": home, "CLAUDE_CONFIG_DIR": cfg}
     r = subprocess.run([B, "--setup"], capture_output=True, text=True, env=env, timeout=30, stdin=subprocess.DEVNULL)
-    import json
-    try:
-        data = json.load(open(os.path.join(cfg, "settings.json")))
-        cmd = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        check("a config path with a quote and a space gives valid JSON and a quoted command", cmd.startswith("'") and cmd.endswith("'"), cmd)
-    except Exception as e:
-        check("a config path with a quote and a space gives valid JSON and a quoted command", False, e)
+    check("a config path with a quote and a space works", r.returncode == 0 and os.path.isfile(os.path.join(cfg, "CLAUDE.md")), r.stdout)
     md = os.path.join(cfg, "CLAUDE.md")
     open(md, "w").write("keep\n<!-- c3-guide:begin (written by c3-guide-mcp --setup; edit outside this block) -->\nmore of mine\n")
     r = subprocess.run([B, "--setup"], capture_output=True, text=True, env=env, timeout=30, stdin=subprocess.DEVNULL)
