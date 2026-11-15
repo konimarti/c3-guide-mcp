@@ -77,7 +77,7 @@ jobs:
       - name: Setup command and recipes compile
         if: runner.os == 'Linux'
         run: |
-          python3 test/setup_test.py
+          python3 test/doctor_test.py
           python3 scripts/verify_corpus.py
       - name: Default build passes too (Linux)
         if: runner.os == 'Linux'

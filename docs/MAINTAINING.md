@@ -4,13 +4,14 @@ For people who change or release the server. Users: see the [README](../README.m
 
 ## How it works
 
-- Modules import only earlier layers: `util`, `corpus`, `context`, `ts`, `sources` → `proc` → `compiler` → `guard`, `format` → `search`, `outline` → `hints` → `check` → `live` → `tools` → `setup` → `main`.
+- Modules import only earlier layers: `util`, `corpus`, `context`, `ts`, `sources` → `proc` → `compiler` → `guard`, `format` → `search`, `outline` → `hints` → `check` → `live` → `tools` → `doctor` → `main`.
 - The docs are a snapshot of one c3c release in `data/corpus.dat`, embedded in the binary and built by `scripts/gen_corpus.py`.
 - Search scans every entry with BM25 in a few milliseconds, so there is no index to keep in sync.
 - `src/context.c3` remembers the last project and the modules the session uses, and ranks their names higher.
 - When the installed c3c is another release, `src/live.c3` reads its standard library once (about 0.2 s) and replaces the snapshot's symbols.
 - `src/live.c3` is a port of `symbols()` in `scripts/gen_corpus.py`: change one, change the other (`test/live_test.c3` compares them).
 - Project lookups and `c3_refs` read source with the vendored tree-sitter grammar, so comments and strings are not uses.
+- `src/doctor.c3` holds one table of where each client keeps its files (`SPECS`, with the source of each location and the unconfirmed ones marked); a new client is a row there. `--doctor` only reads.
 - `src/compat.c3` maps old argument and tool names to the current ones; a renamed parameter needs an entry in `alias_of`.
 - Every ranking rule must hold in general; `test/quality_test.c3`, `test/suggest_test.c3` and `test/sessions_test.c3` pin the cases.
 
@@ -40,7 +41,7 @@ C3_DIR=/path/to/c3 c3c test c3-guide-mcp   # all @test functions, about 80 s
 python3 test/stdio_test.py                 # JSON-RPC over the built binary
 python3 test/smoke.py [binary]             # one call per tool
 python3 test/growth_test.py                # memory over 4,000 calls
-python3 test/setup_test.py                 # --setup and --doctor
+python3 test/doctor_test.py                # --doctor (clients, paths; Windows and macOS paths in test/doctor_test.c3)
 python3 scripts/verify_corpus.py           # code in the corpus compiles
 python3 test/corpus_test.py /path/to/c3    # snapshot matches the c3c install
 sh test/version_check.sh                   # version and CI pins
@@ -50,7 +51,7 @@ sh test/version_check.sh                   # version and CI pins
 
 ## Where the advice is written
 
-- Each tool's `@Desc` is canonical; then update `INSTRUCTIONS` in `src/main.c3`, `integrations/AGENTS.md` (also compiled in for `--setup`) and the README.
+- Each tool's `@Desc` is canonical; then update `INSTRUCTIONS` in `src/main.c3`, `integrations/AGENTS.md` and the README.
 - The first line of `INSTRUCTIONS` is what an agent sees first; `test/stdio_test.py` pins it.
 
 ## Safety

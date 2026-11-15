@@ -29,11 +29,12 @@ One small binary for any MCP client: Claude Code, Claude Desktop, Cursor, VS Cod
 
 Download the binary from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) and install [c3c](https://github.com/c3lang/c3c/releases) 0.8.6. Then give your client the server entry and the rules in [AGENTS.md](integrations/AGENTS.md), which tell the model to use the tools.
 
-**Claude Code**
+`c3-guide-mcp --doctor` shows what each client has: the server entry and whether its rules mention the c3 tools.
+
+**Claude Code**: rules in `~/.claude/CLAUDE.md`.
 
 ```
 claude mcp add c3-guide --scope user -e C3C=/path/to/c3c -- /path/to/c3-guide-mcp
-c3-guide-mcp --setup     # writes the rules into ~/.claude/CLAUDE.md; --doctor shows what is in place
 ```
 
 **Codex**: server in `~/.codex/config.toml`, rules in `~/.codex/AGENTS.md`.

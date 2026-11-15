@@ -1,6 +1,6 @@
 module c3guide;
 import mcp, libc, std::core::string, std::os::env;
-import c3guide::compat, c3guide::proc, c3guide::corpus, c3guide::tools, c3guide::check, c3guide::live, c3guide::setup;
+import c3guide::compat, c3guide::proc, c3guide::corpus, c3guide::tools, c3guide::check, c3guide::live, c3guide::doctor;
 import std::io;
 
 // Sent to the model in `initialize`: this is what makes a model use the tools without being told.
@@ -20,8 +20,7 @@ const String VERSION = env::PROJECT_VERSION;
 
 const String USAGE = `c3-guide-mcp %s: C3 knowledge for AI assistants (an MCP server on stdin/stdout).
   c3-guide-mcp             serve (this is how an editor starts it)
-  c3-guide-mcp --doctor    show the compiler, the docs version and whether the Claude Code rules and server entry are in place
-  c3-guide-mcp --setup     write the rules into Claude Code's CLAUDE.md ([--dry-run] shows the plan)
+  c3-guide-mcp --doctor    show the compiler, the docs version and, per AI client found, its server entry and rules (writes nothing)
   c3-guide-mcp --version
 `;
 
@@ -32,10 +31,10 @@ fn int main(String[] args)
 		switch (args[1])
 		{
 			case "--version": io::printn(VERSION); return 0;
-			case "--doctor": return setup::run_doctor(setup::self_path(args[0]), VERSION);
-			case "--setup":
-				if (args.len > 3 || (args.len == 3 && args[2] != "--dry-run")) { io::eprintf(USAGE, VERSION); return 2; }   // a typo must not turn a dry run into a real one
-				return setup::run_setup(setup::self_path(args[0]), args.len == 3);
+			case "--doctor":
+				int rc = doctor::run_doctor(doctor::self_path(args[0]), VERSION, args[2..]);
+				if (rc == 2) io::eprintf(USAGE, VERSION);   // a stray argument
+				return rc;
 			case "--help":
 			case "-h": io::printf(USAGE, VERSION); return 0;
 			default:
