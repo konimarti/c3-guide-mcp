@@ -1,6 +1,10 @@
 # c3-guide-mcp
 
-C3 changed a lot between 0.6/0.7 and 0.8, which is what most models were trained on. An assistant writing C3 from memory tends to use syntax and functions that no longer exist. c3-guide-mcp gives it the real thing instead: your compiler, the standard library, and the manual, through a small MCP server. Works with Claude Code, Claude Desktop, Cursor, VS Code, and other MCP clients.
+**A C3 coding companion for your AI assistant.**
+
+It checks code with your compiler, runs your tests and looks up any name in your project, its libraries and the standard library. A model with a shell could grep the stdlib and run `c3c` itself; this does it in one step and with less noise: the exact signature instead of grep hits, only the failing tests instead of the whole log, a hint that names the fix. Signatures come from your `c3c`, the manual and release notes are those of 0.8.6.
+
+One small binary. Any MCP client: Claude Code, Claude Desktop, Cursor, VS Code.
 
 ## Six tools
 
@@ -22,42 +26,20 @@ A couple of things worth knowing:
 
 ## Install
 
-1. Download the binary for your platform from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (Linux x64, macOS arm64, or Windows x64) and unpack it. On macOS, allow it once: `xattr -d com.apple.quarantine ./c3-guide-mcp`. The Linux binary needs glibc 2.34+ (Ubuntu 22.04, Debian 12, or newer).
-2. Install [c3c](https://github.com/c3lang/c3c/releases). Built and tested against **0.8.6**; a different installed version still works, since `c3_lookup` reads live signatures from your own `c3c` on first use.
-
-The server looks for `c3c` on `PATH` and in the usual install locations. If your editor uses a restricted `PATH`, set `C3C=/path/to/c3c`.
-
-## Add it to your editor
-
-**Claude Code**
+Download the binary for your system from [Releases](https://github.com/konimarti/c3-guide-mcp/releases) (on macOS, allow it once: `xattr -d com.apple.quarantine ./c3-guide-mcp`), install [c3c](https://github.com/c3lang/c3c/releases) 0.8.6, and add the server to your client:
 
 ```
 claude mcp add c3-guide -e C3C=/path/to/c3c -- /path/to/c3-guide-mcp
+c3-guide-mcp --setup    # Claude Code: rules in CLAUDE.md and a hook that points c3c test/run to the tools
 ```
 
-**Claude Desktop** (`claude_desktop_config.json`) and **Cursor** (`~/.cursor/mcp.json`)
+Other clients (Claude Desktop, Cursor) take the usual entry; VS Code uses `"servers"` with `"type": "stdio"`:
 
 ```json
 { "mcpServers": { "c3-guide": { "command": "/path/to/c3-guide-mcp", "env": { "C3C": "/path/to/c3c" } } } }
 ```
 
-**VS Code** (`.vscode/mcp.json`)
-
-```json
-{ "servers": { "c3-guide": { "type": "stdio", "command": "/path/to/c3-guide-mcp", "env": { "C3C": "/path/to/c3c" } } } }
-```
-
-Claude Code is the one tested in real sessions; the others follow each client's own documented MCP format.
-
-### Getting the assistant to actually use it
-
-```
-c3-guide-mcp --setup --dry-run   # shows what it would do
-c3-guide-mcp --setup             # adds a rules block to ~/.claude/CLAUDE.md, a hook script, settings.json if missing
-c3-guide-mcp --doctor            # reports what is and isn't set up (also your c3c and docs versions)
-```
-
-Safe to re-run. It only touches a marked block in `CLAUDE.md` and its own hook file, and never overwrites an existing `settings.json` (it prints what to add instead). By hand: paste [these lines](integrations/claude-code/CLAUDE.md) into `CLAUDE.md`/`AGENTS.md`/Cursor rules/`.github/copilot-instructions.md`, and for the Claude Code hook see [integrations/claude-code](integrations/claude-code) (it redirects `c3c test`/`run`/`compile-*` to the matching tool; `c3c build` still runs directly).
+Setting it up by hand, and the rules for other assistants: [integrations/claude-code](integrations/claude-code). `c3-guide-mcp --doctor` shows what is in place.
 
 ## Good to know
 
