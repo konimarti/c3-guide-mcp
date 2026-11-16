@@ -101,11 +101,25 @@ fn String install_dir(String binary) => version_field(binary, "Installed directo
 // keeps lib/ in the install directory; a build tree keeps the real one next to it.
 char[1024] stdlib_buf;
 String stdlib_dir_found;
+char[1024] stdlib_for_buf;
+String stdlib_for;   // the compiler the cached directory belongs to: another C3C (a test's fake, a changed variable) is not answered from it
+
+// What a cache was filled for: `binary` is remembered in `buf`; true when `*for_` already holds it.
+fn bool cached_for(String binary, char[] buf, String* for_)
+{
+	if ((*for_).len > 0 && *for_ == binary) return true;
+	if (binary.len > buf.len) { *for_ = ""; return false; }
+	buf[:binary.len] = binary[..];
+	*for_ = (String)buf[:binary.len];
+	return false;
+}
 
 fn String stdlib_root()
 {
+	String binary = c3c_binary();
+	if (!cached_for(binary, stdlib_for_buf[..], &stdlib_for)) stdlib_dir_found = "";
 	if (stdlib_dir_found.len > 0) return stdlib_dir_found;
-	String install = install_dir(c3c_binary());
+	String install = install_dir(binary);
 	if (install.len == 0) return "";
 	String[2] candidates = { string::tformat("%s", install), string::tformat("%s/..", install) };
 	foreach (c : candidates)
@@ -122,12 +136,16 @@ fn String stdlib_root()
 char[64] version_buf;
 String installed_version;
 bool version_asked;
+char[1024] version_for_buf;
+String version_for;   // the compiler that was asked (see stdlib_for)
 
 fn String compiler_version()
 {
+	String binary = c3c_binary();
+	if (!cached_for(binary, version_for_buf[..], &version_for)) { installed_version = ""; version_asked = false; }
 	if (installed_version.len > 0 || version_asked) return installed_version;
 	version_asked = true;   // a c3c that cannot run is asked once, not on every reply
-	String v = version_of(c3c_binary());
+	String v = version_of(binary);
 	if (v.len == 0 || v.len >= version_buf.len) return "";
 	version_buf[:v.len] = v[..];
 	installed_version = (String)version_buf[:v.len];
@@ -139,9 +157,13 @@ fn String compiler_version()
 char[64] path_version_buf;
 String path_version;
 bool path_version_asked;
+char[1024] path_for_buf;
+String path_for;
 
 fn String path_c3c_version()
 {
+	// the answer compares with the compiler in use: asked again when that is another one
+	if (!cached_for(c3c_binary(), path_for_buf[..], &path_for)) { path_version_asked = false; path_version = ""; }
 	if (path_version_asked) return path_version;
 	String? p = env::tget_var("PATH");
 	if (catch p) return "";

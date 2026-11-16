@@ -19,6 +19,7 @@ For people who change or release the server. Users: see the [README](../README.m
 - A folder or `.c3` file inside a project means that project for `c3_test`, `c3_run` and `c3_check`, with one line saying so.
 - `env` lines go to the program or tests through `proc::RunOpts.env`; names that change the compiler or loader are refused (`env_name_refused`).
 - A project without `targets` is type-checked from its `sources` and `test-sources` (`check_library_sources`); c3c's "Can't open the directory" gets the `project.json` entry that names it.
+- What `src/compiler.c3` learned about a compiler (version, library directory, the PATH compiler's version) is kept for that binary only; another `C3C` is asked again.
 - `src/compat.c3` maps old argument and tool names to the current ones; a renamed parameter needs an entry in `alias_of`.
 - Every ranking rule must hold in general; `test/quality_test.c3`, `test/suggest_test.c3` and `test/sessions_test.c3` pin the cases.
 

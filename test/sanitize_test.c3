@@ -1,5 +1,5 @@
 module c3guide::test::sanitize;
-import c3guide::check, c3guide::proc, c3guide::test::support;
+import c3guide::check, c3guide::proc, c3guide::compiler, c3guide::test::support;
 import std::core::string, std::io::file, std::io::path, std::os::env;
 
 fn bool has(String hay, String needle) @local => hay.contains(needle);
@@ -90,5 +90,27 @@ fn void a_sanitizer_that_still_cannot_reserve_gives_one_line() @test
 		// without a sanitizer the same output is not rewritten
 		String p = check::c3_test(f);
 		assert(has(p, "ReserveShadowMemoryRange") || has(p, "exit code"), "%s", p);
+	$endif
+}
+
+// What was learned about one compiler is not kept for another: a test (or a user) that points C3C at a program that cannot
+// say its version must not leave the real compiler without one afterwards.
+fn void the_compiler_caches_follow_the_c3c_in_use() @test
+{
+	$if !env::WIN32:
+		String real = compiler::compiler_version().copy(mem);
+		defer real.free(mem);
+		String real_root = compiler::stdlib_root().copy(mem);
+		defer real_root.free(mem);
+		Path dir = support::make_temp_dir("c3cache");
+		defer (void)path::rmtree(dir);
+		{
+			defer support::restore_c3c();
+			support::set_c3c(support::write_fake(dir, "nover.sh", "echo 'no version here'"));
+			assert(compiler::compiler_version() == "", "a program that prints no version has none: %s", compiler::compiler_version());
+			assert(compiler::stdlib_root() == "", "its library cannot be found: %s", compiler::stdlib_root());
+		}
+		assert(compiler::compiler_version() == real, "'%s' after the fake, '%s' before", compiler::compiler_version(), real);
+		assert(compiler::stdlib_root() == real_root, "'%s' after the fake, '%s' before", compiler::stdlib_root(), real_root);
 	$endif
 }
