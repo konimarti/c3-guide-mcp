@@ -139,12 +139,21 @@ fn String outline_path(String path, String match = "")
 	if (catch abs) return "invalid path";
 	String root = (String)abs;
 	DString out = dstring::temp();
+	// a folder or a file inside a project: say which project it belongs to
+	String enclosing = "";
+	if (path::is_dir(abs)) { if (!file::exists(string::tformat("%s/project.json", root))) enclosing = enclosing_project(string::tformat("%s/x", root)); }
+	else if (util::is_c3_file(root)) { enclosing = enclosing_project(root); }
+	if (enclosing.len > 0)
+	{
+		context::note_project_dir(enclosing);
+		out.appendf("(%s is inside the project in %s)\n", util::clip(path, 100), enclosing);
+	}
 	if (!path::is_dir(abs))
 	{
 		if (!(util::is_c3_file(root) || is_archive(root)) || !file::exists(root)) return "path must be a project directory, a .c3 file or a .c3l library";
 		if (util::is_c3_file(root)) context::note_file(root);
 		String one = is_archive(root) ? archive_outline(root, root, match) : outline_file(root, root, match);
-		return one.len > 0 ? util::clip(one, MAX_OUTLINE) : "no declarations found";
+		return one.len > 0 ? util::clip(string::tformat("%s%s", out.str_view(), one), MAX_OUTLINE) : "no declarations found";
 	}
 	note_project(root);
 	Path base = abs;
@@ -168,7 +177,19 @@ fn String outline_path(String path, String match = "")
 	}
 	if (unread > 0) acc.appendf("[%d more files not shown; give a subdirectory or a file to see them]\n", unread);
 	if (files.len() >= MAX_FILES) acc.appendf("[stopped at %d files]\n", (int)MAX_FILES);
-	return acc.len() == 0 ? "no declarations found" : string::tformat("%s", acc.str_view());
+	return acc.len() == 0 ? "no declarations found" : string::tformat("%s%s", out.str_view(), acc.str_view());
+}
+
+// The directory of the project.json above `file` (up to six levels), "" when there is none.
+fn String enclosing_project(String file)
+{
+	String dir = file[:file.rindex_of("/") ?? 0];
+	for (int up = 0; up < 6 && dir.len > 1; up++)
+	{
+		if (file::exists(string::tformat("%s/project.json", dir))) return dir;
+		dir = dir[:dir.rindex_of("/") ?? 0];
+	}
+	return "";
 }
 
 // The standard library modules a project's own sources import, as context for the searches (a directory with a
@@ -754,7 +775,7 @@ fn String refs_reply(String query, String root_arg, bool stdlib, int limit, Stri
 	}
 	else
 	{
-		String root = root_arg.len > 0 ? root_arg : context::project();
+		String root = root_arg.len > 0 ? root_arg : context::default_project();
 		if (root.len == 0) return "give path (a project directory), or check one first; stdlib=true searches the standard library";
 		Path? p = path::new(tmem, root);
 		if (catch p) return "invalid path";

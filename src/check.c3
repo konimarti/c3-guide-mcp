@@ -1,5 +1,5 @@
 module c3guide::check;
-import mcp, std::core::string, std::io::path, std::io::file, std::collections::list;
+import mcp, std::core::string, std::io::path, std::io::file, std::collections::list, std::collections::object, std::encoding::json;
 import c3guide::guard, c3guide::sources, c3guide::proc, c3guide::compiler, c3guide::format, c3guide::util, c3guide::hints, c3guide::context, c3guide::outline;
 
 // c3_check, c3_test and c3_run: the real compiler's diagnostics (never a build artifact), with hints.
@@ -64,7 +64,8 @@ fn String strip_ansi(String s)
 }
 
 // The runtime's own stack frames say nothing about the user's code: drop them from test output.
-fn String drop_runtime_frames(String s)
+// With `keep_passes` (output=true) the passing lines stay: what a test printed sits on them, in the order it happened.
+fn String drop_runtime_frames(String s, bool keep_passes = false)
 {
 	DString out = dstring::temp();
 	foreach (line : s.tsplit("\n"))
@@ -72,7 +73,7 @@ fn String drop_runtime_frames(String s)
 		if (line.contains("std.core.runtime.") || line.contains("[inline]")) continue;
 		// a passing test is one line of noise; the failures and the summary line are what matter
 		// (and what the output cap must not cut)
-		if (line.starts_with("Testing ") && line.contains("[PASS]")) continue;
+		if (!keep_passes && line.starts_with("Testing ") && line.contains("[PASS]")) continue;
 		out.appendf("%s\n", line);
 	}
 	return out.str_view();
@@ -117,6 +118,7 @@ fn String? resolve_target(String target, bool* is_dir)
 fn String dir_of(String where, bool is_dir) => is_dir ? string::tformat("%s/", where) : string::tformat("%s", where[:(where.rindex_of("/") ?? 0) + 1]);
 
 // Shown for the faults above, so the model knows what to give.
+const String NO_PATH_TEXT = "give path: a project directory (with project.json) or a .c3 file. No project to default to: none was given to an earlier call, and the server's working directory holds no project.json";
 const String BAD_TARGET_TEXT = "path must be a project directory (containing project.json) or a .c3 or .c3i file that exists";
 
 // A build target is a name, never a flag: `build --trust=full` would undo the fixed --trust=none.
@@ -200,7 +202,7 @@ fn String report(String out, int status, bool timed_out, String hide, String rep
 }
 
 // Extra sources compiled together with a snippet or a file (a helper, a library's source): one path per line.
-const int MAX_EXTRA_FILES = 8;
+const int MAX_EXTRA_FILES = 32;
 const int MAX_PROGRAM_ARGS = 16;
 const sz MAX_STDIN = 16 * 1024;
 
@@ -271,10 +273,31 @@ fn String project_for_snippet(String path, String code, Args* out, String* root_
 	return "";
 }
 
-// The program arguments, one per line (a line is one argument, spaces included).
+// The program arguments: a JSON array of strings (`["-v", "a b"]`) or one argument per line (a line is one argument,
+// spaces included). A text that starts with `[` and parses as a JSON array is the first form.
 fn String parse_args(String args, Args* a)
 {
 	int n = 0;
+	String trimmed = args.trim(" \t\r\n");
+	if (trimmed.starts_with("["))
+	{
+		Object*? arr = json::parse(tmem, trimmed);
+		if (try arr)
+		{
+			if (arr.is_array())
+			{
+				for (sz i = 0; i < arr.get_len(); i++)
+				{
+					Object* one = arr.get_at(i);
+					if (!one.is_string()) return "args: a JSON array must hold strings only";
+					if (n++ >= MAX_PROGRAM_ARGS) return string::tformat("args: at most %d arguments", MAX_PROGRAM_ARGS);
+					if (one.s.len > 1024) return "args: an argument is longer than 1024 bytes";
+					a.add(one.s);
+				}
+				return "";
+			}
+		}
+	}
 	foreach (line : args.tsplit("\n"))
 	{
 		String t = line.trim("\r");
@@ -386,8 +409,18 @@ fn String compile_only(String file, String hide, String replacement, String plat
 fn String check_path(String target_path, String target, String platform = "", String[] extra = {})
 {
 	bool is_dir;
-	String? where = resolve_target(target_path, &is_dir);
-	if (catch where) return BAD_TARGET_TEXT;
+	String inside = "";
+	String? first = resolve_target(target_path, &is_dir);
+	// a folder inside a project means that project
+	if (catch first)
+	{
+		Path? tp = path::new(tmem, target_path);
+		if (catch tp) return BAD_TARGET_TEXT;
+		if (!path::is_dir(tp)) return BAD_TARGET_TEXT;
+		first = resolve_project_aware(target_path, &is_dir, &inside);
+	}
+	if (catch first) return BAD_TARGET_TEXT;
+	String where = first;
 	String base = dir_of(where, is_dir);
 	if (is_dir)
 	{
@@ -412,7 +445,9 @@ fn String check_path(String target_path, String target, String platform = "", St
 		// type-check only, never `cc` or the linker: a project's cflags, c-sources and link-args are code that would run
 		m.add("-C");
 		String ok = "OK: no errors (type-checked; c3_test or c3_run builds, links and runs)";
-		return with_note(note, run_c3c(m.list(), base, "", scratch, true, where, ok, PROJECT_CHECK_MS));
+		if (sources::has_no_targets(where)) return with_note(inside, with_note(note, check_library_sources(where, scratch, base)));
+		String reply = run_c3c(m.list(), base, "", scratch, true, where, ok, PROJECT_CHECK_MS);
+		return with_note(inside, with_note(note, which_source_entry(reply, where)));
 	}
 	// A file checked on its own cannot see the other modules or the dependencies of its project: check the project
 	String project = extra.len > 0 ? "" : project_dir(where);
@@ -424,6 +459,49 @@ fn String check_path(String target_path, String target, String platform = "", St
 	String outside = guard::file_escape(where, "");   // (a file of a project was checked above, with its project)
 	if (outside.len > 0) return reads_outside(outside);
 	return compile_only(where, base, "", platform, extra);
+}
+
+// A project without targets (a library scaffold) has nothing for `c3c build`: its `sources` and `test-sources` are
+// type-checked together, with its libraries, as one compilation (nothing is linked).
+fn String check_library_sources(String root, Path scratch, String base)
+{
+	List{String} found;
+	found.init(tmem);
+	sources::project_files(root, &found);
+	sources::project_test_files(root, &found);
+	if (found.len() == 0) return "this project has no targets and its sources and test-sources name no files: nothing to check";
+	Args m;
+	m.add("compile-only");
+	m.add("--no-obj");
+	foreach (f : found)
+	{
+		if (m.n >= m.items.len - 100) return string::tformat("the project has more than %d sources: too many to check without a target", sources::MAX_SOURCES);
+		m.add(f);
+	}
+	List{String} dirs;
+	List{String} names;
+	dirs.init(tmem);
+	names.init(tmem);
+	sources::project_libraries(root, &dirs, &names);
+	if ((long)m.n + 2 * (long)(dirs.len() + names.len()) >= (long)m.items.len - 100) return "the project names too many libraries to check without a target";
+	foreach (d : dirs) { m.add("--libdir"); m.add(d); }
+	foreach (n : names) { m.add("--lib"); m.add(n); }
+	String ok = string::tformat("OK: no errors (the project has no targets: its %d source files, tests included, were type-checked)", (int)found.len());
+	String reply = run_c3c(m.list(), base, "", scratch, false, root, ok, PROJECT_CHECK_MS);
+	return which_source_entry(reply, root);
+}
+
+// c3c's "Can't open the directory 'x'" does not say which entry of project.json asked for it.
+fn String which_source_entry(String reply, String root)
+{
+	String key = "Can't open the directory '";
+	sz at = reply.index_of(key) ?? -1;
+	if (at < 0) return reply;
+	String rest = reply[at + key.len..];
+	sz end = rest.index_of("'") ?? -1;
+	if (end <= 0) return reply;
+	String line = sources::pattern_naming(root, rest[:end]);
+	return line.len > 0 ? string::tformat("%s\n(%s)", reply, line) : reply;
 }
 
 // $embed, $include and $exec can read any file the server can read, and $echo prints it into the reply: not at check time.
@@ -450,7 +528,7 @@ fn String project_dir(String file)
 
 // Build and run the target's tests / the program in a scratch directory: every artifact goes there, the
 // user's tree is not written to. `--trust=none` as for check; `input` is the program's stdin (then end of input).
-fn String run_c3c(String[] mode_args, String hide, String replacement, Path scratch, bool is_dir_target, String where, String ok, ulong deadline_ms = RUN_DEADLINE_MS, String input = "", bool program = false, String also_hide = "")
+fn String run_c3c(String[] mode_args, String hide, String replacement, Path scratch, bool is_dir_target, String where, String ok, ulong deadline_ms = RUN_DEADLINE_MS, String input = "", bool program = false, String also_hide = "", String[] env = {}, bool show_output = false)
 {
 	String sd = (String)scratch;
 	Args a;
@@ -476,14 +554,17 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 	foreach (arg : mode_args) if (arg.starts_with("--sanitize=")) sanitized = true;
 	// capture more than is shown: the [PASS] lines are dropped below, and they must not push the
 	// failures and the summary line past the cap
-	String? out = proc::run_capped(argv, &status, &timed_out, { .deadline_ms = deadline_ms, .max_output = MAX_RUN_CAPTURE, .input = input, .cwd = sd, .sweep = sd, .raise_limits = sanitized });
+	String? out = proc::run_capped(argv, &status, &timed_out, { .deadline_ms = deadline_ms, .max_output = MAX_RUN_CAPTURE, .input = input, .cwd = sd, .sweep = sd, .raise_limits = sanitized, .env = env });
 	if (catch out) return NO_C3C;
 	if (proc::could_not_start(status)) return NO_C3C;
 	if (sanitized && out.contains("ReserveShadowMemoryRange failed")) return sanitizer_blocked(out);
 	// a program's own output is shown as it is, with its exit code; a test run drops the runtime's frames and passing lines
 	String shown = report(out, program ? 0 : status, timed_out, hide, replacement, ok, deadline_ms, also_hide);
 	if (program) { if (status != 0 && !timed_out && !shown.contains("error: ")) shown = string::tformat("%s\n[exit code %d]", shown, status); }
-	else { shown = drop_runtime_frames(shown); }
+	else
+	{
+		shown = drop_runtime_frames(shown, show_output);
+	}
 	shown = util::clip_keep_tail(shown, MAX_RUN_OUTPUT, 1536);
 	// where it ran: a path that was defaulted or relative is the one thing a caller cannot see
 	String footer = where.len > 0 ? string::tformat("\n[c3c %s, %s]", compiler::compiler_version(), where) : "";
@@ -512,28 +593,103 @@ fn String sanitizer_blocked(String out)
 	return string::tformat("The sanitizer could not start: %s is too small for its shadow memory%s. The tests did not run (no sanitizer result).%s Run them where the limit is unlimited.", which, limits, wrapper);
 }
 
-fn String c3_test(String path @Desc("a project directory (with project.json) or a .c3 file with @test functions") = "",
+// Names a caller may not set: they change what c3c and the C toolchain load or run, not what the program sees.
+fn bool env_name_refused(String n)
+{
+	foreach (p : (String[]){ "C3C", "LD_", "DYLD_", "ASAN_", "UBSAN_", "MSAN_", "TSAN_" }) if (n.starts_with(p)) return true;
+	foreach (x : (String[]){ "PATH", "CC", "AR", "SDKROOT", "DEVELOPER_DIR", "HOME", "TMPDIR", "IFS", "SHELL" }) if (n == x) return true;
+	return false;
+}
+
+// `NAME=value` lines for the child's environment. Returns "" or the message to show.
+fn String parse_env(String env, String[]* out)
+{
+	String[] items = mem::talloc_array(String, 16);
+	int n = 0;
+	foreach (line : env.tsplit("\n"))
+	{
+		String t = line.trim(" \t\r");
+		if (t.len == 0) continue;
+		sz eq = t.index_of("=") ?? -1;
+		if (eq <= 0) return string::tformat("env: '%s' is not NAME=value", util::clip(t, 60));
+		String name = t[:eq];
+		foreach (i, c : name)
+		{
+			bool ok = c == '_' || c.is_alpha() || (i > 0 && c.is_digit());
+			if (!ok) return string::tformat("env: '%s' is not a valid variable name (letters, digits, _)", util::clip(name, 40));
+		}
+		if (env_name_refused(name)) return string::tformat("env: %s cannot be set (it would change the compiler or the loader, not the program)", name);
+		if (t.len > 4096) return "env: an entry is longer than 4096 bytes";
+		if (n >= 16) return "env: at most 16 variables";
+		items[n++] = t;
+	}
+	*out = items[:n];
+	return "";
+}
+
+// What `path` names for c3_test and c3_run: no path is the project of the session (see context::default_project); a folder or
+// a .c3 file inside a project means that project (*note says so in one line).
+fn String? resolve_project_aware(String path_in, bool* is_dir, String* note)
+{
+	String path = path_in;
+	if (path.len == 0)
+	{
+		path = context::default_project();
+		if (path.len == 0) return BAD_TARGET~;
+		*note = string::tformat("(no path: using the project %s)", path);
+	}
+	if (path.len > 4096) return BAD_TARGET~;
+	Path? p = path::new(tmem, path);
+	if (catch p) return BAD_TARGET~;
+	Path? abs = p.absolute(tmem);
+	if (catch abs) return BAD_TARGET~;
+	String s = (String)abs;
+	String inner = "";
+	if (path::is_dir(abs))
+	{
+		if (!file::exists(string::tformat("%s/project.json", s))) inner = project_dir(string::tformat("%s/x", s));
+	}
+	else if (util::is_c3_file(s) && file::exists(s))
+	{
+		inner = project_dir(s);
+	}
+	if (inner.len > 0)
+	{
+		*is_dir = true;
+		*note = string::tformat("(%s is inside the project in %s: that project is used)", util::clip(path, 100), inner);
+		return inner;
+	}
+	return resolve_target(path, is_dir);
+}
+
+fn String c3_test(String path @Desc("a project directory (with project.json) or a .c3 file with @test functions. A folder or file inside a project means that project. Default: the project you last gave to a tool, else the server's working directory when it holds a project.json") = "",
 	String filter @Desc("run only the tests whose name matches") = "",
 	String platform @Desc("type-check the tests for another platform, e.g. 'windows-x64' (they cannot run here)") = "",
 	int timeout_s @Desc("give up after this many seconds (1..120, default 120); a test stuck in a loop is killed") = 0,
-	String sanitize @Desc("run under a sanitizer: address (memory errors and leaks), memory or thread; empty for none") = "")
+	String sanitize @Desc("run under a sanitizer: address (memory errors and leaks), memory or thread; empty for none") = "",
+	bool output @Desc("also show what the tests printed (stdout and stderr, in the order of the run, on the lines of the tests that printed it; passing tests are listed then; capped, the summary line is kept)") = false,
+	String env @Desc("environment variables for the tests, one NAME=value per line (not for c3c; C3C*, PATH, LD_*, DYLD_*, CC, AR and similar names are refused)") = "")
 	@Desc("USE THIS INSTEAD OF running `c3c test` yourself. Builds the project or file in a scratch directory, runs its @test functions and returns the failures only, with the failing assertion and file:line, and the summary line; compile errors come with hints. Nothing is written to your tree. 120 s limit.")
 	@Timeout(150000)
 {
-	if (path.len == 0) return "give path: a project directory (with project.json) or a .c3 file with @test functions";
 	if (filter.len > 0 && filter[0] == '-') return "filter must be a test name, not an option";
 	if (!valid_target(platform)) return BAD_TARGET_NAME;
 	if (!valid_sanitize(sanitize)) return BAD_SANITIZE;
+	String[] env_list;
+	String env_err = parse_env(env, &env_list);
+	if (env_err.len > 0) return env_err;
 	bool is_dir;
-	String? where = resolve_target(path, &is_dir);
-	if (catch where) return BAD_TARGET_TEXT;
-	if (is_dir) { outline::note_project(path); } else { context::note_file(path); }
+	String note = "";
+	String? where = resolve_project_aware(path, &is_dir, &note);
+	if (catch where) return path.len == 0 ? NO_PATH_TEXT : BAD_TARGET_TEXT;
+	if (is_dir) { outline::note_project(where); } else { context::note_file(where); }
 	Path? scratch = proc::scratch_dir();
 	if (catch scratch) return "cannot create a temp directory";
 	defer (void)path::rmtree(scratch);
 	String base = dir_of(where, is_dir);
 	Args m;
 	if (sanitize.len > 0) m.add(string::tformat("--sanitize=%s", sanitize));
+	if (output) m.add("--test-show-output");
 	if (filter.len > 0)
 	{
 		m.add("--test-filter");
@@ -549,12 +705,14 @@ fn String c3_test(String path @Desc("a project directory (with project.json) or 
 		m.add("-C");
 		ok = "OK: the tests type-check for that platform (not run)";
 	}
-	return run_c3c(m.list(), base, "", scratch, is_dir, where, ok, deadline_for(timeout_s));
+	return with_note(note, run_c3c(m.list(), base, "", scratch, is_dir, where, ok, deadline_for(timeout_s), "", false, "", env_list, output));
 }
 
 fn String c3_run(String code @Desc("a C3 program with a main function") = "",
-	String path @Desc("instead of code: a project directory or a .c3 file. With code and a project directory the snippet is built with the project's sources and libraries and its main runs, not the project's (the project source files that define a main are left out); its c-sources, cflags and link-args are not used") = "",
-	String args @Desc("the program's command-line arguments, one per line") = "",
+	String path @Desc("instead of code: a project directory or a .c3 file (a folder or file inside a project means that project; default: the project you last gave to a tool, else the server's working directory when it holds a project.json). With code and a project directory the snippet is built with the project's sources and libraries and its main runs, not the project's (the project source files that define a main are left out); its c-sources, cflags and link-args are not used") = "",
+	String args @Desc("the program's command-line arguments: a JSON array of strings (e.g. [\"-v\", \"a b\"]) or one argument per line; both are accepted (up to 16)") = "",
+	String env @Desc("environment variables for the program, one NAME=value per line (not for c3c; C3C*, PATH, LD_*, DYLD_*, CC, AR and similar names are refused)") = "",
+	bool output @Desc("accepted for symmetry with c3_test: a program's output is always shown") = false,
 	String input @Desc("what the program reads from stdin (up to 16 KB); then it sees end of input") = "",
 	String files @Desc("with code or a single .c3 path: more .c3 files compiled into the program, one path per line") = "",
 	String target @Desc("with a project path: the target to run") = "",
@@ -564,7 +722,8 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	@Desc("USE THIS INSTEAD OF `c3c compile-run` or `c3c run`. Builds in a scratch directory and runs the program (arguments, stdin and extra source files can be given; 120 s limit), returning its output or the compile errors with hints. A program that needs its own working directory or files next to it: `c3c build` and run it in the shell.")
 	@Timeout(150000)
 {
-	String bad = exclusive_args(code, path);
+	// no code and no path: the project of the session (resolve_project_aware)
+	String bad = code.len == 0 && path.len == 0 ? "" : exclusive_args(code, path);
 	if (bad.len > 0) return bad;
 	if (!valid_target(target)) return BAD_TARGET_NAME;
 	if (!valid_opt(opt)) return BAD_OPT;
@@ -575,6 +734,9 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	if (err.len > 0) return err;
 	Args tail;
 	err = parse_args(args, &tail);
+	if (err.len > 0) return err;
+	String[] env_list;
+	err = parse_env(env, &env_list);
 	if (err.len > 0) return err;
 	Path? scratch = proc::scratch_dir();
 	if (catch scratch) return "cannot create a temp directory";
@@ -606,20 +768,20 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 	}
 	else
 	{
-		String? resolved = resolve_target(path, &is_dir);
-		if (catch resolved) return BAD_TARGET_TEXT;
+		String? resolved = resolve_project_aware(path, &is_dir, &note);
+		if (catch resolved) return path.len == 0 ? NO_PATH_TEXT : BAD_TARGET_TEXT;
 		where = resolved;
 		hide = dir_of(where, is_dir);
 		if (is_dir)
 		{
-			outline::note_project(path);
+			outline::note_project(where);
 			if (extra.n > 0) return "files goes with code or a single .c3 path, not with a project directory";
 			m.add("run");
 			if (target.len > 0) m.add(target);
 		}
 		else
 		{
-			context::note_file(path);
+			context::note_file(where);
 			m.add("--run-dir");
 			m.add((String)scratch);
 			m.add("compile-run");
@@ -632,7 +794,7 @@ fn String c3_run(String code @Desc("a C3 program with a main function") = "",
 		m.add("--");
 		foreach (t : tail.list()) m.add(t);
 	}
-	return with_note(note, run_c3c(m.list(), hide, replacement, scratch, is_dir, where, "(no output)", deadline_for(timeout_s), input, true, also_hide));
+	return with_note(note, run_c3c(m.list(), hide, replacement, scratch, is_dir, where, "(no output)", deadline_for(timeout_s), input, true, also_hide, env_list));
 }
 
 fn void register(mcp::Server* s)

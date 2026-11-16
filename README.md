@@ -17,8 +17,8 @@ One small binary for any MCP client: Claude Code, Claude Desktop, Cursor, VS Cod
 |---|---|
 | `c3_lookup` | A name: signature, location, source. |
 | `c3_check` | Compile a snippet, file or project. |
-| `c3_test` | Run `@test` functions; failures only. |
-| `c3_run` | Build and run with arguments and stdin. |
+| `c3_test` | Run `@test` functions; failures only (`output=true` shows what they printed; `env` sets variables). |
+| `c3_run` | Build and run with arguments (JSON array or one per line), environment and stdin. |
 | `c3_refs` | Where a name is used. |
 | `c3_search` | Manual, examples, release notes. |
 

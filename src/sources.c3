@@ -180,13 +180,51 @@ fn String expand_pattern(String root, String pattern, List{String}* out, int lim
 // The files the project-level `sources` of the project in `root` stand for (absolute, in the order of the patterns, each
 // once). `src/**` when the manifest names none. Patterns outside the project (`../shared/**`) count as well. At most
 // MAX_SOURCES: a pattern the guard could not expand (see expand_pattern) adds nothing.
-fn void project_files(String root, List{String}* out)
+fn void project_files(String root, List{String}* out) => files_of_key(root, "sources", "src/**", out);
+
+// The files the `test-sources` patterns of the project stand for (none when the manifest has no such key).
+fn void project_test_files(String root, List{String}* out) => files_of_key(root, "test-sources", "", out);
+
+// True when the manifest has no `targets` (a library scaffold: c3c build says "No targets found in project").
+fn bool has_no_targets(String root)
+{
+	Object* m = manifest_of(root);
+	if (!m || !m.is_map()) return false;
+	Object*? t = m.get("targets");
+	if (catch t) return true;
+	if (t.is_array()) return t.get_len() == 0;
+	if (!t.is_map()) return true;
+	int n = 0;
+	t.@each_entry(; String k, Object* v) { n++; };
+	return n == 0;
+}
+
+// The patterns of `key` and `test-sources`/`sources` in a manifest that name `folder` (a folder c3c could not open): "" or a line.
+fn String pattern_naming(String root, String folder)
+{
+	Object* m = manifest_of(root);
+	if (!m) return "";
+	String base = folder.starts_with("/") ? folder[(folder.rindex_of("/") ?? -1) + 1..] : folder;
+	foreach (key : (String[]){ "sources", "test-sources" })
+	{
+		List{String} patterns;
+		patterns.init(tmem);
+		strings_of(m, key, &patterns);
+		foreach (pat : patterns)
+		{
+			if (pat.contains(folder) || (base.len > 0 && pat.contains(base))) return string::tformat("project.json: %s entry '%s' names it", key, pat);
+		}
+	}
+	return "";
+}
+
+fn void files_of_key(String root, String key, String fallback, List{String}* out)
 {
 	Object* m = manifest_of(root);
 	List{String} patterns;
 	patterns.init(tmem);
-	if (m) strings_of(m, "sources", &patterns);
-	if (patterns.len() == 0) patterns.push("src/**");
+	if (m) strings_of(m, key, &patterns);
+	if (patterns.len() == 0 && fallback.len > 0) patterns.push(fallback);
 	foreach (p : patterns)
 	{
 		String base;

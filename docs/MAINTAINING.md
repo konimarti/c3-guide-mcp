@@ -13,6 +13,12 @@ For people who change or release the server. Users: see the [README](../README.m
 - Project lookups and `c3_refs` read source with the vendored tree-sitter grammar, so comments and strings are not uses.
 - `src/doctor.c3` holds one table of where each client keeps its files (`SPECS`, with the source of each location and the unconfirmed ones marked); a new client is a row there. `--doctor` only reads.
 - Enum and constset members are records of kind `member`, written identically by `scripts/gen_corpus.py` and `src/live.c3`, and take no part in `c3_search`.
+- A description whose words name the language (`LANGUAGE_WORDS` in `src/tools.c3`, general C3 vocabulary) and whose library matches are weak and the manual's better is answered with the manual's sections, as `c3_search`.
+- `c3_search` called with `path` or `pattern` gets a pointer to `c3_refs` and `c3_lookup`, not an unknown-argument error; `scope=std` is the library names part.
+- Without `path`, `c3_test`, `c3_run` and `c3_refs` use the project last given to any tool, else the server's working directory when it holds a `project.json` (`context::default_project`); `c3_lookup` uses only the remembered one.
+- A folder or `.c3` file inside a project means that project for `c3_test`, `c3_run` and `c3_check`, with one line saying so.
+- `env` lines go to the program or tests through `proc::RunOpts.env`; names that change the compiler or loader are refused (`env_name_refused`).
+- A project without `targets` is type-checked from its `sources` and `test-sources` (`check_library_sources`); c3c's "Can't open the directory" gets the `project.json` entry that names it.
 - `src/compat.c3` maps old argument and tool names to the current ones; a renamed parameter needs an entry in `alias_of`.
 - Every ranking rule must hold in general; `test/quality_test.c3`, `test/suggest_test.c3` and `test/sessions_test.c3` pin the cases.
 

@@ -10,7 +10,7 @@ Do not write C3 from memory. Call the tools below directly by name (this server 
 - c3_lookup before you use any name: one call for your project, its libraries and the standard library. A name gives the exact signature, docs, location and an example, or says it does not exist and what it became. Describe what you need ("read line from stdin") when you do not know the name. A path alone lists the declarations of a project. source=true shows the whole implementation of a library function: use it instead of reading lib/std files with sed or cat.
 - c3_check on every snippet before you show it, and on a project or file with path; code together with path=<project directory> checks a snippet that imports the project's own modules. Old 0.7 syntax is rewritten for you; format=true also runs the formatter c3f.
 - c3_test runs the @test functions of a project or file and returns the failures (sanitize=address|memory|thread).
-- c3_run builds and runs a program (arguments, stdin; sanitize=address|memory|thread).
+- c3_run builds and runs a program (arguments, env, stdin; sanitize=address|memory|thread; no path: the last project).
 - c3_refs for where a name is used: before you rename, move or delete one, use it instead of grep and sed (whole identifiers only; comments and strings are not uses); rename_to=NEW returns the exact edits of a rename and writes nothing.
 - c3_search for how to do something (manual, recipes); scope=changes when old syntax or an old name fails; scope=syntax for the exact lists of attributes, builtins, keywords and type properties.
 Trust the compiler over this documentation when they disagree.`;

@@ -686,7 +686,9 @@ fn void a_sanitizer_finds_a_memory_error() @test
 	String refused = check::c3_run(code, sanitize: "bogus");
 	assert(refused.contains("sanitize must be"), "%s", refused);
 	String bad = check::c3_run(code, sanitize: "address");
-	assert(bad.contains("AddressSanitizer"), "%s", bad);
+	// where the hard data limit is too low for the shadow memory the answer is the one line about the limit
+	assert(bad.contains("AddressSanitizer") || bad.contains("The sanitizer could not start"), "%s", bad);
+	if (!bad.contains("The sanitizer could not start")) assert(bad.contains("AddressSanitizer"), "%s", bad);
 }
 
 fn void a_c3i_file_is_checked_alone_and_with_a_snippet() @test
@@ -1153,4 +1155,122 @@ fn void a_project_with_very_many_libraries_is_refused_not_overrun() @test
 	assert(has(r, "too many libraries"), "%s", r);
 	r = check::c3_run("fn void main() {}", path: proj);
 	assert(has(r, "too many libraries"), "%s", r);
+}
+
+// ---------------------------------------------------------------- output, env, args, default path, library scaffold
+
+const String PRINTING_PROJECT = "module app;\nimport std::io;\nfn void t_print() @test { io::printn(\"marker-from-the-test\"); assert(1 + 1 == 2); }\n";
+
+fn void output_shows_what_the_tests_printed_only_when_asked() @test
+{
+	Path dir = make_project(PRINTING_PROJECT);
+	defer (void)path::rmtree(dir);
+	String quiet = check::c3_test((String)dir);
+	assert(!has(quiet, "marker-from-the-test"), "%s", quiet);
+	String loud = check::c3_test((String)dir, output: true);
+	assert(has(loud, "marker-from-the-test"), "%s", loud);
+}
+
+fn void env_reaches_the_program_and_bad_names_are_refused() @test
+{
+	String code = "import std::io, std::os::env;\nfn void main() { io::printn(env::tget_var(\"GEOM_MODE\") ?? \"unset\"); }";
+	String r = check::c3_run(code, env: "GEOM_MODE=wide-42");
+	assert(has(r, "wide-42"), "%s", r);
+	assert(!has(check::c3_run(code), "wide-42"));
+	assert(has(check::c3_run(code, env: "PATH=/nowhere"), "cannot be set"));
+	assert(has(check::c3_run(code, env: "C3C_LIB=/x"), "cannot be set"));
+	assert(has(check::c3_run(code, env: "LD_PRELOAD=/x"), "cannot be set"));
+	assert(has(check::c3_run(code, env: "1BAD=x"), "valid variable name"));
+	assert(has(check::c3_run(code, env: "NOEQUALS"), "NAME=value"));
+	Path dir = make_project(PRINTING_PROJECT);
+	defer (void)path::rmtree(dir);
+	String tests = check::c3_test((String)dir, env: "SHAPE_SIZE=3");
+	assert(!has(tests, "cannot be set") && !has(tests, "NAME=value"), "%s", tests);
+}
+
+fn void args_are_a_json_array_or_lines() @test
+{
+	String code = "import std::io;\nfn void main(String[] args) { foreach (a : args[1..]) io::printfn(\"<%s>\", a); }";
+	String lines = check::c3_run(code, args: "alpha\nb c");
+	assert(has(lines, "<alpha>") && has(lines, "<b c>"), "%s", lines);
+	String json = check::c3_run(code, args: `["alpha", "b c", "-v"]`);
+	assert(has(json, "<alpha>") && has(json, "<b c>") && has(json, "<-v>"), "%s", json);
+	assert(has(check::c3_run(code, args: "[1, 2]"), "strings only"));
+}
+
+fn void no_path_uses_the_remembered_project() @test
+{
+	Path dir = make_project(PROJECT_OK);
+	defer (void)path::rmtree(dir);
+	context::clear();
+	defer context::clear();
+	String first = check::c3_test((String)dir, "t_ok");
+	assert(has(first, "1 passed") || has(first, "passed"), "%s", first);
+	String again = check::c3_test(filter: "t_ok");
+	assert(has(again, (String)dir), "%s", again);
+	assert(has(again, "no path: using the project"), "%s", again);
+	String run = check::c3_run();
+	assert(has(run, "3"), "%s", run);
+}
+
+fn void a_folder_or_file_inside_a_project_means_that_project() @test
+{
+	Path dir = make_project(PROJECT_OK);
+	defer (void)path::rmtree(dir);
+	String sub = string::tformat("%s/src", (String)dir);
+	String t = check::c3_test(sub, "t_ok");
+	assert(has(t, "inside the project") && has(t, "passed"), "%s", t);
+	String f = check::c3_test(string::tformat("%s/main.c3", sub), "t_ok");
+	assert(has(f, "inside the project") && has(f, "passed"), "%s", f);
+	String c = check::c3_check(path: sub);
+	assert(has(c, "inside the project") && has(c, "OK"), "%s", c);
+}
+
+fn Path make_library(String src, String test_src, String sources)
+{
+	Path dir = support::make_temp_dir("c3lib");
+	support::sh(string::tformat("mkdir -p '%s/src' '%s/test'", (String)dir, (String)dir));
+	file::save(string::tformat("%s/project.json", (String)dir), string::tformat(`{"langrev":"1","sources":[%s],"test-sources":["test/**"]}`, sources))!!;
+	file::save(string::tformat("%s/src/a.c3", (String)dir), src)!!;
+	file::save(string::tformat("%s/test/t.c3", (String)dir), test_src)!!;
+	return dir;
+}
+
+fn void a_project_without_targets_is_type_checked() @test
+{
+	Path dir = make_library("module shapes;\nfn int sides(int n) => n + 2;\n", "module shapes_test;\nimport shapes;\nfn void t() @test { assert(shapes::sides(1) == 3); }\n", `"src/**"`);
+	defer (void)path::rmtree(dir);
+	String ok = check::c3_check(path: (String)dir);
+	assert(has(ok, "OK") && has(ok, "no targets") && !has(ok, "No targets found"), "%s", ok);
+	file::save(string::tformat("%s/test/t.c3", (String)dir), "module shapes_test;\nimport shapes;\nfn int bad() => \"s\";\n")!!;
+	String bad = check::c3_check(path: (String)dir);
+	assert(has(bad, "error:") && has(bad, "test/t.c3"), "%s", bad);
+	file::save(string::tformat("%s/src/a.c3", (String)dir), "module shapes;\nfn int sides(int n) => n +;\n")!!;
+	String src = check::c3_check(path: (String)dir);
+	assert(has(src, "src/a.c3"), "%s", src);
+}
+
+fn void a_missing_sources_folder_names_its_project_json_entry() @test
+{
+	Path dir = make_project("module app;\nfn void main() {}\n");
+	defer (void)path::rmtree(dir);
+	file::save(string::tformat("%s/project.json", (String)dir), `{"langrev":"1","sources":["src/**","gone_dir/**"],"targets":{"app":{"type":"executable"}}}`)!!;
+	String r = check::c3_check(path: (String)dir);
+	assert(has(r, "Can't open the directory") && has(r, "sources entry 'gone_dir/**'"), "%s", r);
+}
+
+fn void up_to_32_files_are_accepted() @test
+{
+	Path dir = support::make_temp_dir("c3files");
+	defer (void)path::rmtree(dir);
+	DString many = dstring::temp();
+	for (int i = 0; i < 33; i++)
+	{
+		String f = string::tformat("%s/h%d.c3", (String)dir, i);
+		file::save(f, string::tformat("module h%d;\nfn int v%d() => %d;\n", i, i, i))!!;
+		many.appendf("%s\n", f);
+		if (i == 19) assert(!has(check::c3_check("fn void f() {}", files: many.str_view()), "at most"), "20 files");
+		if (i == 31) assert(!has(check::c3_check("fn void f() {}", files: many.str_view()), "at most"), "32 files");
+	}
+	assert(has(check::c3_check("fn void f() {}", files: many.str_view()), "at most 32"));
 }

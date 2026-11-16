@@ -1,6 +1,6 @@
 module c3guide::context;
 import c3guide::util;
-import std::core::string, std::io::file;
+import std::core::string, std::io::file, std::io::path;
 
 // What this session is working with: the standard library modules the code it checked imports, and the modules of
 // the names it looked up. A search prefers names from those modules (`is_dir` is `std::io::file::is_dir` for code
@@ -31,6 +31,18 @@ char[MAX_PROJECT] project_buf;
 sz project_len;
 
 fn String project() => (String)project_buf[:project_len];
+
+// The project to use when a tool gets no path: the one last given; else the server's working directory when it holds a
+// project.json; else "".
+fn String default_project()
+{
+	if (project_len > 0) return project();
+	Path? cwd = path::tcwd();
+	if (catch cwd) return "";
+	String dir = (String)cwd;
+	if (!file::exists(string::tformat("%s/project.json", dir))) return "";
+	return string::tformat("%s", dir);
+}
 
 fn void note_project_dir(String dir)
 {

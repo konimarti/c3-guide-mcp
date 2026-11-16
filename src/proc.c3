@@ -139,18 +139,19 @@ const String[*] KEEP_ENV = {
 	"ASAN_OPTIONS", "UBSAN_OPTIONS", "MSAN_OPTIONS", "TSAN_OPTIONS"
 };
 
-fn Process? spawn_clean(String[] cmd)
+fn Process? spawn_clean(String[] cmd, String[] extra_env = {})
 {
 	$if env::WIN32:
 		return process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT | process::SpawnOptions.INHERIT_ENV);   // the loader needs SystemRoot and more
 	$else
-		String[] kept = mem::talloc_array(String, KEEP_ENV.len);
+		String[] kept = mem::talloc_array(String, KEEP_ENV.len + extra_env.len);
 		int n = 0;
 		foreach (k : KEEP_ENV)
 		{
 			String? v = env::tget_var(k);
 			if (try v) kept[n++] = string::tformat("%s=%s", k, v);
 		}
+		foreach (e : extra_env) kept[n++] = e;   // after the kept ones: a name given by the caller wins
 		return process::spawn(cmd, process::SpawnOptions.STDERR_TO_STDOUT, kept[:n]);
 	$endif
 }
@@ -163,6 +164,7 @@ struct RunOpts
 	String input;        // the child's stdin, then end of input (default: end of input at once)
 	String cwd;          // the child's working directory (default: an empty directory of ours, see neutral_cwd)
 	String sweep;        // a scratch directory whose processes are killed too when the run is cut short
+	String[] env;        // `NAME=value` entries added to the child's environment (Linux and macOS; see check::parse_env)
 	bool raise_limits;   // Linux and macOS: raise the soft data-segment and address-space limits to the hard ones first (sanitizers)
 }
 
@@ -194,7 +196,7 @@ fn String? run_capped(String[] cmd_in, int* code, bool* timed_out, RunOpts opts 
 			cmd = wrapped;
 		}
 	$endif
-	Process spawned = spawn_clean(cmd)!;
+	Process spawned = spawn_clean(cmd, opts.env)!;
 	Process* proc = libc::calloc(1, Process::size);
 	*proc = spawned;
 	// What the program reads from stdin, then end of input: a program that reads stdin must see EOF, not wait for the
