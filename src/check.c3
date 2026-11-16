@@ -578,19 +578,27 @@ fn String run_c3c(String[] mode_args, String hide, String replacement, Path scra
 fn String sanitizer_blocked(String out)
 {
 	String limits = "";
+	bool unlimited = false;
 	$if !env::WIN32:
 		int code = 0;
 		bool timed_out = false;
+		String? h = proc::run_capped({ "/bin/sh", "-c", "echo \"$(ulimit -H -d) $(ulimit -H -v)\"" }, &code, &timed_out);
+		if (try h) unlimited = h.trim() == "unlimited unlimited";
 		String? l = proc::run_capped({ "/bin/sh", "-c", "echo \"data $(ulimit -S -d) soft, $(ulimit -H -d) hard; address space $(ulimit -S -v) soft, $(ulimit -H -v) hard\"" }, &code, &timed_out);
 		if (try l) limits = string::tformat(" (%s)", l.trim());
 	$endif
-	String which = out.contains("ulimit -v or ulimit -d") ? "the data-segment or address-space limit (ulimit -d / -v)" : "an address-space limit";
 	// a c3c that is a shell script setting `ulimit` itself lowers the limits again after we raised them
-	String wrapper = "";
-	String bin = compiler::c3c_binary();
-	char[]? loaded = file::load_temp(bin);
-	if (try loaded) { String head = (String)loaded; if (head.starts_with("#!") && head.contains("ulimit")) wrapper = string::tformat(" The c3c in use (%s) is a script that sets ulimit itself.", bin); }
-	return string::tformat("The sanitizer could not start: %s is too small for its shadow memory%s. The tests did not run (no sanitizer result).%s Run them where the limit is unlimited.", which, limits, wrapper);
+	bool wrapper = false;
+	char[]? loaded = file::load_temp(compiler::c3c_binary());
+	if (try loaded) { String head = (String)loaded; wrapper = head.starts_with("#!") && head.contains("ulimit"); }
+	String tail = " The tests did not run.";
+	// the hard limits are not set: they are not what is in the way, and "run it where the limit is unlimited" would be false
+	if (unlimited)
+	{
+		return string::tformat("The sanitizer could not reserve its shadow memory%s, though ulimit sets no hard limit here; %s.%s", limits, wrapper ? "the c3c in use is a script that may set ulimit itself" : "another limit (a container or cgroup setting) may be in the way", tail);
+	}
+	String which = out.contains("ulimit -v or ulimit -d") ? "the data or address-space limit (ulimit -d/-v)" : "an address-space limit";
+	return string::tformat("The sanitizer could not start: %s is too small for its shadow memory%s.%s%s Run them where the limit is higher.", which, limits, tail, wrapper ? " The c3c in use is a script that may set ulimit itself." : "");
 }
 
 // Names a caller may not set: they change what c3c and the C toolchain load or run, not what the program sees.
