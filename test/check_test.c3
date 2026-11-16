@@ -1,6 +1,6 @@
 module c3guide::test::check;
 import c3guide::format;
-import c3guide::compiler, c3guide::proc;
+import c3guide::compiler, c3guide::proc, c3guide::context;
 import c3guide::check, c3guide::util, c3guide::hints, c3guide::guard, c3guide::sources, c3guide::test::support;
 import libc;
 import std::core::string, std::io, std::io::file, std::io::path, std::os::env, std::time, std::time::clock;
