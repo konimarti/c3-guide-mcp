@@ -106,7 +106,9 @@ fn void missing_compiler_gives_a_clear_message() @test
 {
 	defer support::restore_c3c();
 	support::set_c3c("/nonexistent/c3c");
-	assert(has(check::c3_check("fn void f() {}"), "could not start c3c"));
+	String r = check::c3_check("fn void f() {}");
+	support::restore_c3c();   // before any assert: a failed assert skips the defer, and the fake would stay for every later test
+	assert(has(r, "could not start c3c"));
 }
 
 fn void the_exit_code_is_right_even_when_the_pipe_outlives_the_compiler() @test
@@ -118,9 +120,11 @@ fn void the_exit_code_is_right_even_when_the_pipe_outlives_the_compiler() @test
 	defer support::restore_c3c();
 	support::set_c3c(support::write_fake(dir, "exit3.sh", "sleep 0.5 &\nexit 3"));
 	String t = check::c3_check("fn void f() {}");
-	assert(!has(t, "OK") && has(t, "exit code 3"), "%s", t);
 	support::set_c3c(support::write_fake(dir, "exit0.sh", "sleep 0.5 &\nexit 0"));
-	assert(has(check::c3_check("fn void f() {}"), "OK"), "a success with a held pipe is still a success");
+	String ok = check::c3_check("fn void f() {}");
+	support::restore_c3c();
+	assert(!has(t, "OK") && has(t, "exit code 3"), "%s", t);
+	assert(has(ok, "OK"), "a success with a held pipe is still a success");
 }
 
 fn void output_of_exactly_the_cap_is_not_cut_but_one_byte_more_is() @test
@@ -131,9 +135,11 @@ fn void output_of_exactly_the_cap_is_not_cut_but_one_byte_more_is() @test
 	// c3_check keeps 4096 bytes. 4096 exactly fits, with its exit code; 4097 is cut
 	support::set_c3c(support::write_fake(dir, "exact.sh", "head -c 4096 /dev/zero | tr '\\\\0' 'x'\nexit 7"));
 	String exact = check::c3_check("fn void f() {}");
-	assert(!has(exact, "[output cut]") && exact.len >= 4096, "%d bytes: %s", (int)exact.len, util::clip(exact, 80));
 	support::set_c3c(support::write_fake(dir, "over.sh", "head -c 4097 /dev/zero | tr '\\\\0' 'x'\nexit 7"));
-	assert(has(check::c3_check("fn void f() {}"), "[output cut]"));
+	String over = check::c3_check("fn void f() {}");
+	support::restore_c3c();
+	assert(!has(exact, "[output cut]") && exact.len >= 4096, "%d bytes: %s", (int)exact.len, util::clip(exact, 80));
+	assert(has(over, "[output cut]"));
 }
 
 fn void a_compiler_that_closes_its_output_but_keeps_running_still_gets_the_deadline() @test
@@ -157,6 +163,7 @@ fn void exit_code_without_output_is_not_ok() @test
 	defer support::restore_c3c();
 	support::set_c3c(support::write_fake(dir, "exit1.sh", "exit 1"));
 	String t = check::c3_check("fn void f() {}");
+	support::restore_c3c();
 	assert(!has(t, "OK") && has(t, "exit code 1"), "%s", t);
 }
 
@@ -168,6 +175,7 @@ fn void compiler_flags_are_fixed() @test
 	String argv = string::tformat("%s/argv.txt", (String)dir);
 	support::set_c3c(support::write_fake(dir, "rec.sh", string::tformat("echo \"$@\" > '%s'", argv)));
 	check::c3_check("fn void f() {}");
+	support::restore_c3c();
 	String got = (String)file::load_temp(argv)!!;
 	foreach (f : FLAGS) assert(has(got, f), "flag %s missing: %s", f, got);
 }
@@ -181,10 +189,11 @@ fn void never_ending_compiler_is_killed_after_10_seconds() @test
 	Clock start = clock::now();
 	String t = check::c3_check("fn void f() {}");
 	ulong ms = (ulong)start.to_now() / 1_000_000;
-	assert(ms > 9000 && ms < 20000 && has(t, "[timeout"), "%d ms: %s", ms, t);
 	// the server keeps serving
 	support::restore_c3c();
-	assert(has(check::c3_check("fn void f() {}"), "OK"));
+	String after = check::c3_check("fn void f() {}");
+	assert(ms > 9000 && ms < 20000 && has(t, "[timeout"), "%d ms: %s", ms, t);
+	assert(has(after, "OK"));
 }
 
 fn void no_timeout_program_is_needed() @test
@@ -201,6 +210,8 @@ fn void no_timeout_program_is_needed() @test
 	Clock start = clock::now();
 	String t = check::c3_check("fn void f() {}");
 	ulong ms = (ulong)start.to_now() / 1_000_000;
+	support::restore_c3c();
+	env::set_var("PATH", saved);
 	assert(ms > 9000 && ms < 20000 && has(t, "[timeout"), "%d ms: %s", ms, t);
 }
 
@@ -213,6 +224,7 @@ fn void flooding_compiler_is_cut_and_killed() @test
 	Clock start = clock::now();
 	String t = check::c3_check("fn void f() {}");
 	ulong ms = (ulong)start.to_now() / 1_000_000;
+	support::restore_c3c();
 	assert(t.len < 4200 && has(t, "[output cut]") && ms < 5000, "%d ms, len %d", ms, t.len);
 }
 
@@ -417,7 +429,9 @@ fn void run_tool_kills_a_hanging_compiler_after_its_deadline_flag() @test
 	defer (void)path::rmtree(dir);
 	defer support::restore_c3c();
 	support::set_c3c(support::write_fake(dir, "ok.sh", "echo fake-output"));
-	assert(has(check::c3_run("fn void main() {}"), "fake-output"));
+	String r = check::c3_run("fn void main() {}");
+	support::restore_c3c();
+	assert(has(r, "fake-output"));
 }
 
 fn void run_takes_an_optimization_level() @test

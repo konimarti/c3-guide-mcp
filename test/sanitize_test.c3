@@ -85,10 +85,13 @@ fn void a_sanitizer_that_still_cannot_reserve_gives_one_line() @test
 		String f = string::tformat("%s/ok.c3", (String)dir);
 		file::save(f, "module ok;\nfn void fine() @test {}\n")!!;
 		String t = check::c3_test(f, sanitize: "address");
-		assert(has(t, "did not run") && has(t, "ulimit") && !has(t, "AddressSanitizer failed") && !has(t, "0xdfff"), "%s", t);
-		assert(!has(t, "\n\n") && t.len < 400, "%s", t);
 		// without a sanitizer the same output is not rewritten
 		String p = check::c3_test(f);
+		support::restore_c3c();   // before any assert: a failed assert skips the defer, and the fake would stay for every later test
+		assert(has(t, "did not run") && has(t, "ulimit") && !has(t, "AddressSanitizer failed") && !has(t, "0xdfff"), "%s", t);
+		assert(!has(t, "\n\n") && t.len < 400, "%s", t);
+		// the answer does not blame limits that are not set (when both hard limits are unlimited it says no limit is too small)
+		assert(!(has(t, "data unlimited soft, unlimited hard; address space unlimited soft, unlimited hard") && has(t, "too small")), "%s", t);
 		assert(has(p, "ReserveShadowMemoryRange") || has(p, "exit code"), "%s", p);
 	$endif
 }
@@ -104,12 +107,18 @@ fn void the_compiler_caches_follow_the_c3c_in_use() @test
 		defer real_root.free(mem);
 		Path dir = support::make_temp_dir("c3cache");
 		defer (void)path::rmtree(dir);
+		String fake_version;
+		String fake_root;
 		{
 			defer support::restore_c3c();
 			support::set_c3c(support::write_fake(dir, "nover.sh", "echo 'no version here'"));
-			assert(compiler::compiler_version() == "", "a program that prints no version has none: %s", compiler::compiler_version());
-			assert(compiler::stdlib_root() == "", "its library cannot be found: %s", compiler::stdlib_root());
+			fake_version = compiler::compiler_version().copy(mem);
+			fake_root = compiler::stdlib_root().copy(mem);
 		}
+		defer fake_version.free(mem);
+		defer fake_root.free(mem);
+		assert(fake_version == "", "a program that prints no version has none: %s", fake_version);
+		assert(fake_root == "", "its library cannot be found: %s", fake_root);
 		assert(compiler::compiler_version() == real, "'%s' after the fake, '%s' before", compiler::compiler_version(), real);
 		assert(compiler::stdlib_root() == real_root, "'%s' after the fake, '%s' before", compiler::stdlib_root(), real_root);
 	$endif
