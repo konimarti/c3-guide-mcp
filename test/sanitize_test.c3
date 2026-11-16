@@ -13,7 +13,9 @@ fn String limits_after(String lowered) @local
 
 fn void raising_goes_to_the_hard_limit_and_not_above() @test
 {
-	$if !env::WIN32:
+	// Linux only: on macOS CI the lowered limits did not read back as set (the test got "unlimited"), and the data limit
+	// that blocks the sanitizer's shadow memory is a Linux matter
+	$if env::LINUX:
 		// hard limits of 3 GB and 5 GB (KB units), soft ones far below
 		String r = limits_after("ulimit -S -d 1000000; ulimit -H -d 3000000; ulimit -S -v 2000000; ulimit -H -v 5000000;");
 		assert(r == "3000000\n5000000", "%s", r);
