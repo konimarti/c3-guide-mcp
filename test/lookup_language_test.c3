@@ -54,3 +54,22 @@ fn void the_statement_and_declaration_words_are_all_compiler_keywords() @test
 	foreach (w : tools::STATEMENT_WORDS) assert(tools::in_list("keywords", w), "%s is not in c3c --list-keywords", w);
 	foreach (w : tools::DECLARATION_WORDS) assert(tools::in_list("keywords", w), "%s is not in c3c --list-keywords", w);
 }
+
+// A description about the language itself is answered by the manual's sections, as c3_search would.
+fn void a_language_question_is_answered_by_the_manual() @test
+{
+	foreach (q : (String[]){ "switch statement syntax", "lambda expression syntax", "how to declare an attribute" })
+	{
+		String r = tools::symbol_reply(q);
+		assert(!r.contains("does not exist"), "%s: %s", q, r);
+		assert(r.contains("question about the language"), "%s: %s", q, r);
+	}
+}
+
+fn void a_library_question_is_not_taken_by_the_manual() @test
+{
+	foreach (q : (String[]){ "check whether a path is a directory", "compare semantic version strings", "sha256 hash of bytes" })
+	{
+		assert(!tools::symbol_reply(q).contains("question about the language"), "%s", q);
+	}
+}

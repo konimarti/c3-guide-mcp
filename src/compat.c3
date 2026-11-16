@@ -219,11 +219,28 @@ fn String handle(mcp::Server* s, Allocator a, String line)
 	};
 	if (unknown.len() > 0)
 	{
+		// c3_search is asked for a text search of a project (`path`, `pattern`): that is c3_refs and c3_lookup, not an unknown argument
+		String pointer = search_pointer(a, name, args, unknown.str_view());
+		if (pointer.len > 0) return tool_text(a, id, pointer);
 		String text = string::format(a, "%s does not take %s. It takes: %s.", name, unknown.str_view(), parameters_of(t));
 		return tool_text(a, id, text);
 	}
 	if (!changed) return s.handle(a, line);
 	return s.handle(a, call_message(a, id, name, body.str_view()));
+}
+
+// What to say to `c3_search` called with `path`, `pattern` (or a spelling of them): it searches the manual, the recipes and
+// the library's names, never a project. "" for any other call.
+fn String search_pointer(Allocator a, String tool, Object* args, String unknown)
+{
+	if (tool != "c3_search") return "";
+	bool wants = false;
+	foreach (k : (String[]){ "'path'", "'pattern'", "'regex'", "'glob'", "'dir'", "'directory'", "'include'" }) if (unknown.contains(k)) wants = true;
+	if (!wants) return "";
+	String q = "";
+	if (try v = args.get_string("query")) q = v.len > 60 ? v[:60] : v;
+	if (q.len == 0 || q.contains("\"") || q.contains("\n")) q = "NAME";
+	return string::format(a, "c3_search searches the manual, the recipes and the standard library's names, not a project's text. In a project: c3_refs query=\"%s\" path=<project> lists where a name is used (whole identifiers, comments and strings excluded; it also reads the project's libraries); c3_lookup path=<project> lists its declarations, and c3_lookup query=\"%s\" path=<project> finds a declaration by name. For plain text in files use grep in the shell. c3_search takes: query, scope, limit, file.", q, q);
 }
 
 fn String clip_name(String s) => s.len > 40 ? s[:40] : s;

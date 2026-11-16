@@ -98,10 +98,10 @@ fn int clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
 const String SEARCH_HELP = "give query: what you want to know ('foreach with index', 'defer catch'). scope=changes searches the release notes (what was renamed or removed), scope=syntax the exact lists (attributes, builtins, keywords, type-properties, operators, precedence).";
 
 fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach with index', 'defer catch'; with scope=syntax a list name or a word to find in the lists") = "",
-	String scope @Desc("all (default): manual, recipes and standard library names. changes: the release notes, newest first (use it when old syntax or an old name fails). syntax: the compiler's exact lists of attributes, builtins, keywords, type-properties, operators, precedence") = "",
+	String scope @Desc("all (default): manual, recipes and standard library names. changes: the release notes, newest first (use it when old syntax or an old name fails). syntax: the compiler's exact lists of attributes, builtins, keywords, type-properties, operators, precedence. std: only the standard library names") = "",
 	int limit @Desc("number of results (1..5)") = 3,
 	String file @Desc("the C3 file you are editing, if any: the standard library modules it imports narrow the library names") = "")
-	@Desc("Start here for any 'how do I' question about C3: searches the language manual, the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...) and the standard library names that fit the words ('tcp server' gives std::net::tcp). scope=changes finds what changed between releases, scope=syntax gives the compiler's exact lists. Use c3_lookup when you already know the name.")
+	@Desc("Start here for any 'how do I' question about C3: searches the language manual, the verified recipes (small working programs: read a file, HashMap, sort, mkdir, threads...) and the standard library names that fit the words ('tcp server' gives std::net::tcp). scope=changes finds what changed between releases, scope=syntax gives the compiler's exact lists, scope=std only the library's names. It does not search a project: c3_refs finds where a name is used, c3_lookup with path lists a project's declarations. Use c3_lookup when you already know the name.")
 	@ReadOnly
 {
 	String q = query.trim(" \t\n");
@@ -109,7 +109,13 @@ fn String c3_search(String query @Desc("what you want to know, e.g. 'foreach wit
 	if (sc == "syntax") return syntax_reply(q);
 	if (q.len == 0) return SEARCH_HELP;
 	if (sc == "changes") return string::tformat("%s%s", changes_reply(q, limit), manual_note());
-	if (sc.len > 0 && sc != "all" && sc != "manual") return "scope must be all, changes or syntax";
+	// the library's names part: what `scope=std` (or stdlib, library) is asked for
+	if (sc == "std" || sc == "stdlib" || sc == "library")
+	{
+		live::ensure();
+		return string::tformat("(scope=%s: the standard library names that fit the words; c3_lookup gives one name's signature)\n%s", sc, describe(q));
+	}
+	if (sc.len > 0 && sc != "all" && sc != "manual") return "scope must be all, changes, syntax or std (the library's names)";
 	String reply = search_all(q, limit, file);
 	// a question about what changed is answered by the release notes too
 	if (asks_about_change(q))
@@ -451,6 +457,19 @@ fn String brief(Entry* e)
 }
 
 // Words instead of a name: rank symbols by their name and doc comment.
+// General C3 and programming-language vocabulary: words that ask about the language, not about a library function.
+const String[*] LANGUAGE_WORDS = {
+	"syntax", "keyword", "keywords", "statement", "statements", "lambda", "lambdas", "closure", "attribute", "attributes",
+	"operator", "operators", "literal", "literals", "declare", "declaration", "expression", "expressions", "clause", "semantics",
+	"grammar", "precedence", "contract", "contracts", "generic", "generics"
+};
+
+fn bool names_the_language(String[] terms)
+{
+	foreach (t : terms) foreach (w : LANGUAGE_WORDS) if (t == w) return true;
+	return false;
+}
+
 fn String describe(String query, bool strict = false)
 {
 	Hit[] hits = search::search(query, SYMBOL_KINDS[..], 5, true);
@@ -468,6 +487,22 @@ fn String describe(String query, bool strict = false)
 	}
 	// a name that was not found (`outline_source`) is not described by a symbol that has only one of its two words
 	if (strict && terms.len == 2 && best < 2) return string::tformat("no symbol matches '%s'; try other words", query);
+	// A question about the language ("foreach syntax", "lambda function pointer"): the library hits have less than two thirds
+	// of the words, a section of the manual or a recipe has more of them and nearly all. Then the manual answers, as c3_search would.
+	if (!strict && terms.len >= 2 && best * 3 < (int)terms.len * 2 && names_the_language(terms))
+	{
+		Hit[] manual = search::search(query, { "doc", "recipe" }, 3);
+		int manual_best = 0;
+		foreach (h : manual)
+		{
+			int n = words_in(&corpus::entries[h.idx], terms);
+			if (n > manual_best) manual_best = n;
+		}
+		if (manual_best > best && manual_best * 4 >= (int)terms.len * 3)
+		{
+			return util::clip(string::tformat("'%s' reads as a question about the language: no library name fits it well, so these are the best sections of the manual (what c3_search shows):\n%s", query, format_hits(manual, MAX_SNIPPET)), MAX_REPLY);
+		}
+	}
 	if (terms.len >= 3 && best * 2 < (int)terms.len)
 	{
 		out.appendf("Weak matches: no symbol below has more than %d of your %d words. The standard library may not have this; libc:: and os::posix:: hold the raw system calls, or declare an extern.\n", best, (int)terms.len);

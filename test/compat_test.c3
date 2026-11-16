@@ -116,3 +116,25 @@ fn void an_old_tool_without_arguments_is_forwarded() @test
 	// a current tool without arguments is the library's business, as before
 	assert(call_raw(`{"name":"c3_lookup"}`).contains("give query"));
 }
+
+fn void c3_search_with_a_project_search_points_to_the_tools_that_do_it() @test
+{
+	foreach (args : (String[]){ `{"query":"Shape","path":"/some/project"}`, `{"query":"area","pattern":"*.c3"}`, `{"query":"Widget","glob":"src/*.c3"}` })
+	{
+		String a = call("c3_search", args);
+		assert(!a.contains("does not take"), "%s", a);
+		assert(a.contains("c3_refs") && a.contains("c3_lookup") && a.contains("not a project"), "%s", a);
+	}
+	// an argument that means nothing for any search is still refused by name
+	assert(call("c3_search", `{"query":"defer","colour":"red"}`).contains("does not take 'colour'"));
+}
+
+fn void c3_search_scope_std_is_the_library_names_part() @test
+{
+	foreach (sc : (String[]){ "std", "stdlib", "library" })
+	{
+		String a = call("c3_search", string::tformat(`{"query":"create a directory","scope":"%s"}`, sc));
+		assert(!a.contains("scope must be") && a.contains("standard library names"), "%s", a);
+	}
+	assert(call("c3_search", `{"query":"x","scope":"bogus"}`).contains("scope must be"));
+}
