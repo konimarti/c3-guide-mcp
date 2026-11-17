@@ -1,6 +1,6 @@
 module c3guide::test::compat;
 import c3guide::compat, c3guide::tools, c3guide::check, c3guide::proc, c3guide::test::support;
-import mcp, std::core::string, std::io::file, std::io::path, std::encoding::json, std::collections::object;
+import mcp, std::io::file, std::io::path, std::encoding::json, std::collections::object;
 
 // The argument names and tool names of 0.5/0.6, as clients still send them (src/compat.c3).
 

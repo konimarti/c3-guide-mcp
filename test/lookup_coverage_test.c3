@@ -1,6 +1,6 @@
 module c3guide::test::lookup_coverage;
 import c3guide::tools, c3guide::suggest, c3guide::live, c3guide::corpus, c3guide::test::support;
-import std::core::string, std::io::file, std::io::path, std::os::env;
+import std::io::file, std::io::path, std::os::env;
 
 fn bool has(String hay, String needle) @local => hay.contains(needle);
 

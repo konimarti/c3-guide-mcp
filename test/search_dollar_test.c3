@@ -1,6 +1,5 @@
 module c3guide::test::search_dollar;
 import c3guide::tools, c3guide::search, c3guide::corpus, c3guide::test::support;
-import std::core::string;
 
 // A `$`, `$$` or `@` word in a question is a name: an entry without it comes after every entry that has it, and the
 // compiler's lists are searched for it too.

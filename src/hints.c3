@@ -1,5 +1,4 @@
 module c3guide::hints;
-import std::core::string;
 import c3guide::tools, c3guide::util, c3guide::ts, c3guide::corpus;
 import std::collections::list;
 

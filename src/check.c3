@@ -1,5 +1,5 @@
 module c3guide::check;
-import mcp, std::core::string, std::io::path, std::io::file, std::collections::list, std::collections::object, std::encoding::json;
+import mcp, std::io::path, std::io::file, std::collections::list, std::collections::object, std::encoding::json;
 import c3guide::guard, c3guide::sources, c3guide::proc, c3guide::compiler, c3guide::format, c3guide::util, c3guide::hints, c3guide::context, c3guide::outline;
 
 // c3_check, c3_test and c3_run: the real compiler's diagnostics (never a build artifact), with hints.

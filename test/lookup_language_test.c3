@@ -1,6 +1,5 @@
 module c3guide::test::lookup_language;
 import c3guide::tools;
-import std::core::string;
 
 // The table of built-in types in c3_lookup is C3 knowledge, not read from the compiler: the compiler that builds these
 // tests says whether it is right.

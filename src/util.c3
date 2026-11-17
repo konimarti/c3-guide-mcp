@@ -1,5 +1,5 @@
 module c3guide::util;
-import std::core::string, std::os::env;
+import std::os::env;
 
 extern fn CInt chmod(ZString, uint) @if(!env::WIN32);
 

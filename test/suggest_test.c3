@@ -1,6 +1,5 @@
 module c3guide::test::suggest;
 import c3guide::tools, c3guide::test::support;
-import std::core::string;
 
 // c3_lookup of a name that is not in the library says what it probably is: the first line after "did you mean:", or
 // nothing when the library has nothing close ("nothing is better than noise").

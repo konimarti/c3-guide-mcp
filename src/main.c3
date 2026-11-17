@@ -1,5 +1,5 @@
 module c3guide;
-import mcp, libc, std::core::string, std::os::env;
+import mcp, libc, std::os::env;
 import c3guide::compat, c3guide::proc, c3guide::corpus, c3guide::tools, c3guide::check, c3guide::live, c3guide::doctor;
 import std::io;
 

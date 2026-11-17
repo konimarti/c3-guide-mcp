@@ -1,6 +1,6 @@
 module c3guide::proc;
 import c3guide::util;
-import libc, std::os::posix, std::thread, std::core::string, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock, std::time;
+import libc, std::os::posix, std::thread, std::io, std::io::path, std::io::file, std::os::process, std::os::env, std::time::clock, std::time;
 
 // Running a program (c3c, c3f, pkill) with a deadline and capped output, and the scratch directories it works in.
 

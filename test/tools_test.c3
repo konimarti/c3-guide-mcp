@@ -1,7 +1,7 @@
 module c3guide::test::tools;
 import c3guide::compiler;
 import c3guide::tools, c3guide::util, std::os::env, c3guide::search, c3guide::check, c3guide::test::support;
-import std::core::string, std::time::clock;
+import std::time::clock;
 
 const sz MAX_TEXT = 3600;   // reply cap (3200) plus the cut marker
 

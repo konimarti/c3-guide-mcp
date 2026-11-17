@@ -1,5 +1,5 @@
 module c3guide::compiler;
-import std::core::string, std::io::file, std::io::path, std::os::env;
+import std::io::file, std::io::path, std::os::env;
 import c3guide::proc, c3guide::corpus;
 
 // Finding the installed c3c and what it is: where it is, its version, its standard library, and the notes that say

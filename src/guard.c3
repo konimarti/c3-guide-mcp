@@ -1,6 +1,6 @@
 module c3guide::guard;
 import c3guide::util, c3guide::sources;
-import std::os::env, std::io::file, std::io::path, std::core::string, std::collections::list, std::collections::object, std::compression::zip, std::encoding::json;
+import std::os::env, std::io::file, std::io::path, std::collections::list, std::collections::object, std::compression::zip, std::encoding::json;
 
 // c3_check promises that nothing is run and nothing is read outside what is being checked. `--trust=none` stops `$exec`,
 // but still lets `$embed` read any file the server can read (an `$assert` on one byte of it is enough to read it back).

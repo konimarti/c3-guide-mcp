@@ -1,7 +1,7 @@
 module c3guide::test::live;
 import c3guide::live, c3guide::corpus, c3guide::check, c3guide::search, c3guide::util, c3guide::test::support;
 import std::io::path;
-import std::core::string, std::collections::map, std::os::env, std::io;
+import std::collections::map, std::os::env, std::io;
 
 // Run with C3_DIR=<the c3c install the snapshot belongs to> (CI sets it). The port in src/live.c3 must give the
 // same text as scripts/gen_corpus.py for every symbol, or the server would answer differently depending on

@@ -1,6 +1,5 @@
 module c3guide::test::next_step;
 import c3guide::tools, c3guide::check, c3guide::test::support;
-import std::core::string;
 
 // The answers name the next tool or parameter: a refusal says the way out, an error that depends on the platform says how
 // to check another one, and `source=true` shows the whole implementation (so nobody reads lib/std with sed).

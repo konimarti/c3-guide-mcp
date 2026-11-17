@@ -1,6 +1,5 @@
 module c3guide::search;
 import c3guide::corpus, c3guide::util, c3guide::context;
-import std::core::ascii;
 import std::collections::list;
 import std::sort, std::math;
 

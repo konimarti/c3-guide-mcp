@@ -1,6 +1,6 @@
 module c3guide::suggest;
 import c3guide::corpus, c3guide::util;
-import std::collections::list, std::core::ascii, std::sort;
+import std::collections::list, std::sort;
 
 // "does not exist" is not an answer for a name that is nearly right: `String.trepeat` is `DString.append_repeat`,
 // `file::tload` is `file::load_temp`. The suggestions come from the names of the standard library by their words (not by

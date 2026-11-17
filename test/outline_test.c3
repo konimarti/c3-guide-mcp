@@ -1,7 +1,7 @@
 module c3guide::test::outline;
 import c3guide::compiler, c3guide::proc;
 import c3guide::ts, c3guide::outline, c3guide::tools, c3guide::check, c3guide::util, c3guide::test::support;
-import std::collections::list, std::core::string, std::os::env, std::io, std::io::file, std::io::path, std::time::clock;
+import std::collections::list, std::os::env, std::io, std::io::file, std::io::path, std::time::clock;
 
 const String SAMPLE = `module demo::shapes;
 import std::io;

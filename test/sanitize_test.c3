@@ -1,6 +1,6 @@
 module c3guide::test::sanitize;
 import c3guide::check, c3guide::proc, c3guide::compiler, c3guide::test::support;
-import std::core::string, std::io::file, std::io::path, std::os::env;
+import std::io::file, std::io::path, std::os::env;
 
 fn bool has(String hay, String needle) @local => hay.contains(needle);
 

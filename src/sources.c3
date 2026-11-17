@@ -1,6 +1,6 @@
 module c3guide::sources;
 import c3guide::util;
-import std::sort, std::core::string, std::io::file, std::io::path, std::collections::list, std::collections::object, std::encoding::json;
+import std::sort, std::io::file, std::io::path, std::collections::list, std::collections::object, std::encoding::json;
 
 // What project.json says a project is made of: the files its `sources` patterns stand for and the libraries it depends on.
 // The patterns are expanded the way c3c 0.8.6 expands them (target_expand_source_names and file_add_wildcard_files in

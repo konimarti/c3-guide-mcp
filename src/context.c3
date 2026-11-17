@@ -1,6 +1,6 @@
 module c3guide::context;
 import c3guide::util;
-import std::core::string, std::io::file, std::io::path;
+import std::io::file, std::io::path;
 
 // What this session is working with: the standard library modules the code it checked imports, and the modules of
 // the names it looked up. A search prefers names from those modules (`is_dir` is `std::io::file::is_dir` for code

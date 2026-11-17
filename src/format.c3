@@ -1,5 +1,5 @@
 module c3guide::format;
-import std::core::string, std::os::env;
+import std::os::env;
 import c3guide::proc, c3guide::compiler, c3guide::util;
 
 // The C3 formatter c3f, run on a snippet or a file to show what it would change. Nothing is written.

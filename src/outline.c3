@@ -1,6 +1,6 @@
 module c3guide::outline;
 import c3guide::compiler;
-import std::core::string, std::io, std::io::file, std::io::path, std::collections::list, std::sort, std::compression::zip;
+import std::io, std::io::file, std::io::path, std::collections::list, std::sort, std::compression::zip;
 import std::encoding::json, std::collections::object;
 import c3guide::ts, c3guide::util, c3guide::context;
 

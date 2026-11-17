@@ -1,6 +1,6 @@
 module c3guide::tools;
 import c3guide::compiler, c3guide::proc;
-import mcp, std::core::string;
+import mcp;
 import c3guide::corpus, c3guide::context, c3guide::search, c3guide::util, c3guide::live, c3guide::outline, c3guide::suggest;
 import std::sort, std::math, std::collections::list, std::io::file, libc;
 

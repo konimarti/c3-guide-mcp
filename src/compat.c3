@@ -1,5 +1,5 @@
 module c3guide::compat;
-import mcp, std::core::string, std::io, std::collections::object, std::collections::list, std::encoding::json;
+import mcp, std::io, std::collections::object, std::collections::list, std::encoding::json;
 
 // The argument names and tool names of earlier releases (0.5/0.6: c3_symbol name, c3_examples symbol, c3_outline file, ...)
 // are still in clients' habits and in task files written for them. They are handled here, where the arguments are read, and

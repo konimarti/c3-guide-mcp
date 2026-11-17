@@ -1,6 +1,6 @@
 module c3guide::live;
 import c3guide::compiler, c3guide::proc, c3guide::util;
-import std::core::string, std::collections::list, std::collections::object, std::encoding::json, std::io::file, std::io::path;
+import std::collections::list, std::collections::object, std::encoding::json, std::io::file, std::io::path;
 import c3guide::corpus;
 
 // The standard library part of the docs, read from the c3c the user actually runs. The snapshot in the binary

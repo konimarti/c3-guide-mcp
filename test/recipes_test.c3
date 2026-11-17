@@ -1,6 +1,6 @@
 module c3guide::test::recipes;
 import c3guide::test::support;
-import std::collections::list, std::core::string, std::io, std::io::file, std::io::path;
+import std::collections::list, std::io, std::io::file, std::io::path;
 
 // Every recipe in recipes/ must compile and print exactly its `// expect:` lines. Recipes are what the
 // server shows to a model as "this works"; a recipe that does not compile is worse than none.

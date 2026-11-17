@@ -1,6 +1,6 @@
 module c3guide::test::sessions;
 import c3guide::tools, c3guide::check, c3guide::context, c3guide::test::support, c3guide::proc;
-import std::core::string, std::io, std::io::file, std::io::path;
+import std::io, std::io::file, std::io::path;
 
 // Calls that coders really made in their sessions (the replay lists of the orchestrator), with what the answer must hold.
 // A call that was wrong once is here so it stays right: renamed names, the `$` words, fields, aliases, a project and its

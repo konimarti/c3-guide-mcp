@@ -1,7 +1,7 @@
 module c3guide::test::guard_scope;
 import c3guide::compiler, c3guide::proc;
 import c3guide::check, c3guide::util, c3guide::guard, c3guide::sources, c3guide::test::support;
-import std::core::string, std::io, std::io::file, std::io::path, std::os::env, std::collections::list;
+import std::io, std::io::file, std::io::path, std::os::env, std::collections::list;
 
 // The guard reads the files c3c compiles (src/guard.c3), not the folder tree: scratch folders and review fixtures in a
 // project, which c3c never reads, do not get the project refused. Each case is one project in a fresh folder.

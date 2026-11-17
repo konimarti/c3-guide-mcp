@@ -1,6 +1,5 @@
 module c3guide::test::hints_test;
 import c3guide::hints;
-import std::core::string;
 
 fn void return_fault_question_mark_is_rewritten() @test
 {

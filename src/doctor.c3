@@ -1,7 +1,7 @@
 module c3guide::doctor;
 import c3guide::compiler;
 import c3guide::corpus;
-import std::io, std::io::file, std::os::env, std::io::path, std::core::string;
+import std::io, std::io::file, std::os::env, std::io::path;
 
 // `c3-guide-mcp --doctor` says which AI clients are installed (their config folder exists) and, for each, whether the
 // config file has a c3-guide server entry and whether the user-level rules file mentions the c3 tools. It only reads.
